@@ -54,7 +54,6 @@ impl AppState {
 pub struct ApiConfig {
     pub bind_address: SocketAddr,
     pub database_url: String,
-    pub direct_database_url: String,
     pub publish_token: String,
     pub publish_actor: String,
 }
@@ -69,8 +68,6 @@ impl ApiConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let database_url =
             env::var("DATABASE_URL").map_err(|_| ConfigError::Missing("DATABASE_URL"))?;
-        let direct_database_url = env::var("DIRECT_DATABASE_URL")
-            .map_err(|_| ConfigError::Missing("DIRECT_DATABASE_URL"))?;
         let publish_token = env::var("PRODXIV_PUBLISH_TOKEN")
             .map_err(|_| ConfigError::Missing("PRODXIV_PUBLISH_TOKEN"))?;
         if publish_token.len() < 32 {
@@ -81,18 +78,34 @@ impl ApiConfig {
         if publish_actor.trim().is_empty() {
             return Err(ConfigError::EmptyPublishActor);
         }
-        let bind_address = env::var("PRODXIV_BIND_ADDRESS")
-            .unwrap_or_else(|_| "0.0.0.0:3000".to_owned())
-            .parse()?;
+        let bind_address = resolve_bind_address(
+            env::var("PRODXIV_BIND_ADDRESS").ok().as_deref(),
+            env::var("PORT").ok().as_deref(),
+        )?;
 
         Ok(Self {
             bind_address,
             database_url,
-            direct_database_url,
             publish_token,
             publish_actor,
         })
     }
+}
+
+/// Loads the direct PostgreSQL URL used by the migration command.
+///
+/// `DIRECT_DATABASE_URL` is accepted for local and provider-neutral
+/// configuration. `DATABASE_URL_UNPOOLED` matches the variable injected by the
+/// Neon Vercel integration.
+///
+/// # Errors
+///
+/// Returns an error when neither direct connection variable is configured.
+pub fn migration_database_url_from_env() -> Result<String, ConfigError> {
+    resolve_migration_database_url(
+        env::var("DIRECT_DATABASE_URL").ok(),
+        env::var("DATABASE_URL_UNPOOLED").ok(),
+    )
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +118,29 @@ pub enum ConfigError {
     EmptyPublishActor,
     #[error("PRODXIV_BIND_ADDRESS is invalid: {0}")]
     InvalidBindAddress(#[from] AddrParseError),
+}
+
+fn resolve_bind_address(
+    configured_address: Option<&str>,
+    vercel_port: Option<&str>,
+) -> Result<SocketAddr, ConfigError> {
+    configured_address
+        .map(str::to_owned)
+        .or_else(|| vercel_port.map(|port| format!("0.0.0.0:{port}")))
+        .unwrap_or_else(|| "0.0.0.0:3000".to_owned())
+        .parse()
+        .map_err(ConfigError::from)
+}
+
+fn resolve_migration_database_url(
+    direct_database_url: Option<String>,
+    database_url_unpooled: Option<String>,
+) -> Result<String, ConfigError> {
+    direct_database_url
+        .or(database_url_unpooled)
+        .ok_or(ConfigError::Missing(
+            "DIRECT_DATABASE_URL or DATABASE_URL_UNPOOLED",
+        ))
 }
 
 #[async_trait]
@@ -443,4 +479,38 @@ impl Modify for SecurityAddon {
 
 pub fn openapi() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_bind_address, resolve_migration_database_url};
+
+    #[test]
+    fn explicit_bind_address_takes_precedence_over_vercel_port() {
+        assert_eq!(
+            resolve_bind_address(Some("127.0.0.1:4000"), Some("5000"))
+                .expect("explicit address should parse")
+                .to_string(),
+            "127.0.0.1:4000"
+        );
+    }
+
+    #[test]
+    fn vercel_port_binds_on_all_interfaces() {
+        assert_eq!(
+            resolve_bind_address(None, Some("5000"))
+                .expect("Vercel port should parse")
+                .to_string(),
+            "0.0.0.0:5000"
+        );
+    }
+
+    #[test]
+    fn neon_unpooled_url_is_a_migration_fallback() {
+        assert_eq!(
+            resolve_migration_database_url(None, Some("postgres://neon".to_owned()))
+                .expect("Neon unpooled URL should be accepted"),
+            "postgres://neon"
+        );
+    }
 }

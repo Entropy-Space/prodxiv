@@ -15,7 +15,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  api:
+  migrate:
     build:
       context: .
       dockerfile: Containerfile
@@ -23,9 +23,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    entrypoint: ["/usr/local/bin/prodxiv-migrate"]
+    environment:
+      DIRECT_DATABASE_URL: postgres://prodxiv:prodxiv@postgres:5432/prodxiv
+
+  api:
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://prodxiv:prodxiv@postgres:5432/prodxiv
-      DIRECT_DATABASE_URL: postgres://prodxiv:prodxiv@postgres:5432/prodxiv
       PRODXIV_BIND_ADDRESS: 0.0.0.0:3000
       PRODXIV_PUBLISH_ACTOR: ${PRODXIV_PUBLISH_ACTOR:-local_publisher}
       PRODXIV_PUBLISH_TOKEN: ${PRODXIV_PUBLISH_TOKEN:?set PRODXIV_PUBLISH_TOKEN}
