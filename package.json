@@ -2,6 +2,7 @@
   "name": "prodxiv",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.3.13",
   "workspaces": [
     "apps/*",
     "packages/*"
