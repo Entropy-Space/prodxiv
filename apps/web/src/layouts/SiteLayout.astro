@@ -12,6 +12,7 @@ const {
   title = "prodxiv — Product ideas, documented properly",
   description = "A versioned archive of product papers covering motivation, design decisions, benchmarks, and lessons.",
 } = Astro.props;
+const socialImage = Astro.site ? new URL("/og.png", Astro.site) : undefined;
 ---
 
 <!doctype html>
@@ -22,6 +23,14 @@ const {
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#f4efe5" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {socialImage && <meta property="og:image" content={socialImage} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {socialImage && <meta name="twitter:image" content={socialImage} />}
     <title>{title}</title>
   </head>
   <body>
