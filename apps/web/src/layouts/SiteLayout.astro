@@ -12,7 +12,9 @@ const {
   title = "prodxiv — Product ideas, documented properly",
   description = "A versioned archive of product papers covering motivation, design decisions, benchmarks, and lessons.",
 } = Astro.props;
-const socialImage = Astro.site ? new URL("/og.png", Astro.site) : undefined;
+const siteOrigin = Astro.site ?? Astro.url.origin;
+const canonicalUrl = new URL(Astro.url.pathname, siteOrigin);
+const socialImage = new URL("/og.png", siteOrigin);
 ---
 
 <!doctype html>
@@ -26,11 +28,13 @@ const socialImage = Astro.site ? new URL("/og.png", Astro.site) : undefined;
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    {socialImage && <meta property="og:image" content={socialImage} />}
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={socialImage} />
+    <link rel="canonical" href={canonicalUrl} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    {socialImage && <meta name="twitter:image" content={socialImage} />}
+    <meta name="twitter:image" content={socialImage} />
     <title>{title}</title>
   </head>
   <body>
