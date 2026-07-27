@@ -4,7 +4,9 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
-RUN cargo build --locked --release -p prodxiv-api --bin prodxiv-api
+RUN cargo build --locked --release -p prodxiv-api \
+  --bin prodxiv-api \
+  --bin prodxiv-migrate
 
 FROM docker.io/library/debian:bookworm-slim AS api
 
@@ -12,6 +14,7 @@ RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=api-builder /app/target/release/prodxiv-api /usr/local/bin/prodxiv-api
+COPY --from=api-builder /app/target/release/prodxiv-migrate /usr/local/bin/prodxiv-migrate
 USER 10001:10001
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/prodxiv-api"]

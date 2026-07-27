@@ -37,6 +37,12 @@ set +a
 bun run test:rust
 ```
 
+Run migrations independently when the API is not started through Compose:
+
+```sh
+cargo run -p prodxiv-api --bin prodxiv-migrate
+```
+
 ## Publish a paper
 
 Submissions contain Markdown with YAML front matter. They must include a
@@ -60,13 +66,23 @@ canonicalized.
 
 ## Production configuration
 
+The API deploys from the repository-root `Containerfile.vercel` as a separate
+Vercel project. Keep the Astro website on its native Vercel project; the local
+multi-target `Containerfile` is not the website's production artifact.
+
 Set:
 
 - `DATABASE_URL` to Neon's pooled application URL.
-- `DIRECT_DATABASE_URL` to Neon's direct URL for migrations.
+- `DATABASE_URL_UNPOOLED` to Neon's direct URL for migrations. The
+  provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
-- `PRODXIV_BIND_ADDRESS` when the platform does not use `0.0.0.0:3000`.
+- `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
+  required. On Vercel, the API listens on the platform-provided `PORT`.
+
+Run `prodxiv-migrate` with the direct URL before deploying a schema-dependent
+API release. The API process intentionally does not run migrations during
+startup, so autoscaling and cold starts never perform administrative work.
 
 The bearer token is intentionally temporary MVP authorization. Replace it with
 real user identity before exposing publication to multiple authors. Never put
