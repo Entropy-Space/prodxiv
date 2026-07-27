@@ -14,6 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  domain:
+    name: domain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint domain
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test domain
+        run: cargo test --workspace
+
   web:
     name: web
     runs-on: ubuntu-latest
@@ -35,4 +58,4 @@ jobs:
         run: bun run check
 
       - name: Build website
-        run: bun run build
+        run: bun run build:web

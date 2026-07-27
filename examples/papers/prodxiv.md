@@ -14,7 +14,7 @@ topics:
   - "product_design"
   - "knowledge_management"
 license: "CC BY 4.0"
-repository_url: "https://github.com/prodxiv/prodxiv"
+repository_url: "https://github.com/Entropy-Space/prodxiv"
 ---
 
 # Summary

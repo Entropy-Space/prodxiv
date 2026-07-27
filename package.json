@@ -8,9 +8,16 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun --filter @prodxiv/web build",
+    "build": "bun run build:web && bun run build:domain",
+    "build:domain": "cargo build --workspace --all-targets",
+    "build:web": "bun --filter @prodxiv/web build",
     "check": "bun --filter @prodxiv/web check",
     "dev": "bun --filter @prodxiv/web dev",
-    "preview": "bun --filter @prodxiv/web preview"
+    "format": "cargo fmt --all -- --check",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "preview": "bun --filter @prodxiv/web preview",
+    "schema": "cargo run -p prodxiv-domain --bin generate-schemas -- schemas",
+    "test": "cargo test --workspace",
+    "typecheck": "bun run check"
   }
 }
