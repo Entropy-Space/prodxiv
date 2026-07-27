@@ -1,37 +1,535 @@
 ---
+import { getCollection } from "astro:content";
+import PaperRow from "../components/PaperRow.astro";
 import SiteLayout from "../layouts/SiteLayout.astro";
 
+const papers = (await getCollection("papers")).sort((a, b) =>
+  b.data.published_at.localeCompare(a.data.published_at),
+);
+
+const paperSections = [
+  "Summary",
+  "Background",
+  "Motivation",
+  "Related work",
+  "Core features",
+  "Benchmarks",
+  "Insights",
+  "Limitations",
+];
+
+const principles = [
+  {
+    index: "01",
+    title: "History over silent edits",
+    text: "Published versions stay immutable, so readers can follow how a product and its reasoning changed.",
+  },
+  {
+    index: "02",
+    title: "Evidence over confidence",
+    text: "Claims, comparisons, and benchmarks show where they came from and what remains uncertain.",
+  },
+  {
+    index: "03",
+    title: "Substance over promotion",
+    text: "The format rewards motivation, tradeoffs, limitations, and lessons—not launch-day polish.",
+  },
+];
+
+const topics = [
+  "Developer tools",
+  "Product design",
+  "Knowledge systems",
+  "Local-first software",
+  "AI applications",
+  "Open source",
+];
 ---
 
 <SiteLayout>
-  <section class="shell intro">
-    <p>Open product archive</p>
-    <h1>The decisions behind products, preserved.</h1>
+  <section class="hero shell">
+    <div class="hero__copy">
+      <p class="eyebrow">Open product archive · Working release</p>
+      <h1>The decisions behind products, preserved.</h1>
+      <p class="hero__lede">
+        prodxiv is a home for versioned product papers—clear accounts of why
+        products exist, how they work, what the evidence says, and what their
+        builders learned.
+      </p>
+      <div class="hero__actions">
+        <a class="button button--primary" href="#recent">Explore papers</a>
+        <a class="button button--text" href="/papers/prodxiv">
+          Read the prodxiv paper <span aria-hidden="true">→</span>
+        </a>
+      </div>
+    </div>
+
+    <aside class="paper-anatomy" aria-label="Anatomy of a product paper">
+      <div class="paper-anatomy__header">
+        <span>Paper anatomy</span>
+        <span>Markdown</span>
+      </div>
+      <ol>
+        {paperSections.map((section, index) => (
+          <li>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            {section}
+          </li>
+        ))}
+      </ol>
+      <p>One durable format from first idea to shipped product.</p>
+    </aside>
+  </section>
+
+  <section class="archive-strip">
+    <div class="shell archive-strip__inner">
+      <p><span>Archive status</span> Accepting working papers soon</p>
+      <p><span>Format</span> Structured Markdown</p>
+      <p><span>Revision model</span> Immutable versions</p>
+    </div>
+  </section>
+
+  <section class="section shell" id="recent">
+    <header class="section-heading">
+      <div>
+        <p class="eyebrow">Recently filed</p>
+        <h2>Working papers</h2>
+      </div>
+      <p>
+        The archive begins with its own product paper: a public record of the
+        assumptions, architecture, and unresolved questions behind prodxiv.
+      </p>
+    </header>
+
+    <div class="paper-list">
+      {papers.map((paper) => <PaperRow paper={paper} />)}
+    </div>
+  </section>
+
+  <section class="section section--principles" id="about">
+    <div class="shell">
+      <header class="section-heading">
+        <div>
+          <p class="eyebrow">Publishing principles</p>
+          <h2>A record, not a launch page.</h2>
+        </div>
+        <p>
+          Product papers are designed to remain useful after launch day. They
+          make the reasoning behind a product inspectable and revisable.
+        </p>
+      </header>
+
+      <div class="principle-grid">
+        {principles.map((principle) => (
+          <article>
+            <span>{principle.index}</span>
+            <h3>{principle.title}</h3>
+            <p>{principle.text}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section shell topic-section" id="topics">
+    <div>
+      <p class="eyebrow">Across disciplines</p>
+      <h2>Products connect ideas that categories usually separate.</h2>
+    </div>
+    <ul>
+      {topics.map((topic) => <li>{topic}</li>)}
+    </ul>
+  </section>
+
+  <section class="section shell submit-panel" id="submit">
+    <div class="submit-panel__mark" aria-hidden="true">P</div>
+    <div>
+      <p class="eyebrow">Paperbot</p>
+      <h2>Start with the work you already have.</h2>
+      <p>
+        Paperbot reads an authorized repository and its documentation, maps
+        claims to evidence, and prepares a private Markdown draft. You remain
+        the author, and nothing is published without your approval.
+      </p>
+    </div>
+    <div class="submit-panel__status">
+      <span>CLI + Agent Skill</span>
+      <strong>In development</strong>
+    </div>
   </section>
 </SiteLayout>
 
 <style>
-  .intro {
-    padding-block: clamp(5rem, 12vw, 10rem);
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(17rem, 0.65fr);
+    gap: clamp(3rem, 8vw, 8rem);
+    align-items: center;
+    min-height: min(46rem, calc(100vh - 5.1rem));
+    padding-block: clamp(4.5rem, 10vw, 8rem);
   }
 
-  .intro p {
+  .eyebrow {
     margin: 0 0 1rem;
     color: var(--accent);
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
-  .intro h1 {
-    max-width: 15ch;
+  .hero h1 {
+    max-width: 13ch;
     margin: 0;
     font-family: var(--serif);
-    font-size: clamp(3rem, 8vw, 6.8rem);
+    font-size: clamp(3.5rem, 8vw, 7rem);
     font-weight: 500;
-    line-height: 0.96;
-    letter-spacing: -0.055em;
+    line-height: 0.93;
+    letter-spacing: -0.065em;
+  }
+
+  .hero__lede {
+    max-width: 42rem;
+    margin: 2rem 0 0;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+    font-size: clamp(1.12rem, 2.3vw, 1.35rem);
+    line-height: 1.65;
+  }
+
+  .hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem 1.4rem;
+    align-items: center;
+    margin-top: 2.2rem;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.8rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-decoration: none;
+  }
+
+  .button--primary {
+    padding-inline: 1.1rem;
+    color: white;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 0.18rem;
+  }
+
+  .button--primary:hover {
+    color: white;
+    background: var(--accent-dark);
+    border-color: var(--accent-dark);
+  }
+
+  .button--text {
+    color: var(--accent);
+  }
+
+  .button--text span {
+    margin-left: 0.35rem;
+  }
+
+  .paper-anatomy {
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow);
+    transform: rotate(0.7deg);
+  }
+
+  .paper-anatomy__header {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    color: var(--surface);
+    background: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .paper-anatomy ol {
+    margin: 0;
+    padding: 1.2rem 1.4rem 1rem;
+    list-style: none;
+  }
+
+  .paper-anatomy li {
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: 0.5rem;
+    padding-block: 0.55rem;
+    border-bottom: 1px dotted var(--line);
+    font-family: var(--serif);
+    font-size: 0.95rem;
+  }
+
+  .paper-anatomy li span {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.62rem;
+  }
+
+  .paper-anatomy > p {
+    margin: 0;
+    padding: 0.9rem 1.4rem 1.2rem;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+    font-size: 0.82rem;
+    font-style: italic;
+  }
+
+  .archive-strip {
+    color: var(--surface);
+    background: var(--ink);
+  }
+
+  .archive-strip__inner {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem 2rem;
+    padding-block: 1.05rem;
+  }
+
+  .archive-strip p {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .archive-strip span {
+    margin-right: 0.4rem;
+    color: #c8b7a6;
+  }
+
+  .section {
+    padding-block: clamp(5rem, 10vw, 8rem);
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.65fr);
+    gap: 3rem;
+    align-items: end;
+    margin-bottom: clamp(2.5rem, 5vw, 4rem);
+  }
+
+  .section-heading h2,
+  .topic-section h2,
+  .submit-panel h2 {
+    max-width: 18ch;
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(2.4rem, 5vw, 4.2rem);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.05em;
+  }
+
+  .section-heading > p {
+    max-width: 38rem;
+    margin: 0;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+    font-size: 1.05rem;
+  }
+
+  .section--principles {
+    background: var(--surface);
+    border-block: 1px solid var(--line);
+  }
+
+  .principle-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line-strong);
+  }
+
+  .principle-grid article {
+    min-height: 17rem;
+    padding: 1.5rem clamp(1rem, 3vw, 2rem);
+    border-right: 1px solid var(--line);
+  }
+
+  .principle-grid article:first-child {
+    padding-left: 0;
+  }
+
+  .principle-grid article:last-child {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .principle-grid span {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.66rem;
+  }
+
+  .principle-grid h3 {
+    max-width: 13ch;
+    margin: 3.5rem 0 1rem;
+    font-family: var(--serif);
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.1;
+  }
+
+  .principle-grid p {
+    max-width: 28rem;
+    margin: 0;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+  }
+
+  .topic-section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.7fr);
+    gap: clamp(3rem, 8vw, 8rem);
+    align-items: start;
+  }
+
+  .topic-section ul {
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line-strong);
+    list-style: none;
+  }
+
+  .topic-section li {
+    padding-block: 0.85rem;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--serif);
+    font-size: 1.05rem;
+  }
+
+  .submit-panel {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: clamp(1.5rem, 4vw, 3rem);
+    align-items: center;
+    padding-inline: clamp(1.2rem, 4vw, 3rem);
+    color: var(--surface);
+    background: var(--accent-dark);
+  }
+
+  .submit-panel__mark {
+    display: grid;
+    width: clamp(4rem, 8vw, 6rem);
+    aspect-ratio: 1;
+    place-items: center;
+    color: var(--accent-dark);
+    background: var(--paper);
+    border-radius: 50%;
+    font-family: var(--serif);
+    font-size: clamp(2rem, 5vw, 3.8rem);
+    font-style: italic;
+    font-weight: 700;
+  }
+
+  .submit-panel .eyebrow {
+    color: #d7a9b6;
+  }
+
+  .submit-panel h2 {
+    max-width: 16ch;
+  }
+
+  .submit-panel > div > p:last-child {
+    max-width: 44rem;
+    margin: 1.25rem 0 0;
+    color: #e1d4d5;
+    font-family: var(--serif);
+  }
+
+  .submit-panel__status {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 9rem;
+    padding-left: 1.5rem;
+    border-left: 1px solid rgb(255 255 255 / 28%);
+  }
+
+  .submit-panel__status span {
+    color: #d7a9b6;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .submit-panel__status strong {
+    font-family: var(--serif);
+    font-size: 1rem;
+  }
+
+  @media (max-width: 860px) {
+    .hero,
+    .section-heading,
+    .topic-section {
+      grid-template-columns: 1fr;
+    }
+
+    .hero {
+      min-height: auto;
+    }
+
+    .paper-anatomy {
+      width: min(100%, 29rem);
+      transform: none;
+    }
+
+    .archive-strip__inner {
+      grid-template-columns: 1fr;
+    }
+
+    .submit-panel {
+      grid-template-columns: auto 1fr;
+    }
+
+    .submit-panel__status {
+      grid-column: 2;
+      padding: 1.5rem 0 0;
+      border-top: 1px solid rgb(255 255 255 / 28%);
+      border-left: 0;
+    }
+  }
+
+  @media (max-width: 660px) {
+    .principle-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .principle-grid article,
+    .principle-grid article:first-child,
+    .principle-grid article:last-child {
+      min-height: auto;
+      padding: 1.5rem 0 2.5rem;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .principle-grid h3 {
+      margin-top: 1.5rem;
+    }
+
+    .submit-panel {
+      grid-template-columns: 1fr;
+    }
+
+    .submit-panel__status {
+      grid-column: auto;
+    }
   }
 </style>
