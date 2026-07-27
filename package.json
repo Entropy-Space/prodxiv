@@ -1,0 +1,14 @@
+{
+  "name": "prodxiv",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun --filter @prodxiv/web build",
+    "dev": "bun --filter @prodxiv/web dev",
+    "preview": "bun --filter @prodxiv/web preview"
+  }
+}
