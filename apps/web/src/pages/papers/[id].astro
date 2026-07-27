@@ -1,21 +1,40 @@
 ---
 import { getCollection, render, type CollectionEntry } from "astro:content";
+import EvidenceLedger from "../../components/EvidenceLedger.astro";
 import SiteLayout from "../../layouts/SiteLayout.astro";
 
 export async function getStaticPaths() {
-  const papers = await getCollection("papers");
+  const [papers, evidenceEntries] = await Promise.all([
+    getCollection("papers"),
+    getCollection("evidence"),
+  ]);
+  const evidenceById = new Map(
+    evidenceEntries.map((evidence) => [evidence.id, evidence]),
+  );
 
-  return papers.map((paper) => ({
-    params: { id: paper.id },
-    props: { paper },
-  }));
+  return papers.map((paper) => {
+    const evidenceId = paper.data.evidence_bundle?.replace(/\.json$/, "");
+    const evidence =
+      evidenceId === undefined ? undefined : evidenceById.get(evidenceId);
+    if (evidenceId !== undefined && evidence === undefined) {
+      throw new Error(
+        `Paper ${paper.id} references missing evidence bundle ${paper.data.evidence_bundle}`,
+      );
+    }
+
+    return {
+      params: { id: paper.id },
+      props: { paper, evidence },
+    };
+  });
 }
 
 interface Props {
   paper: CollectionEntry<"papers">;
+  evidence?: CollectionEntry<"evidence">;
 }
 
-const { paper } = Astro.props;
+const { paper, evidence } = Astro.props;
 const { Content, headings } = await render(paper);
 const publishedAt = new Intl.DateTimeFormat("en", {
   dateStyle: "long",
@@ -111,6 +130,8 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
         <Content />
       </div>
     </div>
+
+    {evidence && <EvidenceLedger evidence={evidence.data} />}
   </article>
 </SiteLayout>
 

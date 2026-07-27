@@ -1,0 +1,254 @@
+---
+import type {
+  EvidenceBundle,
+  ProvenanceState,
+} from "@prodxiv/contracts/evidence";
+
+interface Props {
+  evidence: EvidenceBundle;
+}
+
+const { evidence } = Astro.props;
+const sourcePaths = new Map(
+  evidence.sources.map((source) => [source.source_id, source.path]),
+);
+const states: ProvenanceState[] = [
+  "verified",
+  "inferred",
+  "author_provided",
+  "missing_evidence",
+];
+const stateLabels: Record<ProvenanceState, string> = {
+  verified: "Verified",
+  inferred: "Inferred",
+  author_provided: "Author provided",
+  missing_evidence: "Missing evidence",
+};
+const stateCounts = new Map(
+  states.map((state) => [
+    state,
+    evidence.claims.filter((claim) => claim.provenance_state === state)
+      .length,
+  ]),
+);
+---
+
+<section class="evidence-ledger" aria-labelledby="evidence-heading">
+  <header>
+    <div>
+      <p class="eyebrow">Evidence ledger</p>
+      <h2 id="evidence-heading">How this paper’s claims are supported</h2>
+    </div>
+    <p>
+      {evidence.claims.length} claims · {evidence.sources.length} sources ·
+      revision <code>{evidence.repository.revision}</code>
+    </p>
+  </header>
+
+  <dl class="evidence-summary">
+    {states.map((state) => (
+      <div>
+        <dt>{stateLabels[state]}</dt>
+        <dd>{stateCounts.get(state)}</dd>
+      </div>
+    ))}
+  </dl>
+
+  <ol class="claim-list">
+    {evidence.claims.map((claim) => (
+      <li>
+        <div class="claim-heading">
+          <code>{claim.claim_id}</code>
+          <span data-state={claim.provenance_state}>
+            {stateLabels[claim.provenance_state]}
+          </span>
+        </div>
+        <p>{claim.statement}</p>
+        {
+          claim.locations && claim.locations.length > 0 && (
+            <ul aria-label="Supporting sources">
+              {claim.locations.map((location) => (
+                <li>
+                  <code>{sourcePaths.get(location.source_id)}</code>
+                  {location.line_start && (
+                    <span>
+                      :{location.line_start}
+                      {location.line_end &&
+                        location.line_end !== location.line_start &&
+                        `–${location.line_end}`}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+        {claim.notes && <p class="claim-note">{claim.notes}</p>}
+      </li>
+    ))}
+  </ol>
+</section>
+
+<style>
+  .evidence-ledger {
+    margin-top: clamp(4rem, 9vw, 8rem);
+    padding-top: clamp(2.5rem, 5vw, 4rem);
+    border-top: 1px solid var(--line-strong);
+  }
+
+  .evidence-ledger > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 0.55fr);
+    gap: 2rem 4rem;
+    align-items: end;
+  }
+
+  .eyebrow {
+    margin: 0 0 0.8rem;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  h2 {
+    max-width: 18ch;
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(2rem, 4vw, 3.3rem);
+    font-weight: 550;
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+  }
+
+  header > p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    line-height: 1.7;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.72em;
+  }
+
+  .evidence-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: 2.5rem 0;
+    border-block: 1px solid var(--line);
+  }
+
+  .evidence-summary div {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1rem;
+    border-right: 1px solid var(--line);
+  }
+
+  .evidence-summary div:last-child {
+    border-right: 0;
+  }
+
+  .evidence-summary dt {
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .evidence-summary dd {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 1.8rem;
+  }
+
+  .claim-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    margin: 0;
+    padding: 1px;
+    background: var(--line);
+    list-style: none;
+  }
+
+  .claim-list > li {
+    min-width: 0;
+    padding: 1.4rem;
+    background: var(--surface);
+  }
+
+  .claim-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .claim-heading > span {
+    padding: 0.22rem 0.45rem;
+    color: var(--ink-soft);
+    background: var(--background);
+    border: 1px solid var(--line);
+    border-radius: 10rem;
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .claim-heading > span[data-state="verified"] {
+    color: var(--accent-dark);
+    background: var(--accent-pale);
+  }
+
+  .claim-list p {
+    margin: 1rem 0;
+    font-family: var(--serif);
+    line-height: 1.55;
+  }
+
+  .claim-list ul {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    color: var(--ink-soft);
+    list-style: none;
+  }
+
+  .claim-list ul li {
+    overflow-wrap: anywhere;
+    font-size: 0.72rem;
+  }
+
+  .claim-note {
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+  }
+
+  @media (max-width: 720px) {
+    .evidence-ledger > header,
+    .claim-list {
+      grid-template-columns: 1fr;
+    }
+
+    .evidence-summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .evidence-summary div:nth-child(2) {
+      border-right: 0;
+    }
+
+    .evidence-summary div:nth-child(-n + 2) {
+      border-bottom: 1px solid var(--line);
+    }
+  }
+</style>
