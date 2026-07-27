@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvidenceBundle",
+  "type": "object",
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ClaimEvidence"
+      }
+    },
+    "repository": {
+      "$ref": "#/$defs/RepositorySnapshot"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1$"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EvidenceSource"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "sources",
+    "claims"
+  ],
+  "$defs": {
+    "ClaimEvidence": {
+      "type": "object",
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceLocation"
+          }
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provenance_state": {
+          "$ref": "#/$defs/ProvenanceState"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "statement",
+        "provenance_state"
+      ]
+    },
+    "EvidenceLocation": {
+      "type": "object",
+      "properties": {
+        "line_end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
+        "line_start": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
+        "source_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source_id"
+      ]
+    },
+    "EvidenceSource": {
+      "type": "object",
+      "properties": {
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+        },
+        "source_type": {
+          "$ref": "#/$defs/EvidenceSourceType"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "path",
+        "source_type",
+        "content_sha256"
+      ]
+    },
+    "EvidenceSourceType": {
+      "type": "string",
+      "enum": [
+        "source_code",
+        "documentation",
+        "test",
+        "benchmark",
+        "configuration",
+        "manifest"
+      ]
+    },
+    "ProvenanceState": {
+      "type": "string",
+      "enum": [
+        "verified",
+        "inferred",
+        "author_provided",
+        "missing_evidence"
+      ]
+    },
+    "RepositorySnapshot": {
+      "type": "object",
+      "properties": {
+        "is_dirty": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "is_dirty"
+      ]
+    }
+  }
+}
