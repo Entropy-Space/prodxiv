@@ -3,6 +3,8 @@ export const ExitCode = {
   usage: 2,
   repository: 3,
   scan: 4,
+  io: 4,
+  validation: 5,
 } as const;
 
 export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];

@@ -1,4 +1,5 @@
 import type { ScanResult, SkipReason } from "./scanner.ts";
+import type { PaperValidationResult } from "./validator.ts";
 
 const SKIP_REASONS: SkipReason[] = [
   "excluded",
@@ -40,5 +41,23 @@ export function formatScanResult(result: ScanResult): string {
     "Skipped files:",
     skipSummary,
     "Claims: 0 (scan only; drafting adds claims)",
+  ].join("\n");
+}
+
+export function formatValidationResult(result: PaperValidationResult): string {
+  const { report } = result;
+  const diagnostics =
+    report.diagnostics.length === 0
+      ? ["  none"]
+      : report.diagnostics.map(
+          (item) =>
+            `  [${item.severity}] ${item.code} ${item.path}: ${item.message}`,
+        );
+  return [
+    `Paperbot validation: ${report.valid ? "valid" : "invalid"}`,
+    `Input: ${result.input_path}`,
+    `Profile: ${result.profile}`,
+    "Diagnostics:",
+    ...diagnostics,
   ].join("\n");
 }

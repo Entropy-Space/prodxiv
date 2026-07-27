@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "repository": {
+    "revision": "0123456789abcdef",
+    "is_dirty": false
+  },
+  "sources": [
+    {
+      "source_id": "readme",
+      "path": "README.md",
+      "source_type": "documentation",
+      "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "fixture_complete",
+      "statement": "The fixture contains every required section.",
+      "provenance_state": "verified",
+      "locations": [
+        {
+          "source_id": "readme",
+          "line_start": 1,
+          "line_end": 2
+        }
+      ]
+    }
+  ]
+}

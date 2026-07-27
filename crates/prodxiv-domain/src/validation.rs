@@ -118,6 +118,15 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
             &mut diagnostics,
         );
     }
+    if let Some(evidence_bundle) = &metadata.evidence_bundle {
+        validate_relative_path(
+            "metadata.evidence_bundle",
+            evidence_bundle,
+            "value.invalid_relative_path",
+            "evidence bundle must be a repository-relative path",
+            &mut diagnostics,
+        );
+    }
 
     if let Some(paper_id) = &metadata.paper_id {
         validate_paper_id("metadata.paper_id", paper_id, &mut diagnostics);
@@ -223,7 +232,13 @@ pub fn validate_evidence_bundle(bundle: &EvidenceBundle) -> ValidationReport {
                 "source identifiers must be unique",
             );
         }
-        validate_source_path(&format!("{base}.path"), &source.path, &mut diagnostics);
+        validate_relative_path(
+            &format!("{base}.path"),
+            &source.path,
+            "evidence.invalid_path",
+            "evidence paths must be non-empty, repository-relative paths",
+            &mut diagnostics,
+        );
         if !is_sha256(&source.content_sha256) {
             error(
                 &mut diagnostics,
@@ -432,7 +447,13 @@ fn validate_paper_id(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>)
     }
 }
 
-fn validate_source_path(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_relative_path(
+    path: &str,
+    value: &str,
+    code: &str,
+    message: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let bytes = value.as_bytes();
     let has_windows_prefix =
         bytes.get(1) == Some(&b':') && matches!(bytes.get(2), Some(b'/' | b'\\'));
@@ -442,12 +463,7 @@ fn validate_source_path(path: &str, value: &str, diagnostics: &mut Vec<Diagnosti
         .split('/')
         .any(|component| component == "..");
     if value.is_empty() || is_absolute || has_parent_component {
-        error(
-            diagnostics,
-            "evidence.invalid_path",
-            path,
-            "evidence paths must be non-empty, repository-relative paths",
-        );
+        error(diagnostics, code, path, message);
     }
 }
 

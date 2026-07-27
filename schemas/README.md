@@ -13,6 +13,9 @@ bun run schema
 matter in `metadata` and the Markdown body in `markdown`.
 `evidence.schema.json` describes Paperbot's repository snapshot, source index,
 and claim provenance.
+`validation.schema.json` describes versioned validation diagnostics.
+`validation-policy.json` carries section and profile rules consumed by local
+schema-backed validators.
 
 The schemas describe structural validity. Domain validation adds rules that
 JSON Schema cannot express cleanly, including required Markdown sections,

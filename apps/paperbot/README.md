@@ -7,6 +7,8 @@ paper draft. The initial command is a deterministic repository scan:
 bun run paperbot scan .
 bun run paperbot scan . --format json
 bun run paperbot scan . --include .env.example
+bun run paperbot validate paper.md
+bun run paperbot validate paper.md --profile publication --format json
 ```
 
 The human-readable format summarizes the scan. JSON output conforms to
@@ -21,9 +23,16 @@ Tracked files that match a default path exclusion can be opted in with a
 repeatable `--include <glob>`. Explicit exclusions, Git ignore rules, generated
 content, binary files, symlinks, and size limits still take precedence.
 
+`validate` checks YAML front matter, the canonical paper schema, required
+Markdown sections, draft or publication requirements, and a referenced
+evidence bundle. It returns a versioned diagnostic report in JSON mode. Local
+validation is a fast authoring check; the publishing API will validate again
+using the authoritative Rust domain.
+
 ## Exit codes
 
 - `0` — success
 - `2` — invalid command-line usage
 - `3` — the target is not a readable Git repository
-- `4` — scanning failed
+- `4` — reading or scanning failed
+- `5` — validation completed and found errors

@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf};
 
-use prodxiv_domain::{EvidenceBundle, PaperDocument};
+use prodxiv_domain::{EvidenceBundle, PaperDocument, ValidationReport, validation_policy};
 use schemars::schema_for;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,6 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output_directory.join("evidence.schema.json"),
         &schema_for!(EvidenceBundle),
     )?;
+    write_schema(
+        output_directory.join("validation.schema.json"),
+        &schema_for!(ValidationReport),
+    )?;
+
+    let mut policy = serde_json::to_string_pretty(&validation_policy())?;
+    policy.push('\n');
+    fs::write(output_directory.join("validation-policy.json"), policy)?;
     Ok(())
 }
 
