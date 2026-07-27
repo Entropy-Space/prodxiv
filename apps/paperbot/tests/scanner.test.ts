@@ -55,7 +55,7 @@ beforeEach(async () => {
     join(repositoryPath, "ignored", "ignored.ts"),
     "export const ignored = true;\n",
   );
-  await writeFile(join(repositoryPath, "image.png"), "not source evidence\n");
+  await writeFile(join(repositoryPath, "image.png"), "unsupported file\n");
   await symlink("src/index.ts", join(repositoryPath, "linked.ts"));
 
   await git(["init", "-q"]);
@@ -85,7 +85,7 @@ afterEach(async () => {
 });
 
 describe("scanRepository", () => {
-  test("indexes supported evidence deterministically and excludes unsafe files", async () => {
+  test("selects supported files deterministically and excludes unsafe files", async () => {
     const first = await scanRepository(repositoryPath, {
       exclusions: ["docs/private.md"],
     });
@@ -93,15 +93,14 @@ describe("scanRepository", () => {
       exclusions: ["docs/private.md"],
     });
 
-    expect(first.bundle).toEqual(second.bundle);
-    expect(first.bundle.schema_version).toBe("1");
-    expect(first.bundle.repository.is_dirty).toBe(false);
-    expect(first.bundle.repository.source_url).toBe(
+    expect(first.manifest).toEqual(second.manifest);
+    expect(first.manifest.schema_version).toBe("1");
+    expect(first.manifest.repository.is_dirty).toBe(false);
+    expect(first.manifest.repository.source_url).toBe(
       "https://github.com/example/product",
     );
-    expect(first.bundle.claims).toEqual([]);
 
-    const paths = first.bundle.sources.map((source) => source.path);
+    const paths = first.manifest.files.map((file) => file.path);
     expect(paths).toEqual([
       ".gitignore",
       "README.md",
@@ -124,12 +123,12 @@ describe("scanRepository", () => {
     expect(first.skipped_file_counts.oversized).toBe(1);
     expect(first.skipped_file_counts.symlink).toBe(1);
 
-    expect(sourceType(first, "README.md")).toBe("documentation");
-    expect(sourceType(first, "benches/latency.ts")).toBe("benchmark");
-    expect(sourceType(first, "config/app.toml")).toBe("configuration");
-    expect(sourceType(first, "package.json")).toBe("manifest");
-    expect(sourceType(first, "src/index.ts")).toBe("source_code");
-    expect(sourceType(first, "tests/index.test.ts")).toBe("test");
+    expect(fileType(first, "README.md")).toBe("documentation");
+    expect(fileType(first, "benches/latency.ts")).toBe("benchmark");
+    expect(fileType(first, "config/app.toml")).toBe("configuration");
+    expect(fileType(first, "package.json")).toBe("manifest");
+    expect(fileType(first, "src/index.ts")).toBe("source_code");
+    expect(fileType(first, "tests/index.test.ts")).toBe("test");
   });
 
   test("includes non-ignored untracked files and marks the snapshot dirty", async () => {
@@ -140,16 +139,12 @@ describe("scanRepository", () => {
 
     const result = await scanRepository(repositoryPath);
 
-    expect(result.bundle.repository.is_dirty).toBe(true);
+    expect(result.manifest.repository.is_dirty).toBe(true);
     expect(
-      result.bundle.sources.some(
-        (source) => source.path === "src/untracked.ts",
-      ),
+      result.manifest.files.some((file) => file.path === "src/untracked.ts"),
     ).toBe(true);
     expect(
-      result.bundle.sources.some(
-        (source) => source.path === "ignored/ignored.ts",
-      ),
+      result.manifest.files.some((file) => file.path === "ignored/ignored.ts"),
     ).toBe(false);
   });
 
@@ -164,8 +159,8 @@ describe("scanRepository", () => {
     expect(cleanScope.repository_path).toBe(
       await realpath(join(repositoryPath, "src")),
     );
-    expect(cleanScope.bundle.repository.is_dirty).toBe(false);
-    expect(cleanScope.bundle.sources.map((source) => source.path)).toEqual([
+    expect(cleanScope.manifest.repository.is_dirty).toBe(false);
+    expect(cleanScope.manifest.files.map((file) => file.path)).toEqual([
       "src/index.ts",
       "src/secret-scanner.ts",
     ]);
@@ -177,7 +172,7 @@ describe("scanRepository", () => {
 
     const dirtyScope = await scanRepository(join(repositoryPath, "src"));
 
-    expect(dirtyScope.bundle.repository.is_dirty).toBe(true);
+    expect(dirtyScope.manifest.repository.is_dirty).toBe(true);
   });
 });
 
@@ -208,23 +203,21 @@ describe("CLI", () => {
       inclusions: [".env"],
     });
 
-    expect(result.bundle.sources.some((source) => source.path === ".env")).toBe(
+    expect(result.manifest.files.some((file) => file.path === ".env")).toBe(
       true,
     );
-    expect(sourceType(result, ".env")).toBe("configuration");
+    expect(fileType(result, ".env")).toBe("configuration");
 
     const explicitlyExcluded = await scanRepository(repositoryPath, {
       inclusions: [".env"],
       exclusions: [".env"],
     });
     expect(
-      explicitlyExcluded.bundle.sources.some(
-        (source) => source.path === ".env",
-      ),
+      explicitlyExcluded.manifest.files.some((file) => file.path === ".env"),
     ).toBe(false);
   });
 
-  test("writes only the evidence bundle to stdout in JSON mode", async () => {
+  test("writes only the scan manifest to stdout in JSON mode", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
 
@@ -235,15 +228,13 @@ describe("CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toHaveLength(1);
-    const bundle = JSON.parse(stdout[0] ?? "{}") as {
+    const manifest = JSON.parse(stdout[0] ?? "{}") as {
       schema_version?: string;
-      sources?: Array<{ path: string }>;
+      files?: Array<{ path: string }>;
     };
-    expect(bundle.schema_version).toBe("1");
-    expect(bundle.sources?.some((source) => source.path === ".env")).toBe(
-      false,
-    );
-    expect(stderr).toEqual([expect.stringContaining("paperbot: scanned")]);
+    expect(manifest.schema_version).toBe("1");
+    expect(manifest.files?.some((file) => file.path === ".env")).toBe(false);
+    expect(stderr).toEqual([expect.stringContaining("paperbot: selected")]);
   });
 
   test("returns a stable usage exit code for invalid options", async () => {
@@ -285,10 +276,9 @@ async function git(args: string[]): Promise<void> {
   }
 }
 
-function sourceType(
+function fileType(
   result: Awaited<ReturnType<typeof scanRepository>>,
   path: string,
 ): string | undefined {
-  return result.bundle.sources.find((source) => source.path === path)
-    ?.source_type;
+  return result.manifest.files.find((file) => file.path === path)?.file_type;
 }

@@ -9,7 +9,6 @@ const repositoryRoot = resolve(packageRoot, "../..");
 const outputDirectory = join(packageRoot, "src/generated");
 
 const contracts = [
-  ["evidence.schema.json", "evidence.ts"],
   ["paper.schema.json", "paper.ts"],
   ["validation.schema.json", "validation.ts"],
 ] as const;

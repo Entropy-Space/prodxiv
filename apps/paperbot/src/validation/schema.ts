@@ -2,7 +2,6 @@ import type { Diagnostic } from "@prodxiv/contracts/validation";
 import Ajv2020, { type AnySchema, type ErrorObject } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
-import evidenceSchema from "../../../../schemas/evidence.schema.json";
 import paperSchema from "../../../../schemas/paper.schema.json";
 import { diagnostic } from "./shared.ts";
 
@@ -19,18 +18,11 @@ ajv.addFormat("uint32", {
 });
 
 const validatePaperSchema = ajv.compile(paperSchema as AnySchema);
-const validateEvidenceSchema = ajv.compile(evidenceSchema as AnySchema);
 
 export function validatePaperStructure(value: unknown): Diagnostic[] {
   return validatePaperSchema(value)
     ? []
     : schemaDiagnostics(validatePaperSchema.errors, "paper");
-}
-
-export function validateEvidenceStructure(value: unknown): Diagnostic[] {
-  return validateEvidenceSchema(value)
-    ? []
-    : schemaDiagnostics(validateEvidenceSchema.errors, "evidence");
 }
 
 function schemaDiagnostics(

@@ -2,7 +2,7 @@
 schema_version: "1"
 paper_id: "prodxiv:2607.0001"
 title: "prodxiv: A Versioned Archive for Product Knowledge"
-summary: "A proposal for preserving the motivations, decisions, evidence, and lessons behind products as durable, versioned Markdown papers."
+summary: "A proposal for preserving the motivations, decisions, results, and lessons behind products as durable, versioned Markdown papers."
 authors:
   - name: "prodxiv contributors"
 organization: "prodxiv"
@@ -21,8 +21,8 @@ repository_url: "https://github.com/Entropy-Space/prodxiv"
 
 prodxiv is a proposed open archive for structured product papers. It gives
 builders a durable place to explain why a product exists, which alternatives
-they considered, how the product works, what evidence supports its claims, and
-what they learned.
+they considered, how the product works, what results they observed, and what
+they learned.
 
 Papers are written in Markdown and published as immutable versions. The format
 borrows the useful archival properties of academic publishing without asking
@@ -52,8 +52,8 @@ prodxiv is motivated by three goals:
 
 1. Preserve the reasoning behind products as they evolve.
 2. Make product knowledge useful to people outside the original team.
-3. Reward evidence, limitations, and learning rather than promotional
-   confidence.
+3. Reward clear methodology, limitations, and learning rather than
+   promotional confidence.
 
 # Related Work
 
@@ -89,17 +89,17 @@ Papers can express relationships such as `inspired_by`, `built_on`,
 `alternative_to`, and `supersedes`. This creates a navigable history of product
 ideas rather than a flat collection of launch pages.
 
-## Evidence-aware claims
+## Reproducible benchmark reporting
 
-Important claims can carry provenance. During drafting, Paperbot distinguishes
-verified evidence, reasonable inference, author-provided context, and missing
-evidence.
+Benchmark sections should describe methodology, environment, inputs, results,
+and limitations. Papers without meaningful benchmarks should say so directly
+instead of filling the section with promotional metrics.
 
 ## Paperbot
 
 Paperbot is a local-first Bun CLI and portable Agent Skill. It inspects an
-authorized repository, builds an evidence map, drafts supported sections, and
-asks the author targeted questions about information that code cannot reveal.
+authorized repository, prepares a private Markdown scaffold, and asks the
+author targeted questions about information that code cannot reveal.
 
 # Architecture
 
@@ -110,8 +110,8 @@ The planned system has three primary components:
   immutable versions, and audit records.
 - Paperbot, implemented as a Bun and TypeScript CLI with an Agent Skill.
 
-PostgreSQL stores paper metadata, Markdown, evidence, relationships, and audit
-records. The production deployment is planned to use Neon Postgres, while local
+PostgreSQL stores paper metadata, Markdown, relationships, and audit records.
+The production deployment is planned to use Neon Postgres, while local
 development uses PostgreSQL through Podman.
 
 Language-neutral JSON Schema and OpenAPI documents connect the Rust domain
@@ -124,8 +124,8 @@ No product benchmarks are available at the concept stage.
 The first useful measurements should evaluate:
 
 - Time required to produce a complete first draft with and without Paperbot.
-- Percentage of generated claims linked to inspectable evidence.
-- Number of unsupported claims found during author review.
+- Number of factual corrections required during author review.
+- Number of author questions that materially improve incomplete sections.
 - Reader comprehension of motivation, tradeoffs, and limitations.
 - Author effort required to publish a meaningful revision.
 
@@ -137,8 +137,8 @@ slice can be tested against varied repositories.
 The design process has produced three early insights.
 
 First, product papers need versioning more than static essays do because the
-underlying products continue to change. Second, code is strong evidence for
-implementation but weak evidence for intention. Third, automated drafting is
+underlying products continue to change. Second, code can describe
+implementation but cannot explain intention. Third, automated drafting is
 useful only when uncertainty remains visible to the author.
 
 These observations are hypotheses until the format is used by product teams

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "repository": {
+    "revision": "0123456789abcdef",
+    "is_dirty": false
+  },
+  "files": [
+    {
+      "path": "../private.txt",
+      "file_type": "unknown"
+    }
+  ]
+}

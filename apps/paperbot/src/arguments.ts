@@ -20,7 +20,7 @@ export interface ValidateArguments {
 
 export interface DraftArguments {
   command: "draft";
-  evidence_path: string;
+  scan_path: string;
   output_path?: string;
   title?: string;
 }
@@ -58,7 +58,7 @@ export function parseArguments(args: string[]): ParsedArguments {
 function parseDraftArguments(
   args: string[],
 ): DraftArguments | { command: "help" } {
-  let evidence_path: string | undefined;
+  let scan_path: string | undefined;
   let output_path: string | undefined;
   let title: string | undefined;
 
@@ -94,18 +94,18 @@ function parseDraftArguments(
     if (argument.startsWith("-")) {
       throw usageError(`unknown option: ${argument}`);
     }
-    if (evidence_path !== undefined) {
-      throw usageError("draft accepts only one evidence bundle path");
+    if (scan_path !== undefined) {
+      throw usageError("draft accepts only one scan manifest path");
     }
-    evidence_path = argument;
+    scan_path = argument;
   }
 
-  if (evidence_path === undefined) {
-    throw usageError("draft requires an evidence bundle path");
+  if (scan_path === undefined) {
+    throw usageError("draft requires a scan manifest path");
   }
   return {
     command: "draft",
-    evidence_path,
+    scan_path,
     ...(output_path === undefined ? {} : { output_path }),
     ...(title === undefined ? {} : { title }),
   };

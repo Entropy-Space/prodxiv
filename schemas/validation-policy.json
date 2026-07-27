@@ -17,8 +17,5 @@
       "version",
       "license"
     ]
-  },
-  "evidence": {
-    "verified_claims_require_locations": true
   }
 }

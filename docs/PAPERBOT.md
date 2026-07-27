@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Paperbot turns an existing codebase and its documentation into an
-evidence-backed product paper draft.
+Paperbot turns an existing codebase and its documentation into an initial
+product paper draft.
 
 It is a research assistant for authors, not an autonomous publisher. Its role
 is to reduce the work required to create a thoughtful first draft while
@@ -16,7 +16,7 @@ The guiding rule is:
 Code can reveal architecture, dependencies, features, tests, releases, and
 sometimes performance characteristics. It cannot reliably explain why a
 product exists, why alternatives were rejected, or what its creators learned.
-Paperbot should draft what it can substantiate and convert uncertainty into
+Paperbot should describe what it can observe and turn missing context into
 specific author questions.
 
 ## Inputs and outputs
@@ -29,26 +29,13 @@ Paperbot may analyze:
 - Product documentation selected by the author.
 - Optional notes and answers supplied during an author interview.
 
-Its primary output is a private Markdown draft following the prodxiv paper
-structure. The draft should include source evidence, confidence states,
-unanswered questions, and suggested work for incomplete sections.
+The scanner produces a private manifest containing the repository revision and
+the paths and types of selected files. The manifest coordinates local analysis;
+it is not part of the published paper format.
 
-## Claim states
-
-Every generated substantive claim should have an explicit provenance state:
-
-- **Verified** — Directly supported by code, tests, benchmarks, or
-  documentation.
-- **Inferred** — A reasonable interpretation that requires author
-  confirmation.
-- **Author-provided** — Motivation, history, intent, or qualitative insight
-  supplied by an author.
-- **Missing evidence** — A claim that should not be presented as established
-  until supporting evidence is added.
-
-These states may be visible during drafting without all appearing in the final
-published prose. The final paper should retain enough citations and methodology
-to make important claims inspectable.
+The primary output is a private Markdown draft following the prodxiv paper
+structure. The draft should leave unanswered questions and incomplete sections
+visible instead of filling them with speculation.
 
 ## Drafting workflow
 
@@ -56,20 +43,19 @@ to make important claims inspectable.
    documents.
 2. **Confirm scope.** Paperbot shows which directories and files it may read
    and which are excluded.
-3. **Understand the project.** It detects languages, architecture,
-   dependencies, documentation, tests, releases, and benchmark suites.
-4. **Build an evidence map.** Features and technical claims are linked to
-   supporting files, symbols, tests, or documents.
-5. **Generate a private draft.** Paperbot writes the sections it can support
-   and marks gaps instead of filling them with speculation.
+3. **Create a scan manifest.** The CLI records the repository revision and
+   selected file inventory.
+4. **Understand the project.** The drafting agent reads relevant files and
+   detects languages, architecture, dependencies, tests, releases, and
+   benchmark suites.
+5. **Generate a private draft.** The agent completes sections supported by the
+   repository and leaves uncertain details as questions.
 6. **Interview the author.** It asks a short, adaptive set of questions about
    motivation, background, alternatives, tradeoffs, and lessons.
 7. **Revise collaboratively.** Author answers are incorporated without
    overwriting deliberate manual edits.
-8. **Review evidence and privacy.** The author sees claims, contributing
-   sources, exclusions, and possible sensitive content.
-9. **Approve submission.** Nothing is published without explicit author
-   approval.
+8. **Review and approve.** The author reviews privacy, accuracy, and
+   completeness before any submission.
 
 ## Example draft behavior
 
@@ -84,29 +70,26 @@ to make important claims inspectable.
 
 ## Local-first persistence
 
-The application stores workspace state locally and synchronizes changes
-through an asynchronous replication layer.
+The repository implements local workspace storage and asynchronous
+synchronization.
 
-Evidence:
-- `src/storage/local_store.rs`
-- `src/sync/replicator.rs`
+> Author review:
+> Is offline operation a product goal or only an implementation detail?
 
 # Benchmarks
 
-No reproducible benchmark suite was found.
+No reproducible benchmark results were found.
 
 > Suggested benchmark:
 > Measure synchronization latency with 1, 10, and 100 concurrent clients.
 ```
 
-Paperbot should never turn the absence of evidence into a polished but
-unsupported claim.
+Paperbot should never turn missing context into polished but unsupported prose.
 
 ## Revision assistance
 
-Paperbot should also help maintain published papers. When a repository changes,
-it can compare the relevant commit range with the latest paper version and
-propose a revision.
+When a repository changes, Paperbot can compare the relevant commit range with
+the latest paper and propose a revision.
 
 A revision proposal might report:
 
@@ -122,46 +105,43 @@ Paperbot must:
 
 - Never publish automatically.
 - Never invent benchmark results or experimental methodology.
-- Never treat README marketing claims as verified solely because they are
-  documented.
+- Never treat README marketing statements as established facts.
 - Never include secrets, credentials, environment files, user data, or other
   sensitive material in a draft.
 - Exclude generated code, vendored dependencies, and irrelevant large assets
   by default.
-- Show which files and documents contributed to the draft.
-- Let authors remove sources and regenerate affected claims.
-- Preserve author edits when regenerating individual sections.
-- Make uncertainty visible instead of hiding it behind fluent prose.
+- Show which files were selected for analysis.
+- Preserve author edits when revising individual sections.
+- Keep uncertainty visible during drafting.
 
-Private and unpublished code introduces additional trust requirements. A local
-analysis mode is preferable because it can produce an evidence map without
-uploading the full repository. If remote analysis is supported, its retention,
-access, deletion, and model-training policies must be explicit.
+Private and unpublished code introduces additional trust requirements. Local
+analysis is the default so repository contents do not need to be uploaded. If
+remote analysis is supported later, retention, access, deletion, and
+model-training policies must be explicit.
 
 ## Initial scope
 
 The first version should support:
 
-- Local repositories through a CLI or desktop-assisted workflow.
-- Public repository URLs.
+- Local repositories through a CLI or agent-assisted workflow.
 - Markdown documentation.
 - Repository structure, dependency, test, and benchmark detection.
-- Evidence-linked paper drafting.
-- A focused author interview.
-- Private preview and manual approval.
+- A section-complete Markdown scaffold.
+- Agent-assisted drafting and a focused author interview.
+- Structural validation and private preview.
+- Manual approval before submission.
 
-Private repository integration can follow once authentication, data retention,
-and user trust are designed deliberately. Broad integrations with issue
-trackers, chats, analytics, and design tools are valuable later, but are not
-required to validate the core drafting experience.
+Private repository integrations can follow once authentication, data retention,
+and user trust are designed deliberately. Issue trackers, chats, analytics, and
+design tools are not required to validate the core drafting experience.
 
 ## Success criteria
 
 Paperbot succeeds when it:
 
 - Produces a useful draft faster than an author can start from a blank page.
-- Makes unsupported claims easier to notice.
+- Makes incomplete or unsupported statements easier to notice.
 - Asks questions that improve the paper rather than merely filling sections.
-- Generates traceable descriptions of product behavior from real evidence.
+- Describes observed product behavior without inventing product intent.
 - Helps authors keep papers current without erasing historical versions.
 - Leaves authors feeling that the paper is theirs.

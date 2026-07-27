@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf};
 
-use prodxiv_domain::{EvidenceBundle, PaperDocument, ValidationReport, validation_policy};
+use prodxiv_domain::{PaperDocument, ValidationReport, validation_policy};
 use schemars::schema_for;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,10 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_schema(
         output_directory.join("paper.schema.json"),
         &schema_for!(PaperDocument),
-    )?;
-    write_schema(
-        output_directory.join("evidence.schema.json"),
-        &schema_for!(EvidenceBundle),
     )?;
     write_schema(
         output_directory.join("validation.schema.json"),

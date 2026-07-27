@@ -9,19 +9,19 @@ import { validatePaperFile } from "./validator.ts";
 
 const VERSION = "0.0.1";
 
-const HELP = `Paperbot — evidence-backed product paper drafting
+const HELP = `Paperbot — repository-assisted product paper drafting
 
 Usage:
   paperbot scan [repository] [--format text|json] [--exclude <glob>] [--include <glob>]
-  paperbot draft <evidence.json> [--title <title>] [--output <paper.md>]
+  paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|publication] [--format text|json]
   paperbot --help
   paperbot --version
 
 Commands:
-  scan      Index relevant repository files into an evidence bundle
-  draft     Create an evidence-linked Markdown scaffold without generated claims
-  validate  Validate a paper and its referenced evidence bundle
+  scan      Select relevant repository files into a private scan manifest
+  draft     Create a Markdown paper scaffold from a scan manifest
+  validate  Validate a product paper
 
 Options:
   --format <format>    Output format: text (default) or json
@@ -73,7 +73,7 @@ export async function run(
     }
 
     if (parsed.command === "draft") {
-      const result = await preparePaperDraft(parsed.evidence_path, {
+      const result = await preparePaperDraft(parsed.scan_path, {
         ...(parsed.output_path === undefined
           ? {}
           : { output_path: parsed.output_path }),
@@ -105,9 +105,9 @@ export async function run(
       inclusions: parsed.inclusions,
     });
     if (parsed.format === "json") {
-      io.stdout(JSON.stringify(result.bundle, null, 2));
+      io.stdout(JSON.stringify(result.manifest, null, 2));
       io.stderr(
-        `paperbot: scanned ${result.bundle.sources.length} evidence sources from ${result.discovered_file_count} files`,
+        `paperbot: selected ${result.manifest.files.length} files from ${result.discovered_file_count} discovered files`,
       );
     } else {
       io.stdout(formatScanResult(result));

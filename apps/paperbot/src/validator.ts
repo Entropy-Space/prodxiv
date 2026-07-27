@@ -9,7 +9,6 @@ import type {
 
 import type { ValidationProfile } from "./arguments.ts";
 import { ExitCode, PaperbotError } from "./errors.ts";
-import { validateReferencedEvidence } from "./validation/evidence.ts";
 import { parsePaper, validatePaperRules } from "./validation/paper.ts";
 import { validatePaperStructure } from "./validation/schema.ts";
 import { sortDiagnostics } from "./validation/shared.ts";
@@ -37,7 +36,6 @@ export async function validatePaperFile(
   if (paper !== undefined) {
     diagnostics.push(...validatePaperStructure(paper));
     validatePaperRules(paper, profile, diagnostics);
-    await validateReferencedEvidence(paper, absoluteInputPath, diagnostics);
   }
 
   sortDiagnostics(diagnostics);

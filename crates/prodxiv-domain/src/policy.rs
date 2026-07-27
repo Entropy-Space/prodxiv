@@ -9,18 +9,12 @@ pub const PUBLICATION_REQUIRED_METADATA: [&str; 4] =
 pub struct ValidationPolicy {
     pub schema_version: String,
     pub paper: PaperValidationPolicy,
-    pub evidence: EvidenceValidationPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PaperValidationPolicy {
     pub required_sections: Vec<String>,
     pub publication_required_metadata: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EvidenceValidationPolicy {
-    pub verified_claims_require_locations: bool,
 }
 
 #[must_use]
@@ -32,9 +26,6 @@ pub fn validation_policy() -> ValidationPolicy {
             publication_required_metadata: PUBLICATION_REQUIRED_METADATA
                 .map(str::to_owned)
                 .to_vec(),
-        },
-        evidence: EvidenceValidationPolicy {
-            verified_claims_require_locations: true,
         },
     }
 }

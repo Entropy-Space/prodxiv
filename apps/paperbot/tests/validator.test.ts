@@ -26,7 +26,7 @@ describe("validatePaperFile", () => {
     });
   });
 
-  test("validates a draft and its referenced evidence bundle", async () => {
+  test("validates a complete draft", async () => {
     const result = await validatePaperFile(
       resolve(fixtureRoot, "valid-paper.md"),
       "draft",
@@ -51,17 +51,6 @@ describe("validatePaperFile", () => {
       "publication.date_required",
       "publication.version_required",
     ]);
-  });
-
-  test("matches authoritative evidence cross-reference diagnostics", async () => {
-    const result = await validatePaperFile(
-      resolve(fixtureRoot, "paper-with-invalid-evidence.md"),
-      "draft",
-    );
-
-    expect(result.report.valid).toBe(false);
-    expect(codes(result)).toContain("evidence.unknown_source");
-    expect(codes(result)).toContain("evidence.invalid_line_range");
   });
 
   test("matches authoritative missing-section diagnostics", async () => {
@@ -107,10 +96,6 @@ describe("validatePaperFile", () => {
       .replace(
         'status: "concept"',
         'status: "concept"\npublished_at: "2026-02-30"',
-      )
-      .replace(
-        'evidence_bundle: "valid-evidence.json"',
-        'evidence_bundle: "../evidence.json"',
       );
     await writeFile(paperPath, source);
 
@@ -118,7 +103,6 @@ describe("validatePaperFile", () => {
       const result = await validatePaperFile(paperPath, "draft");
       expect(codes(result)).toContain("value.required");
       expect(codes(result)).toContain("publication.invalid_date");
-      expect(codes(result)).toContain("value.invalid_relative_path");
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }

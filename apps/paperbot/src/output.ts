@@ -11,17 +11,14 @@ const SKIP_REASONS: SkipReason[] = [
 ];
 
 export function formatScanResult(result: ScanResult): string {
-  const { bundle } = result;
-  const sourceCounts = new Map<string, number>();
-  for (const source of bundle.sources) {
-    sourceCounts.set(
-      source.source_type,
-      (sourceCounts.get(source.source_type) ?? 0) + 1,
-    );
+  const { manifest } = result;
+  const fileCounts = new Map<string, number>();
+  for (const file of manifest.files) {
+    fileCounts.set(file.file_type, (fileCounts.get(file.file_type) ?? 0) + 1);
   }
 
-  const sourceSummary =
-    [...sourceCounts.entries()]
+  const fileSummary =
+    [...fileCounts.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([type, count]) => `  ${type}: ${count}`)
       .join("\n") || "  none";
@@ -32,15 +29,14 @@ export function formatScanResult(result: ScanResult): string {
   return [
     "Paperbot repository scan",
     `Repository: ${result.repository_path}`,
-    `Revision: ${bundle.repository.revision}`,
-    `Working tree: ${bundle.repository.is_dirty ? "dirty" : "clean"}`,
+    `Revision: ${manifest.repository.revision}`,
+    `Working tree: ${manifest.repository.is_dirty ? "dirty" : "clean"}`,
     `Files discovered: ${result.discovered_file_count}`,
-    `Evidence sources: ${bundle.sources.length}`,
-    "Source types:",
-    sourceSummary,
+    `Files selected: ${manifest.files.length}`,
+    "File types:",
+    fileSummary,
     "Skipped files:",
     skipSummary,
-    "Claims: 0 (scan only; drafting adds claims)",
   ].join("\n");
 }
 

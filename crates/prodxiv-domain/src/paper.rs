@@ -87,8 +87,6 @@ pub struct PaperMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(url)]
     pub repository_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence_bundle: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relationships: Vec<ProductRelationship>,
 }

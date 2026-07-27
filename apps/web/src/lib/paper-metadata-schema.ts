@@ -1,4 +1,3 @@
-import type { EvidenceBundle } from "@prodxiv/contracts/evidence";
 import type { PaperMetadata } from "@prodxiv/contracts/paper";
 import { validation_policy } from "@prodxiv/contracts/validation-policy";
 import Ajv2020, {
@@ -9,7 +8,6 @@ import Ajv2020, {
 import addFormats from "ajv-formats";
 import { z } from "astro/zod";
 
-import evidenceSchema from "../../../../schemas/evidence.schema.json";
 import paperSchema from "../../../../schemas/paper.schema.json";
 
 const ajv = new Ajv2020({
@@ -32,9 +30,6 @@ const metadataSchema = {
 const validateMetadata = ajv.compile<PaperMetadata>(
   metadataSchema as AnySchema,
 );
-const validateEvidence = ajv.compile<EvidenceBundle>(
-  evidenceSchema as AnySchema,
-);
 
 type PublicationField =
   (typeof validation_policy.paper.publication_required_metadata)[number];
@@ -55,8 +50,6 @@ export const paperMetadataSchema = canonicalSchema(validateMetadata)
     }
   })
   .transform((value) => value as PublishedPaperMetadata);
-
-export const evidenceBundleSchema = canonicalSchema(validateEvidence);
 
 function canonicalSchema<Value>(validate: ValidateFunction<Value>) {
   return z

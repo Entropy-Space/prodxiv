@@ -1,7 +1,7 @@
 ---
 schema_version: "1"
 paper_id: "prodxiv:2607.0002"
-title: "Paperbot Fixture: An Evidence-Linked Test Product"
+title: "Paperbot Fixture: A Repository-Assisted Test Product"
 summary: "A deliberately small product fixture used to exercise the complete Paperbot scan, drafting, validation, and website-rendering workflow."
 authors:
   - name: "prodxiv contributors"
@@ -14,7 +14,6 @@ topics:
   - "testing"
 license: "CC BY 4.0"
 repository_url: "https://github.com/Entropy-Space/prodxiv"
-evidence_bundle: "evidence/paperbot-fixture.json"
 ---
 
 # Summary
@@ -23,9 +22,8 @@ The Paperbot fixture is a deliberately small test product inside the prodxiv
 repository. It exists to make the repository-to-paper workflow reproducible
 without presenting a toy program as a production system.
 
-Its evidence bundle is checked in beside this paper. Claims identify whether
-they are verified from files, inferred from incomplete implementation,
-provided by the maintainers, or still missing evidence.
+It exercises the same private scan, author interview, Markdown validation, and
+website rendering steps intended for real product repositories.
 
 # Background
 
@@ -33,14 +31,14 @@ Paperbot needs fixtures that exercise documentation, source code, tests,
 configuration, manifests, and benchmark inputs. This repository provides each
 of those source categories in a form that is quick to scan and easy to inspect.
 
-The repository README directly states that its purpose is to exercise
-Paperbot's deterministic scanner. Evidence: `fixture_purpose`.
+The repository README states that its purpose is to exercise Paperbot's
+deterministic scanner.
 
 # Motivation
 
-The prodxiv maintainers intentionally keep the fixture small so a failed scan,
-unsupported claim, or broken evidence link can be understood without first
-learning a realistic application. Evidence: `small_by_design`.
+The prodxiv maintainers intentionally keep the fixture small so a failed scan
+or malformed draft can be understood without first learning a realistic
+application.
 
 This is testing infrastructure rather than an independent commercial product.
 Its value comes from exposing integration mistakes at the boundary between the
@@ -61,20 +59,19 @@ patterns that a controlled fixture cannot represent.
 ## Inspectable greeting behavior
 
 The fixture exports a greeting function that interpolates the supplied name.
-A Bun test checks the observable result for the name `Paperbot`. Evidence:
-`greeting_behavior`.
+A Bun test checks the observable result for the name `Paperbot`.
 
-## Multiple evidence categories
+## Multiple repository inputs
 
 The repository contains documentation, a package manifest, source files, a
 test, configuration, and a benchmark scenario. This allows the scanner to
 classify several source types while keeping every input human-readable.
 
-## Explicit uncertainty
+## Author review boundaries
 
 The configuration selects a value named `fixture`, but the repository does not
-establish what that mode changes at runtime. The evidence therefore records the
-interpretation as inferred rather than verified. Evidence: `fixture_mode`.
+establish what that mode changes at runtime. Paperbot should ask the author
+instead of inventing an explanation.
 
 # Architecture
 
@@ -82,31 +79,29 @@ The product is intentionally flat. A TypeScript source module implements its
 observable greeting behavior, a Bun test imports that module, and small files
 represent configuration and benchmark inputs.
 
-Paperbot scans those inputs into a language-neutral evidence bundle. The
-drafting workflow refers to stable claim and source identifiers, while the
-canonical validator checks the paper and evidence bundle before Astro renders
-the Markdown.
+Paperbot records the selected files in a private scan manifest and creates a
+Markdown scaffold. The drafting agent reads the selected repository files,
+asks the author about intent, and completes the paper before the canonical
+validator and Astro renderer process it.
 
 # Benchmarks
 
 The benchmark input declares 100 iterations, but it contains no executable
 measurement harness, environment description, raw samples, or results.
-Evidence: `benchmark_setup_only`.
 
-No performance conclusion can be drawn from that input. The evidence bundle
-retains a `missing_evidence` claim for fixture performance so the absence
-cannot be mistaken for a positive result. Evidence: `performance_unknown`.
+No performance conclusion can be drawn from that input. The paper states this
+gap directly rather than treating benchmark-shaped code as a result.
 
 # Insights and Lessons
 
 A complete pipeline fixture should be small enough to debug but rich enough to
-cross every important boundary. Separating claim state from fluent prose also
-makes a useful failure visible: a sentence can sound plausible while its
-evidence still says `inferred` or `missing_evidence`.
+cross every important boundary. Repository analysis is useful for describing
+implementation, but the author must still supply motivation, tradeoffs, and
+lessons.
 
-The fixture further demonstrates that benchmark-shaped code is not benchmark
-evidence. Reproducible results require methodology and measurements, not only
-an iteration count.
+The fixture further demonstrates that benchmark-shaped code is not a benchmark
+result. Reproducible results require methodology and measurements, not only an
+iteration count.
 
 # Limitations
 
@@ -122,6 +117,4 @@ paper generation.
 
 1. The fixture repository,
    `apps/paperbot/tests/fixtures/repository`.
-2. The evidence bundle,
-   `examples/papers/evidence/paperbot-fixture.json`.
-3. The Paperbot workflow, `skills/paperbot/SKILL.md`.
+2. The Paperbot workflow, `skills/paperbot/SKILL.md`.

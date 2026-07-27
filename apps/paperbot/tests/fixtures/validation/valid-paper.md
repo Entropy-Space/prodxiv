@@ -7,7 +7,6 @@ authors:
 status: "concept"
 topics:
   - "developer_tools"
-evidence_bundle: "valid-evidence.json"
 ---
 
 # Summary
@@ -36,7 +35,7 @@ No benchmarks are claimed.
 
 # Insights and Lessons
 
-Validation should keep unsupported claims visible.
+Validation should keep incomplete drafts visible.
 
 # Limitations
 

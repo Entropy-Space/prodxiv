@@ -8,8 +8,7 @@ products:
 - **prodxiv web** is the public archive, reader, editor, and publishing
   experience.
 - **Paperbot** is a local-first Bun CLI plus an Agent Skill that turns an
-  existing repository and its documentation into an evidence-backed paper
-  draft.
+  existing repository and its documentation into an initial paper draft.
 
 Read these documents before making product or architecture decisions:
 
@@ -27,13 +26,6 @@ Read these documents before making product or architecture decisions:
 - Paperbot should infer implementation and ask authors about intention.
 - Keep repository analysis local by default.
 
-Every substantive Paperbot claim must have one of these provenance states:
-
-- `verified`
-- `inferred`
-- `author_provided`
-- `missing_evidence`
-
 ## Current architecture
 
 Use a polyglot monorepo with a Bun workspace for TypeScript products and a
@@ -50,8 +42,7 @@ prodxiv/
 │   └── prodxiv-storage/        # PostgreSQL persistence
 ├── packages/
 │   ├── api-client/             # Generated TypeScript client
-│   ├── markdown/               # Rendering rules
-│   └── evidence/               # Paperbot evidence utilities
+│   └── markdown/               # Rendering rules
 ├── schemas/
 │   └── paper.schema.json       # Generated, checked-in contract
 ├── skills/
@@ -101,7 +92,7 @@ Work toward the smallest complete loop:
 ```text
 repository
   -> Paperbot scan
-  -> evidence bundle
+  -> private scan manifest
   -> agent-authored paper draft
   -> Paperbot validation
   -> website paper page
@@ -109,7 +100,7 @@ repository
 
 Prioritize work in this order:
 
-1. Define the canonical paper and evidence schema.
+1. Define the canonical paper schema.
 2. Write one exemplary product paper by hand.
 3. Implement `paperbot scan`, `paperbot draft`, and `paperbot validate`.
 4. Package the Paperbot Agent Skill.
@@ -135,8 +126,8 @@ The CLI should:
 - Respect `.gitignore` and explicit user exclusions.
 - Exclude credentials, environment files, user data, generated code, and
   vendored dependencies by default.
-- Identify the files and documents supporting each generated claim.
-- Never fabricate benchmarks or infer that marketing copy is verified.
+- Show which files were selected for local analysis.
+- Never fabricate benchmarks or treat marketing copy as established fact.
 - Require explicit confirmation for submission or any remote write.
 
 The skill should:
@@ -147,7 +138,7 @@ The skill should:
 - Keep detailed policies and templates in `references/` or `assets/`.
 - Work with any skills-compatible agent that can execute the CLI.
 - Ask the author targeted questions when motivation, history, tradeoffs, or
-  lessons are not supported by repository evidence.
+  lessons are not explained by repository contents.
 
 Distribute Paperbot as editable TypeScript source and as Bun-compiled
 executables for supported platforms.
@@ -161,8 +152,8 @@ The API must:
 
 - Allocate paper identifiers and version numbers transactionally.
 - Treat every published version as immutable.
-- Associate evidence, source hashes, and authors with the exact paper version
-  they belong to.
+- Associate authors and source Markdown with the exact paper version they
+  belong to.
 - Reject unsupported schema versions with a useful diagnostic.
 - Require authorization for draft access, submission, and revision creation.
 - Keep publication and moderation operations auditable.
@@ -179,7 +170,7 @@ operations belong in `prodxiv-storage`.
 - Preserve raw Markdown alongside rendered output.
 - Validate required metadata and recognized sections through the canonical
   schema.
-- Keep published source, evidence, and version identifiers reproducible.
+- Keep published source and version identifiers reproducible.
 - Do not silently rewrite published paper content.
 
 ## Code conventions
@@ -200,9 +191,9 @@ operations belong in `prodxiv-storage`.
 ## Tests and verification
 
 - Add or update tests with behavior changes.
-- Prefer fixture-based and golden-file tests for scanning, evidence bundles,
+- Prefer fixture-based and golden-file tests for scanning, scan manifests,
   Markdown output, and diagnostics.
-- Test malformed input, ignored files, missing evidence, and sensitive-file
+- Test malformed input, ignored files, incomplete drafts, and sensitive-file
   exclusions.
 - Keep at least one end-to-end fixture that exercises the complete
   repository-to-rendered-paper loop.
@@ -235,7 +226,7 @@ not invent them in status reports.
 - Use pooled PostgreSQL connections for application traffic and direct
   connections for migrations and administrative operations.
 - Keep the API and database in nearby regions.
-- Store paper metadata, Markdown, evidence, and audit data in PostgreSQL.
+- Store paper metadata, Markdown, and audit data in PostgreSQL.
 - Store large images, archives, and other binary assets in object storage.
 - Keep runtime state outside the container filesystem.
 - Deploy the Astro website through Vercel's native Astro integration.

@@ -1,9 +1,8 @@
 use std::{fs, path::Path};
 
 use prodxiv_domain::{
-    EvidenceBundle, PaperDocument, PaperMetadata, PaperParseError, ProductStatus,
-    ValidationProfile, ValidationReport, validate_evidence_bundle, validate_paper,
-    validation_policy,
+    PaperDocument, PaperMetadata, PaperParseError, ProductStatus, ValidationProfile,
+    ValidationReport, validate_paper, validation_policy,
 };
 use schemars::schema_for;
 
@@ -57,7 +56,6 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
             license: None,
             product_url: None,
             repository_url: None,
-            evidence_bundle: None,
             relationships: Vec::new(),
         },
         markdown: prodxiv_domain::REQUIRED_SECTIONS
@@ -74,14 +72,12 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
     paper.metadata.published_at = Some("2026-02-30".to_owned());
     paper.metadata.version = Some(0);
     paper.metadata.license = Some(String::new());
-    paper.metadata.evidence_bundle = Some("../evidence.json".to_owned());
     let report = validate_paper(&paper, ValidationProfile::Draft);
     let codes = diagnostic_codes(&report);
     assert!(codes.contains(&"value.invalid_paper_id"));
     assert!(codes.contains(&"publication.invalid_date"));
     assert!(codes.contains(&"publication.invalid_version"));
     assert!(codes.contains(&"publication.invalid_license"));
-    assert!(codes.contains(&"value.invalid_relative_path"));
 }
 
 #[test]
@@ -124,23 +120,9 @@ fn parser_preserves_the_markdown_body() {
 }
 
 #[test]
-fn invalid_evidence_reports_unknown_sources_and_line_ranges() {
-    let bundle: EvidenceBundle =
-        serde_json::from_str(include_str!("fixtures/invalid-evidence.json"))
-            .expect("fixture should deserialize");
-    let report = validate_evidence_bundle(&bundle);
-    let codes = diagnostic_codes(&report);
-
-    assert!(!report.valid);
-    assert!(codes.contains(&"evidence.unknown_source"));
-    assert!(codes.contains(&"evidence.invalid_line_range"));
-}
-
-#[test]
 fn checked_in_schemas_match_the_rust_contracts() {
     let schemas = [
         ("paper.schema.json", schema_for!(PaperDocument)),
-        ("evidence.schema.json", schema_for!(EvidenceBundle)),
         ("validation.schema.json", schema_for!(ValidationReport)),
     ];
 

@@ -5,9 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::{
-    EvidenceBundle, PaperDocument, ProvenanceState, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION,
-};
+use crate::{PaperDocument, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationProfile {
@@ -118,16 +116,6 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
             &mut diagnostics,
         );
     }
-    if let Some(evidence_bundle) = &metadata.evidence_bundle {
-        validate_relative_path(
-            "metadata.evidence_bundle",
-            evidence_bundle,
-            "value.invalid_relative_path",
-            "evidence bundle must be a repository-relative path",
-            &mut diagnostics,
-        );
-    }
-
     if let Some(paper_id) = &metadata.paper_id {
         validate_paper_id("metadata.paper_id", paper_id, &mut diagnostics);
     }
@@ -200,123 +188,6 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
     }
 
     validate_sections(&paper.markdown, &mut diagnostics);
-    report(diagnostics)
-}
-
-pub fn validate_evidence_bundle(bundle: &EvidenceBundle) -> ValidationReport {
-    let mut diagnostics = Vec::new();
-    require_supported_schema(&bundle.schema_version, &mut diagnostics);
-    require_nonempty(
-        "repository.revision",
-        &bundle.repository.revision,
-        &mut diagnostics,
-    );
-
-    if let Some(source_url) = &bundle.repository.source_url {
-        validate_http_url("repository.source_url", source_url, &mut diagnostics);
-    }
-
-    let mut source_ids = HashSet::new();
-    for (index, source) in bundle.sources.iter().enumerate() {
-        let base = format!("sources[{index}]");
-        require_identifier(
-            &format!("{base}.source_id"),
-            &source.source_id,
-            &mut diagnostics,
-        );
-        if !source_ids.insert(source.source_id.as_str()) {
-            error(
-                &mut diagnostics,
-                "evidence.duplicate_source_id",
-                &format!("{base}.source_id"),
-                "source identifiers must be unique",
-            );
-        }
-        validate_relative_path(
-            &format!("{base}.path"),
-            &source.path,
-            "evidence.invalid_path",
-            "evidence paths must be non-empty, repository-relative paths",
-            &mut diagnostics,
-        );
-        if !is_sha256(&source.content_sha256) {
-            error(
-                &mut diagnostics,
-                "evidence.invalid_sha256",
-                &format!("{base}.content_sha256"),
-                "content_sha256 must contain 64 lowercase hexadecimal characters",
-            );
-        }
-    }
-
-    let mut claim_ids = HashSet::new();
-    for (index, claim) in bundle.claims.iter().enumerate() {
-        let base = format!("claims[{index}]");
-        require_identifier(
-            &format!("{base}.claim_id"),
-            &claim.claim_id,
-            &mut diagnostics,
-        );
-        if !claim_ids.insert(claim.claim_id.as_str()) {
-            error(
-                &mut diagnostics,
-                "evidence.duplicate_claim_id",
-                &format!("{base}.claim_id"),
-                "claim identifiers must be unique",
-            );
-        }
-        require_nonempty(
-            &format!("{base}.statement"),
-            &claim.statement,
-            &mut diagnostics,
-        );
-        if claim.provenance_state == ProvenanceState::Verified && claim.locations.is_empty() {
-            error(
-                &mut diagnostics,
-                "evidence.verified_requires_location",
-                &format!("{base}.locations"),
-                "verified claims require at least one evidence location",
-            );
-        }
-        for (location_index, location) in claim.locations.iter().enumerate() {
-            let location_path = format!("{base}.locations[{location_index}]");
-            if !source_ids.contains(location.source_id.as_str()) {
-                error(
-                    &mut diagnostics,
-                    "evidence.unknown_source",
-                    &format!("{location_path}.source_id"),
-                    "evidence location references an unknown source",
-                );
-            }
-            if location.line_start.is_none() && location.line_end.is_some() {
-                error(
-                    &mut diagnostics,
-                    "evidence.line_start_required",
-                    &format!("{location_path}.line_start"),
-                    "line_start is required when line_end is present",
-                );
-            }
-            if location.line_start == Some(0) || location.line_end == Some(0) {
-                error(
-                    &mut diagnostics,
-                    "evidence.invalid_line_number",
-                    &location_path,
-                    "line numbers must be positive",
-                );
-            }
-            if let (Some(start), Some(end)) = (location.line_start, location.line_end)
-                && end < start
-            {
-                error(
-                    &mut diagnostics,
-                    "evidence.invalid_line_range",
-                    &location_path,
-                    "line_end must be greater than or equal to line_start",
-                );
-            }
-        }
-    }
-
     report(diagnostics)
 }
 
@@ -404,17 +275,6 @@ fn require_nonempty(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) 
     }
 }
 
-fn require_identifier(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if !is_slug(value) {
-        error(
-            diagnostics,
-            "value.invalid_identifier",
-            path,
-            "identifier must use lowercase snake_case",
-        );
-    }
-}
-
 fn validate_http_url(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) {
     match Url::parse(value) {
         Ok(url) if matches!(url.scheme(), "http" | "https") => {}
@@ -447,26 +307,6 @@ fn validate_paper_id(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>)
     }
 }
 
-fn validate_relative_path(
-    path: &str,
-    value: &str,
-    code: &str,
-    message: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let bytes = value.as_bytes();
-    let has_windows_prefix =
-        bytes.get(1) == Some(&b':') && matches!(bytes.get(2), Some(b'/' | b'\\'));
-    let is_absolute = value.starts_with('/') || has_windows_prefix;
-    let has_parent_component = value
-        .replace('\\', "/")
-        .split('/')
-        .any(|component| component == "..");
-    if value.is_empty() || is_absolute || has_parent_component {
-        error(diagnostics, code, path, message);
-    }
-}
-
 fn is_slug(value: &str) -> bool {
     !value.is_empty()
         && !value.starts_with('_')
@@ -474,13 +314,6 @@ fn is_slug(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-}
-
-fn is_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn is_iso_date(value: &str) -> bool {

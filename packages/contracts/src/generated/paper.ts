@@ -14,7 +14,6 @@ export interface PaperMetadata {
    * @minItems 1
    */
   authors: [Author, ...Author[]];
-  evidence_bundle?: string | null;
   license?: string | null;
   organization?: string | null;
   paper_id?: string | null;

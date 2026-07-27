@@ -11,8 +11,6 @@ bun run schema
 
 `paper.schema.json` describes the normalized paper document: parsed front
 matter in `metadata` and the Markdown body in `markdown`.
-`evidence.schema.json` describes Paperbot's repository snapshot, source index,
-and claim provenance.
 `validation.schema.json` describes versioned validation diagnostics.
 `validation-policy.json` carries section and profile rules consumed by local
 schema-backed validators.

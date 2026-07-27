@@ -3,7 +3,7 @@
 ## Product vision
 
 prodxiv is a versioned, searchable archive of structured product papers. It
-helps product builders document the motivations, decisions, evidence, and
+helps product builders document the motivations, decisions, results, and
 lessons behind their work in a durable format.
 
 The product borrows the publishing model of an academic archive without
@@ -34,7 +34,7 @@ shape the publishing format.
 ## The product paper
 
 A product paper is a structured introduction to a product, concept, or major
-product revision. It combines narrative context with implementation evidence.
+product revision. It combines narrative context with implementation detail.
 
 A recommended paper structure is:
 
@@ -95,7 +95,7 @@ Each paper should expose:
 - Version history.
 - Rendered Markdown and raw source.
 - References and links to related products.
-- Evidence and methodology attached to substantive claims.
+- Benchmark methodology and reproducibility notes.
 
 Product relationships should support more than conventional citations. Useful
 relationships include `inspired_by`, `built_on`, `alternative_to`, and
@@ -106,8 +106,8 @@ relationships include `inspired_by`, `built_on`, `alternative_to`, and
 The first release should focus on five surfaces:
 
 1. **Explore** — Recent and notable papers, topic filters, and search.
-2. **Paper** — The rendered paper, metadata, evidence, version history,
-   citations, and raw Markdown.
+2. **Paper** — The rendered paper, metadata, version history, citations, and
+   raw Markdown.
 3. **Submit** — A Markdown editor with preview and structural validation.
 4. **Lineage** — Connections among related products and ideas.
 5. **Profiles** — Papers and revisions associated with an author, team, or
@@ -126,7 +126,7 @@ arXiv's identity literally.
 - Clear identifiers, version information, and product status near the title.
 
 The product's credibility should come from its content model, version history,
-and evidence—not from visual imitation.
+and honest limitations—not from visual imitation.
 
 ## Product principles
 
@@ -134,8 +134,8 @@ and evidence—not from visual imitation.
    than reproduce launch copy.
 2. **History over silent updates.** Meaningful changes create new immutable
    versions.
-3. **Evidence over confidence.** Claims and benchmarks should show how they
-   were established.
+3. **Method over confidence.** Benchmarks should explain how they were
+   produced and what they do not establish.
 4. **Open contribution with visible quality signals.** Publishing should be
    accessible while validation and moderation protect the archive.
 5. **Readable by default.** Markdown source should render into an excellent
