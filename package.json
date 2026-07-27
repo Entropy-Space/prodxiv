@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "bun --filter @prodxiv/web build",
+    "check": "bun --filter @prodxiv/web check",
     "dev": "bun --filter @prodxiv/web dev",
     "preview": "bun --filter @prodxiv/web preview"
   }
