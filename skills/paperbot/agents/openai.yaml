@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paperbot"
+  short_description: "Draft evidence-backed product papers"
+  default_prompt: "Use $paperbot to draft an evidence-backed product paper from this repository."
