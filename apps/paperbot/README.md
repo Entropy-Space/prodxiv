@@ -7,6 +7,7 @@ paper draft. The initial command is a deterministic repository scan:
 bun run paperbot scan .
 bun run paperbot scan . --format json
 bun run paperbot scan . --include .env.example
+bun run paperbot draft evidence.json --output paper.md
 bun run paperbot validate paper.md
 bun run paperbot validate paper.md --profile publication --format json
 ```
@@ -28,6 +29,13 @@ Markdown sections, draft or publication requirements, and a referenced
 evidence bundle. It returns a versioned diagnostic report in JSON mode. Local
 validation is a fast authoring check; the publishing API will validate again
 using the authoritative Rust domain.
+
+`draft` accepts a valid evidence bundle and creates a section-complete Markdown
+scaffold. It does not turn repository observations into prose or copy claims
+into the paper. Missing author metadata and narrative content remain visibly
+incomplete for the Agent Skill and author to resolve. Without `--output`, the
+scaffold is written to stdout. With `--output`, Paperbot creates a new file and
+refuses to overwrite an existing draft.
 
 ## Exit codes
 

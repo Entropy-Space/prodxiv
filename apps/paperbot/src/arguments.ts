@@ -18,9 +18,17 @@ export interface ValidateArguments {
   format: OutputFormat;
 }
 
+export interface DraftArguments {
+  command: "draft";
+  evidence_path: string;
+  output_path?: string;
+  title?: string;
+}
+
 export type ParsedArguments =
   | ScanArguments
   | ValidateArguments
+  | DraftArguments
   | {
       command: "help";
     }
@@ -41,7 +49,66 @@ export function parseArguments(args: string[]): ParsedArguments {
   if (args[0] === "validate") {
     return parseValidateArguments(args.slice(1));
   }
+  if (args[0] === "draft") {
+    return parseDraftArguments(args.slice(1));
+  }
   throw usageError(`unknown command: ${args[0]}`);
+}
+
+function parseDraftArguments(
+  args: string[],
+): DraftArguments | { command: "help" } {
+  let evidence_path: string | undefined;
+  let output_path: string | undefined;
+  let title: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--output" || argument === "--title") {
+      const value = args[index + 1];
+      if (value === undefined || value.length === 0) {
+        throw usageError(`missing value for ${argument}`);
+      }
+      if (argument === "--output") {
+        output_path = value;
+      } else {
+        title = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--output=")) {
+      output_path = requiredInlineValue(argument, "--output");
+      continue;
+    }
+    if (argument.startsWith("--title=")) {
+      title = requiredInlineValue(argument, "--title");
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    if (evidence_path !== undefined) {
+      throw usageError("draft accepts only one evidence bundle path");
+    }
+    evidence_path = argument;
+  }
+
+  if (evidence_path === undefined) {
+    throw usageError("draft requires an evidence bundle path");
+  }
+  return {
+    command: "draft",
+    evidence_path,
+    ...(output_path === undefined ? {} : { output_path }),
+    ...(title === undefined ? {} : { title }),
+  };
 }
 
 function parseScanArguments(
@@ -200,6 +267,14 @@ function parseProfile(value: string): ValidationProfile {
     return value;
   }
   throw usageError(`unsupported validation profile: ${value}`);
+}
+
+function requiredInlineValue(argument: string, option: string): string {
+  const value = argument.slice(`${option}=`.length);
+  if (value.length === 0) {
+    throw usageError(`missing value for ${option}`);
+  }
+  return value;
 }
 
 function usageError(message: string): PaperbotError {

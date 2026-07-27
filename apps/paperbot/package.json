@@ -8,7 +8,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test tests/scanner.test.ts tests/validator.test.ts"
+    "test": "bun test tests/scanner.test.ts tests/validator.test.ts tests/drafter.test.ts"
   },
   "dependencies": {
     "@prodxiv/contracts": "workspace:*",

@@ -64,22 +64,20 @@ export async function validateReferencedEvidence(
     return;
   }
 
-  diagnostics.push(...validateEvidenceStructure(evidence));
-  validateEvidenceRules(evidence, diagnostics);
+  diagnostics.push(...validateEvidenceValue(evidence));
 }
 
-function validateEvidenceRules(
-  value: unknown,
-  diagnostics: Diagnostic[],
-): void {
+export function validateEvidenceValue(value: unknown): Diagnostic[] {
+  const diagnostics = validateEvidenceStructure(value);
   if (!isRecord(value)) {
-    return;
+    return diagnostics;
   }
   const sources = Array.isArray(value.sources) ? value.sources : [];
   validateRepository(value.repository, diagnostics);
   const sourceIds = validateSources(sources, diagnostics);
   const claims = Array.isArray(value.claims) ? value.claims : [];
   validateClaims(claims, sourceIds, diagnostics);
+  return diagnostics;
 }
 
 function validateRepository(value: unknown, diagnostics: Diagnostic[]): void {
