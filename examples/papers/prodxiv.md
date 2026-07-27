@@ -1,6 +1,6 @@
 ---
 schema_version: "1"
-paper_id: "prodxiv:2607.0001"
+paper_id: "prodxiv:2607.000001"
 title: "prodxiv: A Versioned Archive for Product Knowledge"
 summary: "A proposal for preserving the motivations, decisions, results, and lessons behind products as durable, versioned Markdown papers."
 authors:

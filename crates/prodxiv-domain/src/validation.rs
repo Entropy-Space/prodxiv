@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use utoipa::ToSchema;
 
-use crate::{PaperDocument, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION};
+use crate::{PaperDocument, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION, canonicalize_paper_id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationProfile {
@@ -323,21 +323,12 @@ fn validate_http_url(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>)
 }
 
 fn validate_paper_id(path: &str, value: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let valid = value
-        .strip_prefix("prodxiv:")
-        .and_then(|suffix| suffix.split_once('.'))
-        .is_some_and(|(date, sequence)| {
-            date.len() == 4
-                && sequence.len() == 4
-                && date.bytes().all(|byte| byte.is_ascii_digit())
-                && sequence.bytes().all(|byte| byte.is_ascii_digit())
-        });
-    if !valid {
+    if canonicalize_paper_id(value).is_none() {
         error(
             diagnostics,
             "value.invalid_paper_id",
             path,
-            "paper identifier must match `prodxiv:YYMM.NNNN`",
+            "paper identifier must match `prodxiv:YYMM.XXXXXX` using Crockford Base32",
         );
     }
 }

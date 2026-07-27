@@ -1,6 +1,6 @@
 ---
 schema_version: "1"
-paper_id: "prodxiv:2607.0002"
+paper_id: "prodxiv:2607.000002"
 title: "Paperbot Fixture: A Repository-Assisted Test Product"
 summary: "A deliberately small product fixture used to exercise the complete Paperbot scan, drafting, validation, and website-rendering workflow."
 authors:

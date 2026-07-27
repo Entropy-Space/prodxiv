@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use crate::{PaperDocument, PaperMetadata, ValidationProfile, ValidationReport, validate_paper};
+use crate::{
+    PaperDocument, PaperMetadata, ValidationProfile, ValidationReport, canonicalize_paper_id,
+    validate_paper,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicationIdentity {
@@ -41,9 +44,16 @@ pub fn prepare_publication(
     mut paper: PaperDocument,
     identity: PublicationIdentity,
 ) -> Result<PublishedPaper, PublicationPreparationError> {
-    paper.metadata.paper_id = Some(identity.paper_id.clone());
+    let paper_id =
+        canonicalize_paper_id(&identity.paper_id).unwrap_or_else(|| identity.paper_id.clone());
+    paper.metadata.paper_id = Some(paper_id.clone());
     paper.metadata.version = Some(identity.version);
     paper.metadata.published_at = Some(identity.published_at.clone());
+    for relationship in &mut paper.metadata.relationships {
+        if let Some(canonical) = canonicalize_paper_id(&relationship.paper_id) {
+            relationship.paper_id = canonical;
+        }
+    }
 
     let report = validate_paper(&paper, ValidationProfile::Publication);
     if !report.valid {
@@ -55,7 +65,7 @@ pub fn prepare_publication(
 
     Ok(PublishedPaper {
         schema_version: paper.metadata.schema_version.clone(),
-        paper_id: identity.paper_id,
+        paper_id,
         version: identity.version,
         published_at: identity.published_at,
         metadata: paper.metadata,

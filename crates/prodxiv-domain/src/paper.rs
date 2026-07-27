@@ -4,6 +4,8 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 pub const SUPPORTED_SCHEMA_VERSION: &str = "1";
+pub const PAPER_ID_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+pub const PAPER_ID_SUFFIX_LENGTH: usize = 6;
 
 pub const REQUIRED_SECTIONS: [&str; 8] = [
     "Summary",
@@ -60,7 +62,7 @@ pub struct PaperMetadata {
     #[schemars(regex(pattern = r"^1$"))]
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9]{4}$"))]
+    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
     pub paper_id: Option<String>,
     #[schemars(length(min = 1))]
     pub title: String,
@@ -118,7 +120,7 @@ pub enum ProductStatus {
 #[serde(deny_unknown_fields)]
 pub struct ProductRelationship {
     pub kind: RelationshipKind,
-    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9]{4}$"))]
+    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
     pub paper_id: String,
 }
 
@@ -139,4 +141,38 @@ pub enum PaperParseError {
     Unterminated,
     #[error("paper front matter is invalid: {0}")]
     InvalidYaml(String),
+}
+
+#[must_use]
+pub fn canonicalize_paper_id(value: &str) -> Option<String> {
+    let (date, suffix) = value.strip_prefix("prodxiv:")?.split_once('.')?;
+    let suffix = suffix.to_ascii_uppercase();
+    if date.len() != 4
+        || !date.bytes().all(|byte| byte.is_ascii_digit())
+        || suffix.len() != PAPER_ID_SUFFIX_LENGTH
+        || !suffix
+            .bytes()
+            .all(|byte| PAPER_ID_ALPHABET.as_bytes().contains(&byte))
+    {
+        return None;
+    }
+
+    Some(format!("prodxiv:{date}.{suffix}"))
+}
+
+#[must_use]
+pub fn encode_paper_id_suffix(mut value: u32) -> Option<String> {
+    let alphabet = PAPER_ID_ALPHABET.as_bytes();
+    let radix = u32::try_from(alphabet.len()).expect("paper ID alphabet length fits in u32");
+    if value >= radix.pow(PAPER_ID_SUFFIX_LENGTH as u32) {
+        return None;
+    }
+
+    let mut encoded = [alphabet[0]; PAPER_ID_SUFFIX_LENGTH];
+    for character in encoded.iter_mut().rev() {
+        let index = usize::try_from(value % radix).expect("alphabet index fits in usize");
+        *character = alphabet[index];
+        value /= radix;
+    }
+    String::from_utf8(encoded.to_vec()).ok()
 }

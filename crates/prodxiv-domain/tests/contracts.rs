@@ -2,7 +2,8 @@ use std::{fs, path::Path};
 
 use prodxiv_domain::{
     PaperDocument, PaperMetadata, PaperParseError, ProductStatus, PublicationIdentity,
-    ValidationProfile, ValidationReport, prepare_publication, validate_paper, validation_policy,
+    ValidationProfile, ValidationReport, canonicalize_paper_id, encode_paper_id_suffix,
+    prepare_publication, validate_paper, validation_policy,
 };
 use schemars::schema_for;
 
@@ -117,14 +118,14 @@ fn publication_preparation_assigns_identity_and_preserves_body() {
     let published = prepare_publication(
         paper,
         PublicationIdentity {
-            paper_id: "prodxiv:2607.0042".to_owned(),
+            paper_id: "prodxiv:2607.00001A".to_owned(),
             version: 1,
             published_at: "2026-07-27".to_owned(),
         },
     )
     .expect("complete submission should publish");
 
-    assert_eq!(published.paper_id, "prodxiv:2607.0042");
+    assert_eq!(published.paper_id, "prodxiv:2607.00001A");
     assert_eq!(
         published.metadata.paper_id.as_deref(),
         Some(published.paper_id.as_str())
@@ -134,6 +135,20 @@ fn publication_preparation_assigns_identity_and_preserves_body() {
         PaperDocument::from_markdown(&published.source_markdown).expect("source should reparse");
     assert_eq!(reparsed.metadata, published.metadata);
     assert_eq!(reparsed.markdown, original_body);
+}
+
+#[test]
+fn paper_identifiers_use_canonical_crockford_base32() {
+    assert_eq!(encode_paper_id_suffix(0).as_deref(), Some("000000"));
+    assert_eq!(encode_paper_id_suffix(31).as_deref(), Some("00000Z"));
+    assert_eq!(encode_paper_id_suffix(32).as_deref(), Some("000010"));
+    assert_eq!(
+        canonicalize_paper_id("prodxiv:2607.abc123").as_deref(),
+        Some("prodxiv:2607.ABC123")
+    );
+    assert!(canonicalize_paper_id("prodxiv:2607.00000I").is_none());
+    assert!(canonicalize_paper_id("prodxiv:2607.00000O").is_none());
+    assert!(canonicalize_paper_id("prodxiv:2607.00000U").is_none());
 }
 
 #[test]
