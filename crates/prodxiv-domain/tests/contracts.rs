@@ -1,8 +1,8 @@
 use std::{fs, path::Path};
 
 use prodxiv_domain::{
-    PaperDocument, PaperMetadata, PaperParseError, ProductStatus, ValidationProfile,
-    ValidationReport, validate_paper, validation_policy,
+    PaperDocument, PaperMetadata, PaperParseError, ProductStatus, PublicationIdentity,
+    ValidationProfile, ValidationReport, prepare_publication, validate_paper, validation_policy,
 };
 use schemars::schema_for;
 
@@ -78,6 +78,62 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
     assert!(codes.contains(&"publication.invalid_date"));
     assert!(codes.contains(&"publication.invalid_version"));
     assert!(codes.contains(&"publication.invalid_license"));
+}
+
+#[test]
+fn submission_requires_license_and_forbids_server_owned_metadata() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+
+    let report = validate_paper(&paper, ValidationProfile::Submission);
+    let codes = diagnostic_codes(&report);
+    assert!(codes.contains(&"submission.paper_id_forbidden"));
+    assert!(codes.contains(&"submission.date_forbidden"));
+    assert!(codes.contains(&"submission.version_forbidden"));
+
+    paper.metadata.paper_id = None;
+    paper.metadata.published_at = None;
+    paper.metadata.version = None;
+    assert!(validate_paper(&paper, ValidationProfile::Submission).valid);
+
+    paper.metadata.license = None;
+    assert!(
+        diagnostic_codes(&validate_paper(&paper, ValidationProfile::Submission))
+            .contains(&"submission.license_required")
+    );
+}
+
+#[test]
+fn publication_preparation_assigns_identity_and_preserves_body() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+    paper.metadata.paper_id = None;
+    paper.metadata.published_at = None;
+    paper.metadata.version = None;
+    let original_body = paper.markdown.clone();
+
+    let published = prepare_publication(
+        paper,
+        PublicationIdentity {
+            paper_id: "prodxiv:2607.0042".to_owned(),
+            version: 1,
+            published_at: "2026-07-27".to_owned(),
+        },
+    )
+    .expect("complete submission should publish");
+
+    assert_eq!(published.paper_id, "prodxiv:2607.0042");
+    assert_eq!(
+        published.metadata.paper_id.as_deref(),
+        Some(published.paper_id.as_str())
+    );
+    assert!(published.source_markdown.ends_with(&original_body));
+    let reparsed =
+        PaperDocument::from_markdown(&published.source_markdown).expect("source should reparse");
+    assert_eq!(reparsed.metadata, published.metadata);
+    assert_eq!(reparsed.markdown, original_body);
 }
 
 #[test]

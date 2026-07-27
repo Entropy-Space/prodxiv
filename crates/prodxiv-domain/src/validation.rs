@@ -4,16 +4,18 @@ use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use utoipa::ToSchema;
 
 use crate::{PaperDocument, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationProfile {
     Draft,
+    Submission,
     Publication,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ValidationReport {
     pub schema_version: String,
@@ -21,7 +23,7 @@ pub struct ValidationReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
@@ -30,7 +32,7 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticSeverity {
     Error,
@@ -152,7 +154,40 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
         );
     }
 
-    if profile == ValidationProfile::Publication {
+    if profile == ValidationProfile::Submission {
+        if metadata.paper_id.is_some() {
+            error(
+                &mut diagnostics,
+                "submission.paper_id_forbidden",
+                "metadata.paper_id",
+                "paper identifiers are assigned by the publishing service",
+            );
+        }
+        if metadata.published_at.is_some() {
+            error(
+                &mut diagnostics,
+                "submission.date_forbidden",
+                "metadata.published_at",
+                "publication dates are assigned by the publishing service",
+            );
+        }
+        if metadata.version.is_some() {
+            error(
+                &mut diagnostics,
+                "submission.version_forbidden",
+                "metadata.version",
+                "paper versions are assigned by the publishing service",
+            );
+        }
+        if metadata.license.is_none() {
+            error(
+                &mut diagnostics,
+                "submission.license_required",
+                "metadata.license",
+                "submitted papers require a license",
+            );
+        }
+    } else if profile == ValidationProfile::Publication {
         if metadata.paper_id.is_none() {
             error(
                 &mut diagnostics,
