@@ -1,4 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
+import { relative, sep } from "node:path";
 
 import { ExitCode, PaperbotError } from "./errors.ts";
 
@@ -10,6 +11,7 @@ interface GitResult {
 
 export interface GitRepository {
   root_path: string;
+  scan_path: string;
   revision: string;
   is_dirty: boolean;
   source_url?: string;
@@ -44,6 +46,8 @@ export async function inspectGitRepository(
     );
   }
   const root_path = await realpath(rootResult.stdout.trim());
+  const scope = relative(root_path, requestedPath).split(sep).join("/");
+  const pathspec = scope.length === 0 ? "." : scope;
 
   const [revisionResult, statusResult, remoteResult, filesResult] =
     await Promise.all([
@@ -53,6 +57,8 @@ export async function inspectGitRepository(
         "--porcelain=v1",
         "-z",
         "--untracked-files=normal",
+        "--",
+        pathspec,
       ]),
       runGit(root_path, ["config", "--get", "remote.origin.url"]),
       runGit(root_path, [
@@ -61,6 +67,8 @@ export async function inspectGitRepository(
         "--others",
         "--exclude-standard",
         "-z",
+        "--",
+        pathspec,
       ]),
     ]);
 
@@ -84,6 +92,7 @@ export async function inspectGitRepository(
 
   return {
     root_path,
+    scan_path: requestedPath,
     revision: revisionResult.stdout.trim(),
     is_dirty: statusResult.stdout.length > 0,
     ...(source_url === undefined ? {} : { source_url }),
