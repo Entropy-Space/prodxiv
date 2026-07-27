@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.13",
+  "devDependencies": {
+    "prettier": "3.9.6"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -11,13 +14,20 @@
     "build": "bun run build:web && bun run build:domain",
     "build:domain": "cargo build --workspace --all-targets",
     "build:web": "bun --filter @prodxiv/web build",
-    "check": "bun --filter @prodxiv/web check",
+    "check": "bun run check:web && bun run check:paperbot",
+    "check:paperbot": "bun --filter @prodxiv/paperbot check",
+    "check:web": "bun --filter @prodxiv/web check",
+    "contracts": "bun --filter @prodxiv/contracts generate",
     "dev": "bun --filter @prodxiv/web dev",
-    "format": "cargo fmt --all -- --check",
+    "format": "cargo fmt --all -- --check && bun run format:ts",
+    "format:ts": "prettier --check \"apps/paperbot/**/*.{ts,json,md}\" \"packages/contracts/**/*.{ts,json}\" package.json",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "paperbot": "bun run apps/paperbot/src/cli.ts",
     "preview": "bun --filter @prodxiv/web preview",
     "schema": "cargo run -p prodxiv-domain --bin generate-schemas -- schemas",
-    "test": "cargo test --workspace",
+    "test": "bun run test:domain && bun run test:paperbot",
+    "test:domain": "cargo test --workspace",
+    "test:paperbot": "bun --filter @prodxiv/paperbot test",
     "typecheck": "bun run check"
   }
 }

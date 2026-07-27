@@ -1,0 +1,20 @@
+{
+  "name": "@prodxiv/paperbot",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "bin": {
+    "paperbot": "./src/cli.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test tests/scanner.test.ts"
+  },
+  "dependencies": {
+    "@prodxiv/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.13",
+    "typescript": "^6.0.0"
+  }
+}
