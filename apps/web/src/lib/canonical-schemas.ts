@@ -1,9 +1,15 @@
+import type { EvidenceBundle } from "@prodxiv/contracts/evidence";
 import type { PaperMetadata } from "@prodxiv/contracts/paper";
 import { validation_policy } from "@prodxiv/contracts/validation-policy";
-import Ajv2020, { type AnySchema, type ErrorObject } from "ajv/dist/2020.js";
+import Ajv2020, {
+  type AnySchema,
+  type ErrorObject,
+  type ValidateFunction,
+} from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { z } from "astro/zod";
 
+import evidenceSchema from "../../../../schemas/evidence.schema.json";
 import paperSchema from "../../../../schemas/paper.schema.json";
 
 const ajv = new Ajv2020({
@@ -26,6 +32,9 @@ const metadataSchema = {
 const validateMetadata = ajv.compile<PaperMetadata>(
   metadataSchema as AnySchema,
 );
+const validateEvidence = ajv.compile<EvidenceBundle>(
+  evidenceSchema as AnySchema,
+);
 
 type PublicationField =
   (typeof validation_policy.paper.publication_required_metadata)[number];
@@ -33,23 +42,10 @@ type PublishedPaperMetadata = PaperMetadata & {
   [Field in PublicationField]-?: NonNullable<PaperMetadata[Field]>;
 };
 
-export const paperMetadataSchema = z
-  .unknown()
+export const paperMetadataSchema = canonicalSchema(validateMetadata)
   .superRefine((value, context) => {
-    if (!validateMetadata(value)) {
-      for (const error of validateMetadata.errors ?? []) {
-        context.addIssue({
-          code: "custom",
-          message: error.message ?? "does not match the canonical paper schema",
-          path: errorPath(error),
-        });
-      }
-      return;
-    }
-
-    const metadata = value as PaperMetadata;
     for (const field of validation_policy.paper.publication_required_metadata) {
-      if (metadata[field] === undefined || metadata[field] === null) {
+      if (value[field] === undefined || value[field] === null) {
         context.addIssue({
           code: "custom",
           message: "is required for a published paper",
@@ -59,6 +55,26 @@ export const paperMetadataSchema = z
     }
   })
   .transform((value) => value as PublishedPaperMetadata);
+
+export const evidenceBundleSchema = canonicalSchema(validateEvidence);
+
+function canonicalSchema<Value>(validate: ValidateFunction<Value>) {
+  return z
+    .unknown()
+    .superRefine((value, context) => {
+      if (validate(value)) {
+        return;
+      }
+      for (const error of validate.errors ?? []) {
+        context.addIssue({
+          code: "custom",
+          message: error.message ?? "does not match the canonical JSON Schema",
+          path: errorPath(error),
+        });
+      }
+    })
+    .transform((value) => value as Value);
+}
 
 function errorPath(error: ErrorObject): Array<string | number> {
   const path = error.instancePath
