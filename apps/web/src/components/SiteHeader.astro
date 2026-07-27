@@ -1,0 +1,26 @@
+---
+const navigation = [
+  { href: "/#recent", label: "Recent" },
+  { href: "/#topics", label: "Topics" },
+  { href: "/#about", label: "About" },
+];
+---
+
+<header class="site-header">
+  <div class="accent-rule" aria-hidden="true"></div>
+  <div class="site-header__inner shell">
+    <a class="wordmark" href="/" aria-label="prodxiv home">
+      <span>prod</span><strong>xiv</strong>
+    </a>
+
+    <nav aria-label="Primary navigation">
+      <ul class="site-nav">
+        {navigation.map((item) => (
+          <li><a href={item.href}>{item.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+
+    <a class="header-action" href="/#submit">Submit a paper</a>
+  </div>
+</header>
