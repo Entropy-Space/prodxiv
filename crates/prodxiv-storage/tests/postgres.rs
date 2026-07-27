@@ -24,6 +24,17 @@ fn submission() -> (String, PaperDocument) {
     (source, paper)
 }
 
+#[sqlx::test]
+async fn serializes_concurrent_migration_runners(pool: PgPool) {
+    let first = PostgresStorage::new(pool.clone());
+    let second = PostgresStorage::new(pool);
+
+    let (first_result, second_result) = tokio::join!(first.migrate(), second.migrate());
+
+    first_result.expect("first concurrent migrator should succeed");
+    second_result.expect("second concurrent migrator should succeed");
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());

@@ -14,6 +14,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = ApiConfig::from_env()?;
+    let migration_storage = PostgresStorage::connect(&config.migration_database_url, 1).await?;
+    migration_storage.migrate().await?;
+    migration_storage.pool().close().await;
+    tracing::info!("prodxiv database migrations are current");
+
     let storage = PostgresStorage::connect(&config.database_url, 10).await?;
     let state = AppState::new(
         Arc::new(storage),
