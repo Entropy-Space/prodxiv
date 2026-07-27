@@ -1,15 +1,13 @@
-import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import type {
-  EvidenceBundle,
-  EvidenceSource,
-  EvidenceSourceType,
-} from "@prodxiv/contracts/evidence";
-
 import { ExitCode, PaperbotError } from "./errors.ts";
 import { inspectGitRepository } from "./git.ts";
+import type {
+  ScanFileType,
+  ScanManifest,
+  ScannedFile,
+} from "./scan-manifest.ts";
 
 const MAX_SOURCE_BYTES = 1024 * 1024;
 
@@ -165,7 +163,7 @@ export type SkipReason =
   "excluded" | "generated" | "binary" | "oversized" | "symlink" | "unsupported";
 
 export interface ScanResult {
-  bundle: EvidenceBundle;
+  manifest: ScanManifest;
   repository_path: string;
   discovered_file_count: number;
   skipped_file_counts: Record<SkipReason, number>;
@@ -186,8 +184,7 @@ export async function scanRepository(
     (pattern) => new Bun.Glob(pattern),
   );
   const skipped_file_counts = emptySkipCounts();
-  const sources: EvidenceSource[] = [];
-  const sourceIds = new Set<string>();
+  const files: ScannedFile[] = [];
 
   for (const path of repository.files) {
     const normalizedPath = path.toLowerCase();
@@ -203,8 +200,8 @@ export async function scanRepository(
       continue;
     }
 
-    const source_type = classifySource(path);
-    if (source_type === undefined) {
+    const file_type = classifyFile(path);
+    if (file_type === undefined) {
       skipped_file_counts.unsupported += 1;
       continue;
     }
@@ -256,15 +253,13 @@ export async function scanRepository(
       continue;
     }
 
-    sources.push({
-      source_id: createSourceId(path, sourceIds),
+    files.push({
       path,
-      source_type,
-      content_sha256: createHash("sha256").update(content).digest("hex"),
+      file_type,
     });
   }
 
-  const bundle: EvidenceBundle = {
+  const manifest: ScanManifest = {
     schema_version: "1",
     repository: {
       revision: repository.revision,
@@ -273,19 +268,18 @@ export async function scanRepository(
         ? {}
         : { source_url: repository.source_url }),
     },
-    sources,
-    claims: [],
+    files,
   };
 
   return {
-    bundle,
+    manifest,
     repository_path: repository.scan_path,
     discovered_file_count: repository.files.length,
     skipped_file_counts,
   };
 }
 
-function classifySource(path: string): EvidenceSourceType | undefined {
+function classifyFile(path: string): ScanFileType | undefined {
   const lowerPath = path.toLowerCase();
   const filename = basename(lowerPath);
   const extensionIndex = filename.lastIndexOf(".");
@@ -336,28 +330,6 @@ function classifySource(path: string): EvidenceSourceType | undefined {
     return "source_code";
   }
   return undefined;
-}
-
-function createSourceId(path: string, existing: Set<string>): string {
-  const normalized = path
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .replace(/_+/g, "_");
-  const base =
-    normalized.length === 0
-      ? "source"
-      : /^\d/.test(normalized)
-        ? `source_${normalized}`
-        : normalized;
-  let candidate = base;
-  let suffix = 2;
-  while (existing.has(candidate)) {
-    candidate = `${base}_${suffix}`;
-    suffix += 1;
-  }
-  existing.add(candidate);
-  return candidate;
 }
 
 function emptySkipCounts(): Record<SkipReason, number> {

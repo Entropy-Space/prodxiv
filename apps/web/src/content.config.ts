@@ -1,10 +1,7 @@
 import { defineCollection } from "astro:content";
 import { glob } from "astro/loaders";
 
-import {
-  evidenceBundleSchema,
-  paperMetadataSchema,
-} from "./lib/canonical-schemas";
+import { paperMetadataSchema } from "./lib/paper-metadata-schema";
 
 const papers = defineCollection({
   loader: glob({
@@ -14,12 +11,4 @@ const papers = defineCollection({
   schema: paperMetadataSchema,
 });
 
-const evidence = defineCollection({
-  loader: glob({
-    base: "../../examples/papers",
-    pattern: "**/*.json",
-  }),
-  schema: evidenceBundleSchema,
-});
-
-export const collections = { evidence, papers };
+export const collections = { papers };

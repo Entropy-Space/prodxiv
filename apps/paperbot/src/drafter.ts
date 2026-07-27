@@ -1,24 +1,23 @@
 import { lstat, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 
-import type { EvidenceBundle } from "@prodxiv/contracts/evidence";
 import { validation_policy } from "@prodxiv/contracts/validation-policy";
 import type { ValidationReport } from "@prodxiv/contracts/validation";
 
 import { ExitCode, PaperbotError } from "./errors.ts";
-import { validateEvidenceValue } from "./validation/evidence.ts";
-import { isSafeRelativePath, sortDiagnostics } from "./validation/shared.ts";
+import { type ScanManifest, validateScanManifest } from "./scan-manifest.ts";
+import { sortDiagnostics } from "./validation/shared.ts";
 
-const MAX_EVIDENCE_BUNDLE_BYTES = 5 * 1024 * 1024;
+const MAX_SCAN_MANIFEST_BYTES = 5 * 1024 * 1024;
 
 const SECTION_PROMPTS = [
   [
     "Summary",
-    "Summarize what the product is and who it serves. Keep unsupported claims explicit.",
+    "Summarize what the product is and who it serves. Leave uncertain details for author review.",
   ],
   [
     "Background",
-    "Describe the context supported by documentation, then ask the author about missing history.",
+    "Describe documented context, then ask the author about missing history.",
   ],
   [
     "Motivation",
@@ -30,24 +29,21 @@ const SECTION_PROMPTS = [
   ],
   [
     "Core Features",
-    "Describe implementation-backed features and link each substantive claim to evidence.",
+    "Describe observed product behavior and ask the author to confirm intended positioning.",
   ],
   [
     "Architecture",
-    "Explain the observed architecture, dependencies, and boundaries. Mark interpretations as inferred.",
+    "Explain observed architecture, dependencies, and boundaries without inventing design intent.",
   ],
   [
     "Benchmarks",
-    "Do not invent results. Record reproducible methodology or state that no benchmark evidence was found.",
+    "Do not invent results. Record reproducible methodology or state that no benchmark results were found.",
   ],
   [
     "Insights and Lessons",
     "Author input required: capture tradeoffs, surprises, failed approaches, and lessons.",
   ],
-  [
-    "Limitations",
-    "State known limitations, missing evidence, and unresolved questions directly.",
-  ],
+  ["Limitations", "State known limitations and unresolved questions directly."],
   [
     "References",
     "List repositories, documentation, related products, and other inspectable sources.",
@@ -65,45 +61,45 @@ export interface DraftOptions {
 }
 
 export async function preparePaperDraft(
-  evidencePath: string,
+  scanPath: string,
   options: DraftOptions = {},
 ): Promise<DraftPreparation> {
-  const absoluteEvidencePath = resolve(evidencePath);
-  let serializedEvidence: string;
+  const absoluteScanPath = resolve(scanPath);
+  let serializedScan: string;
   try {
-    const metadata = await lstat(absoluteEvidencePath);
+    const metadata = await lstat(absoluteScanPath);
     if (
       !metadata.isFile() ||
       metadata.isSymbolicLink() ||
-      metadata.size > MAX_EVIDENCE_BUNDLE_BYTES
+      metadata.size > MAX_SCAN_MANIFEST_BYTES
     ) {
-      throw new Error("unsupported evidence file");
+      throw new Error("unsupported scan manifest");
     }
-    serializedEvidence = await readFile(absoluteEvidencePath, "utf8");
+    serializedScan = await readFile(absoluteScanPath, "utf8");
   } catch {
     throw new PaperbotError(
-      `could not read evidence bundle: ${evidencePath}`,
+      `could not read scan manifest: ${scanPath}`,
       ExitCode.io,
     );
   }
 
-  let evidence: unknown;
+  let scan: unknown;
   try {
-    evidence = JSON.parse(serializedEvidence) as unknown;
+    scan = JSON.parse(serializedScan) as unknown;
   } catch {
     return invalidReport(
-      "evidence.json_invalid",
-      "evidence",
-      "evidence bundle is not valid JSON",
+      "scan_manifest.json_invalid",
+      "scan_manifest",
+      "scan manifest is not valid JSON",
     );
   }
 
-  const diagnostics = validateEvidenceValue(evidence);
+  const { diagnostics, manifest } = validateScanManifest(scan);
   sortDiagnostics(diagnostics);
   const valid = diagnostics.every(
     (diagnostic) => diagnostic.severity !== "error",
   );
-  if (!valid) {
+  if (!valid || manifest === undefined) {
     return {
       report: {
         schema_version: validation_policy.schema_version,
@@ -113,28 +109,13 @@ export async function preparePaperDraft(
     };
   }
 
-  const outputDirectory =
-    options.output_path === undefined
-      ? process.cwd()
-      : dirname(resolve(options.output_path));
-  const evidenceReference = relative(outputDirectory, absoluteEvidencePath)
-    .split(sep)
-    .join("/");
-  if (!isSafeRelativePath(evidenceReference)) {
-    throw new PaperbotError(
-      "draft output must be in the evidence bundle directory or one of its parents",
-      ExitCode.usage,
-    );
-  }
-
-  const bundle = evidence as EvidenceBundle;
   return {
     report: {
       schema_version: validation_policy.schema_version,
       valid,
       diagnostics,
     },
-    markdown: renderDraft(bundle, evidenceReference, options.title),
+    markdown: renderDraft(manifest, options.title),
   };
 }
 
@@ -161,11 +142,7 @@ function isFileExistsError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "EEXIST";
 }
 
-function renderDraft(
-  evidence: EvidenceBundle,
-  evidenceReference: string,
-  title?: string,
-): string {
+function renderDraft(scan: ScanManifest, title?: string): string {
   const frontMatter = [
     'schema_version: "1"',
     `title: ${JSON.stringify(title ?? "")}`,
@@ -173,14 +150,13 @@ function renderDraft(
     "authors: []",
     'status: "concept"',
     "topics: []",
-    `evidence_bundle: ${JSON.stringify(evidenceReference)}`,
   ].join("\n");
   const sections = SECTION_PROMPTS.map(
     ([section, prompt]) => `# ${section}\n\n<!-- ${prompt} -->`,
   ).join("\n\n");
-  const evidenceSummary = `<!-- Draft scaffold: ${evidence.sources.length} indexed sources, ${evidence.claims.length} existing claims. The drafting agent must preserve provenance states and ask the author about intention. -->`;
+  const scanSummary = `<!-- Draft scaffold from ${scan.files.length} selected repository files at revision ${scan.repository.revision}. Ask the author about intention, tradeoffs, history, and lessons. -->`;
 
-  return `---\n${frontMatter}\n---\n\n${evidenceSummary}\n\n${sections}\n`;
+  return `---\n${frontMatter}\n---\n\n${scanSummary}\n\n${sections}\n`;
 }
 
 function invalidReport(

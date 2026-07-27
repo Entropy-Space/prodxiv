@@ -4,12 +4,7 @@ import type { Diagnostic } from "@prodxiv/contracts/validation";
 import { marked, type Token, type Tokens } from "marked";
 
 import type { ValidationProfile } from "../arguments.ts";
-import {
-  diagnostic,
-  isHttpUrl,
-  isRecord,
-  isSafeRelativePath,
-} from "./shared.ts";
+import { diagnostic, isHttpUrl, isRecord } from "./shared.ts";
 
 export function parsePaper(
   source: string,
@@ -194,18 +189,6 @@ function validatePublicationValues(
         "publication.invalid_license",
         "metadata.license",
         "license must not be empty",
-      ),
-    );
-  }
-  if (
-    typeof metadata.evidence_bundle === "string" &&
-    !isSafeRelativePath(metadata.evidence_bundle)
-  ) {
-    diagnostics.push(
-      diagnostic(
-        "value.invalid_relative_path",
-        "metadata.evidence_bundle",
-        "evidence bundle must be a repository-relative path",
       ),
     );
   }

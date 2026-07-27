@@ -14,22 +14,22 @@ test("parses deterministic draft arguments", () => {
   expect(
     parseArguments([
       "draft",
-      "evidence.json",
+      "scan.json",
       "--title",
       "Fixture",
       "--output=paper.md",
     ]),
   ).toEqual({
     command: "draft",
-    evidence_path: "evidence.json",
+    scan_path: "scan.json",
     title: "Fixture",
     output_path: "paper.md",
   });
 });
 
-test("creates a complete scaffold without copying evidence claims", async () => {
+test("creates a complete scaffold from a scan manifest", async () => {
   const result = await preparePaperDraft(
-    resolve(fixtureRoot, "valid-evidence.json"),
+    resolve(fixtureRoot, "valid-scan.json"),
     { title: "Fixture product" },
   );
 
@@ -39,21 +39,20 @@ test("creates a complete scaffold without copying evidence claims", async () => 
   expect(result.markdown).toContain("# Architecture");
   expect(result.markdown).toContain("# Limitations");
   expect(result.markdown).toContain("# References");
-  expect(result.markdown).toContain("1 indexed sources, 1 existing claims");
-  expect(result.markdown).not.toContain(
-    "The fixture contains every required section.",
+  expect(result.markdown).toContain(
+    "Draft scaffold from 1 selected repository files",
   );
 });
 
-test("refuses invalid evidence before drafting", async () => {
+test("refuses an invalid scan manifest before drafting", async () => {
   const result = await preparePaperDraft(
-    resolve(fixtureRoot, "invalid-evidence.json"),
+    resolve(fixtureRoot, "invalid-scan.json"),
   );
 
   expect(result.report.valid).toBe(false);
   expect(result.markdown).toBeUndefined();
   expect(result.report.diagnostics.map((item) => item.code)).toContain(
-    "evidence.unknown_source",
+    "scan_manifest.invalid_file",
   );
 });
 
@@ -61,12 +60,12 @@ test("writes once, preserves existing work, and remains visibly incomplete", asy
   const temporaryDirectory = await mkdtemp(
     resolve(tmpdir(), "paperbot-draft-"),
   );
-  const evidencePath = resolve(temporaryDirectory, "evidence.json");
+  const scanPath = resolve(temporaryDirectory, "scan.json");
   const paperPath = resolve(temporaryDirectory, "paper.md");
-  await copyFile(resolve(fixtureRoot, "valid-evidence.json"), evidencePath);
+  await copyFile(resolve(fixtureRoot, "valid-scan.json"), scanPath);
 
   try {
-    const result = await preparePaperDraft(evidencePath, {
+    const result = await preparePaperDraft(scanPath, {
       output_path: paperPath,
       title: "Fixture product",
     });
@@ -75,7 +74,7 @@ test("writes once, preserves existing work, and remains visibly incomplete", asy
     await writePaperDraft(paperPath, result.markdown ?? "");
 
     const firstDraft = await readFile(paperPath, "utf8");
-    expect(firstDraft).toContain('evidence_bundle: "evidence.json"');
+    expect(firstDraft).not.toContain("scan.json");
     await expect(writePaperDraft(paperPath, "replacement")).rejects.toEqual(
       expect.objectContaining({
         exit_code: 4,
