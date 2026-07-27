@@ -29,6 +29,9 @@
       "name": "@prodxiv/web",
       "version": "0.0.1",
       "dependencies": {
+        "@prodxiv/contracts": "workspace:*",
+        "ajv": "8.20.0",
+        "ajv-formats": "3.0.1",
         "astro": "^7.1.3",
       },
       "devDependencies": {
