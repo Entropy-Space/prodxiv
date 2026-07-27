@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { compileFromFile } from "json-schema-to-typescript";
@@ -11,6 +11,7 @@ const outputDirectory = join(packageRoot, "src/generated");
 const contracts = [
   ["evidence.schema.json", "evidence.ts"],
   ["paper.schema.json", "paper.ts"],
+  ["validation.schema.json", "validation.ts"],
 ] as const;
 
 await mkdir(outputDirectory, { recursive: true });
@@ -36,3 +37,27 @@ for (const [schemaFilename, outputFilename] of contracts) {
 
   await writeFile(join(outputDirectory, outputFilename), generated);
 }
+
+const validationPolicy = JSON.parse(
+  await readFile(
+    join(repositoryRoot, "schemas", "validation-policy.json"),
+    "utf8",
+  ),
+) as unknown;
+const generatedPolicy = await format(
+  `/* Generated from the canonical Rust validation policy. Do not edit manually. */
+
+export const validation_policy = ${JSON.stringify(validationPolicy)} as const;
+export type ValidationPolicy = typeof validation_policy;
+`,
+  {
+    parser: "typescript",
+    printWidth: 80,
+    semi: true,
+    singleQuote: false,
+    tabWidth: 2,
+    trailingComma: "all",
+    useTabs: false,
+  },
+);
+await writeFile(join(outputDirectory, "validation-policy.ts"), generatedPolicy);

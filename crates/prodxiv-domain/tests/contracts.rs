@@ -2,7 +2,8 @@ use std::{fs, path::Path};
 
 use prodxiv_domain::{
     EvidenceBundle, PaperDocument, PaperMetadata, PaperParseError, ProductStatus,
-    ValidationProfile, validate_evidence_bundle, validate_paper,
+    ValidationProfile, ValidationReport, validate_evidence_bundle, validate_paper,
+    validation_policy,
 };
 use schemars::schema_for;
 
@@ -73,12 +74,14 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
     paper.metadata.published_at = Some("2026-02-30".to_owned());
     paper.metadata.version = Some(0);
     paper.metadata.license = Some(String::new());
+    paper.metadata.evidence_bundle = Some("../evidence.json".to_owned());
     let report = validate_paper(&paper, ValidationProfile::Draft);
     let codes = diagnostic_codes(&report);
     assert!(codes.contains(&"value.invalid_paper_id"));
     assert!(codes.contains(&"publication.invalid_date"));
     assert!(codes.contains(&"publication.invalid_version"));
     assert!(codes.contains(&"publication.invalid_license"));
+    assert!(codes.contains(&"value.invalid_relative_path"));
 }
 
 #[test]
@@ -104,7 +107,7 @@ fn malformed_front_matter_is_rejected() {
         Err(PaperParseError::Missing)
     );
     assert!(matches!(
-        PaperDocument::from_markdown("---\ntitle: [\n---\n\n# Summary"),
+        PaperDocument::from_markdown(include_str!("fixtures/malformed-frontmatter.md")),
         Err(PaperParseError::InvalidYaml(_))
     ));
 }
@@ -138,6 +141,7 @@ fn checked_in_schemas_match_the_rust_contracts() {
     let schemas = [
         ("paper.schema.json", schema_for!(PaperDocument)),
         ("evidence.schema.json", schema_for!(EvidenceBundle)),
+        ("validation.schema.json", schema_for!(ValidationReport)),
     ];
 
     for (filename, schema) in schemas {
@@ -150,4 +154,15 @@ fn checked_in_schemas_match_the_rust_contracts() {
             "{filename} is stale; regenerate schemas"
         );
     }
+
+    let mut generated_policy =
+        serde_json::to_string_pretty(&validation_policy()).expect("policy should serialize");
+    generated_policy.push('\n');
+    let checked_in_policy =
+        fs::read_to_string(repository_root().join("schemas/validation-policy.json"))
+            .expect("checked-in policy should be readable");
+    assert_eq!(
+        checked_in_policy, generated_policy,
+        "validation-policy.json is stale; regenerate schemas"
+    );
 }

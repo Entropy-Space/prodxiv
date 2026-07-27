@@ -279,7 +279,7 @@ export async function scanRepository(
 
   return {
     bundle,
-    repository_path: repository.root_path,
+    repository_path: repository.scan_path,
     discovered_file_count: repository.files.length,
     skipped_file_counts,
   };

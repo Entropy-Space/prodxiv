@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -143,6 +151,33 @@ describe("scanRepository", () => {
         (source) => source.path === "ignored/ignored.ts",
       ),
     ).toBe(false);
+  });
+
+  test("limits a nested scan to the requested directory", async () => {
+    await writeFile(
+      join(repositoryPath, "README.md"),
+      "# Changed outside the requested scope\n",
+    );
+
+    const cleanScope = await scanRepository(join(repositoryPath, "src"));
+
+    expect(cleanScope.repository_path).toBe(
+      await realpath(join(repositoryPath, "src")),
+    );
+    expect(cleanScope.bundle.repository.is_dirty).toBe(false);
+    expect(cleanScope.bundle.sources.map((source) => source.path)).toEqual([
+      "src/index.ts",
+      "src/secret-scanner.ts",
+    ]);
+
+    await writeFile(
+      join(repositoryPath, "src", "index.ts"),
+      "export const changedInsideScope = true;\n",
+    );
+
+    const dirtyScope = await scanRepository(join(repositoryPath, "src"));
+
+    expect(dirtyScope.bundle.repository.is_dirty).toBe(true);
   });
 });
 
