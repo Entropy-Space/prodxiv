@@ -71,7 +71,7 @@
             "string",
             "null"
           ],
-          "pattern": "^prodxiv:[0-9]{4}\\.[0-9]{4}$"
+          "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
         },
         "product_url": {
           "type": [
@@ -150,7 +150,7 @@
         },
         "paper_id": {
           "type": "string",
-          "pattern": "^prodxiv:[0-9]{4}\\.[0-9]{4}$"
+          "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
         }
       },
       "additionalProperties": false,

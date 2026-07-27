@@ -22,12 +22,15 @@
     "format": "cargo fmt --all -- --check && bun run format:ts",
     "format:ts": "prettier --check \"apps/paperbot/**/*.{ts,json,md}\" \"apps/web/**/*.ts\" \"packages/contracts/**/*.{ts,json}\" package.json",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "openapi": "cargo run -p prodxiv-api --bin generate-openapi -- openapi/prodxiv-api.json",
     "paperbot": "bun run apps/paperbot/src/cli.ts",
     "preview": "bun --filter @prodxiv/web preview",
     "schema": "cargo run -p prodxiv-domain --bin generate-schemas -- schemas",
-    "test": "bun run test:domain && bun run test:paperbot",
-    "test:domain": "cargo test --workspace",
+    "test": "bun run test:rust && bun run test:paperbot",
+    "test:domain": "cargo test -p prodxiv-domain",
     "test:paperbot": "bun --filter @prodxiv/paperbot test",
+    "test:rust": "cargo test --workspace",
+    "test:storage": "cargo test -p prodxiv-storage",
     "typecheck": "bun run check"
   }
 }

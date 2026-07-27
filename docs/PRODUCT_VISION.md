@@ -80,7 +80,7 @@ version instead of silently changing its historical record.
 An identifier may look like:
 
 ```text
-prodxiv:2607.0042
+prodxiv:2607.00001A
 v1 — Initial concept
 v2 — Public launch
 v3 — Architecture and benchmark update

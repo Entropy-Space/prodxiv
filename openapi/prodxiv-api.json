@@ -1,0 +1,453 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "prodxiv publishing API",
+    "description": "Authoritative immutable publication and retrieval API.",
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "API process is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/papers": {
+      "post": {
+        "tags": [],
+        "operationId": "publish_paper",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishPaperRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Paper was published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPaper"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Paper is malformed or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Publishing failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Monthly identifier space is exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/v1/papers/{paper_id}/versions/{version}": {
+      "get": {
+        "tags": [],
+        "operationId": "get_paper_version",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "description": "Canonical prodxiv paper identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact immutable paper version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPaper"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Paper identifier or version is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Paper version does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Author": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "affiliation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "Diagnostic": {
+        "type": "object",
+        "required": [
+          "severity",
+          "code",
+          "path",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiagnosticSeverity": {
+        "type": "string",
+        "enum": [
+          "error",
+          "warning"
+        ]
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "PaperMetadata": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "title",
+          "summary",
+          "authors",
+          "status",
+          "topics"
+        ],
+        "properties": {
+          "authors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Author"
+            }
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paper_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
+          },
+          "product_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relationships": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductRelationship"
+            }
+          },
+          "repository_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProductStatus"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProductRelationship": {
+        "type": "object",
+        "required": [
+          "kind",
+          "paper_id"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RelationshipKind"
+          },
+          "paper_id": {
+            "type": "string",
+            "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProductStatus": {
+        "type": "string",
+        "enum": [
+          "concept",
+          "private_beta",
+          "public_beta",
+          "launched",
+          "discontinued"
+        ]
+      },
+      "PublishPaperRequest": {
+        "type": "object",
+        "required": [
+          "source_markdown"
+        ],
+        "properties": {
+          "source_markdown": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublishedPaper": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "paper_id",
+          "version",
+          "published_at",
+          "metadata",
+          "source_markdown"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/PaperMetadata"
+          },
+          "paper_id": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "source_markdown": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelationshipKind": {
+        "type": "string",
+        "enum": [
+          "inspired_by",
+          "built_on",
+          "alternative_to",
+          "supersedes"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearer_token": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

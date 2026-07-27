@@ -1,8 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 pub const SUPPORTED_SCHEMA_VERSION: &str = "1";
+pub const PAPER_ID_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+pub const PAPER_ID_SUFFIX_LENGTH: usize = 6;
 
 pub const REQUIRED_SECTIONS: [&str; 8] = [
     "Summary",
@@ -15,7 +18,7 @@ pub const REQUIRED_SECTIONS: [&str; 8] = [
     "Limitations",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PaperDocument {
     pub metadata: PaperMetadata,
@@ -53,13 +56,14 @@ impl PaperDocument {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PaperMetadata {
     #[schemars(regex(pattern = r"^1$"))]
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9]{4}$"))]
+    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
+    #[schema(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$")]
     pub paper_id: Option<String>,
     #[schemars(length(min = 1))]
     pub title: String,
@@ -91,7 +95,7 @@ pub struct PaperMetadata {
     pub relationships: Vec<ProductRelationship>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Author {
     #[schemars(length(min = 1))]
@@ -103,7 +107,7 @@ pub struct Author {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProductStatus {
     Concept,
@@ -113,15 +117,16 @@ pub enum ProductStatus {
     Discontinued,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProductRelationship {
     pub kind: RelationshipKind,
-    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9]{4}$"))]
+    #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
+    #[schema(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$")]
     pub paper_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationshipKind {
     InspiredBy,
@@ -138,4 +143,38 @@ pub enum PaperParseError {
     Unterminated,
     #[error("paper front matter is invalid: {0}")]
     InvalidYaml(String),
+}
+
+#[must_use]
+pub fn canonicalize_paper_id(value: &str) -> Option<String> {
+    let (date, suffix) = value.strip_prefix("prodxiv:")?.split_once('.')?;
+    let suffix = suffix.to_ascii_uppercase();
+    if date.len() != 4
+        || !date.bytes().all(|byte| byte.is_ascii_digit())
+        || suffix.len() != PAPER_ID_SUFFIX_LENGTH
+        || !suffix
+            .bytes()
+            .all(|byte| PAPER_ID_ALPHABET.as_bytes().contains(&byte))
+    {
+        return None;
+    }
+
+    Some(format!("prodxiv:{date}.{suffix}"))
+}
+
+#[must_use]
+pub fn encode_paper_id_suffix(mut value: u32) -> Option<String> {
+    let alphabet = PAPER_ID_ALPHABET.as_bytes();
+    let radix = u32::try_from(alphabet.len()).expect("paper ID alphabet length fits in u32");
+    if value >= radix.pow(PAPER_ID_SUFFIX_LENGTH as u32) {
+        return None;
+    }
+
+    let mut encoded = [alphabet[0]; PAPER_ID_SUFFIX_LENGTH];
+    for character in encoded.iter_mut().rev() {
+        let index = usize::try_from(value % radix).expect("alphabet index fits in usize");
+        *character = alphabet[index];
+        value /= radix;
+    }
+    String::from_utf8(encoded.to_vec()).ok()
 }

@@ -1,19 +1,19 @@
 [package]
-name = "prodxiv-domain"
+name = "prodxiv-storage"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-pulldown-cmark.workspace = true
-schemars.workspace = true
-serde.workspace = true
+prodxiv-domain = { path = "../prodxiv-domain" }
 serde_json.workspace = true
-serde_yaml.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
-utoipa.workspace = true
-url.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

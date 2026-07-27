@@ -18,6 +18,22 @@ jobs:
     name: domain
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: prodxiv
+          POSTGRES_PASSWORD: prodxiv
+          POSTGRES_USER: prodxiv
+        options: >-
+          --health-cmd "pg_isready -U prodxiv -d prodxiv"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://prodxiv:prodxiv@127.0.0.1:5432/prodxiv
 
     steps:
       - name: Check out repository
@@ -36,6 +52,11 @@ jobs:
 
       - name: Test domain
         run: cargo test --workspace
+
+      - name: Check generated OpenAPI contract
+        run: |
+          cargo run -p prodxiv-api --bin generate-openapi -- openapi/prodxiv-api.json
+          git diff --exit-code -- openapi/prodxiv-api.json
 
   paperbot:
     name: paperbot
