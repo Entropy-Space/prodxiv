@@ -1,0 +1,120 @@
+{
+  "schema_version": "1",
+  "repository": {
+    "revision": "fixture_snapshot_v1",
+    "is_dirty": false,
+    "source_url": "https://github.com/Entropy-Space/prodxiv"
+  },
+  "sources": [
+    {
+      "source_id": "readme_md",
+      "path": "README.md",
+      "source_type": "documentation",
+      "content_sha256": "a8129ad0b73a469b2ccb77e926e2807f9e2336a8e88b244faf8db3a0acec0e76"
+    },
+    {
+      "source_id": "package_json",
+      "path": "package.json",
+      "source_type": "manifest",
+      "content_sha256": "c1237bb134378ed3320a3f5f6e3adb1c4dd11696348870000e025d062ce38417"
+    },
+    {
+      "source_id": "src_index_ts",
+      "path": "src/index.ts",
+      "source_type": "source_code",
+      "content_sha256": "6e9bc8cdbbd515f50513279a939c5e736dcdf97ddf68275e330a11d025ee3fd6"
+    },
+    {
+      "source_id": "src_secret_scanner_ts",
+      "path": "src/secret-scanner.ts",
+      "source_type": "source_code",
+      "content_sha256": "5ca5a37b841b58f7a761d08f93704a47510c46fedc77246b8253a0f815289c72"
+    },
+    {
+      "source_id": "tests_index_test_ts",
+      "path": "tests/index.test.ts",
+      "source_type": "test",
+      "content_sha256": "00b8926c7504cbc69ac31a71058cd5dea4bde964f3f2ccd38ff16612811deda2"
+    },
+    {
+      "source_id": "benches_latency_ts",
+      "path": "benches/latency.ts",
+      "source_type": "benchmark",
+      "content_sha256": "de1d520ecfa087c27cdaa20f830bb2fde8f0122d1249d77ad6f7a51969106465"
+    },
+    {
+      "source_id": "config_app_toml",
+      "path": "config/app.toml",
+      "source_type": "configuration",
+      "content_sha256": "a3babda9f13d31a45fec2063b755c9bd04e125ebb0f8f55c6d3429823a042ddc"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "fixture_purpose",
+      "statement": "The repository exists to exercise Paperbot's deterministic scanner.",
+      "provenance_state": "verified",
+      "locations": [
+        {
+          "source_id": "readme_md",
+          "line_start": 1,
+          "line_end": 3
+        }
+      ]
+    },
+    {
+      "claim_id": "greeting_behavior",
+      "statement": "The fixture exports a greeting function that interpolates a supplied name.",
+      "provenance_state": "verified",
+      "locations": [
+        {
+          "source_id": "src_index_ts",
+          "line_start": 1,
+          "line_end": 3
+        },
+        {
+          "source_id": "tests_index_test_ts",
+          "line_start": 3,
+          "line_end": 7
+        }
+      ]
+    },
+    {
+      "claim_id": "fixture_mode",
+      "statement": "The app configuration appears to select a dedicated fixture mode.",
+      "provenance_state": "inferred",
+      "locations": [
+        {
+          "source_id": "config_app_toml",
+          "line_start": 1,
+          "line_end": 1
+        }
+      ],
+      "notes": "The configuration value is visible, but its runtime meaning is not implemented in the fixture."
+    },
+    {
+      "claim_id": "benchmark_setup_only",
+      "statement": "The benchmark fixture declares 100 iterations but records no measurements or results.",
+      "provenance_state": "verified",
+      "locations": [
+        {
+          "source_id": "benches_latency_ts",
+          "line_start": 1,
+          "line_end": 3
+        }
+      ]
+    },
+    {
+      "claim_id": "small_by_design",
+      "statement": "The fixture is intentionally small so failures in the drafting pipeline remain easy to inspect.",
+      "provenance_state": "author_provided",
+      "notes": "Provided by the prodxiv maintainers for this reference paper."
+    },
+    {
+      "claim_id": "performance_unknown",
+      "statement": "The fixture has meaningful latency or throughput characteristics.",
+      "provenance_state": "missing_evidence",
+      "notes": "No executable benchmark harness, environment, raw measurements, or results are present."
+    }
+  ]
+}
