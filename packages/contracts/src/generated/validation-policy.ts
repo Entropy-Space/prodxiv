@@ -20,6 +20,5 @@ export const validation_policy = {
       "license",
     ],
   },
-  evidence: { verified_claims_require_locations: true },
 } as const;
 export type ValidationPolicy = typeof validation_policy;

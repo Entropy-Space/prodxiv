@@ -53,12 +53,6 @@
           },
           "minItems": 1
         },
-        "evidence_bundle": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "license": {
           "type": [
             "string",

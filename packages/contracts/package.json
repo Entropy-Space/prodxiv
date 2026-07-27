@@ -4,7 +4,6 @@
   "type": "module",
   "version": "0.0.1",
   "exports": {
-    "./evidence": "./src/generated/evidence.ts",
     "./paper": "./src/generated/paper.ts",
     "./validation": "./src/generated/validation.ts",
     "./validation-policy": "./src/generated/validation-policy.ts"
