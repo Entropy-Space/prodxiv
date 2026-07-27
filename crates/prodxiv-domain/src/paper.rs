@@ -63,6 +63,7 @@ pub struct PaperMetadata {
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
+    #[schema(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$")]
     pub paper_id: Option<String>,
     #[schemars(length(min = 1))]
     pub title: String,
@@ -121,6 +122,7 @@ pub enum ProductStatus {
 pub struct ProductRelationship {
     pub kind: RelationshipKind,
     #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
+    #[schema(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$")]
     pub paper_id: String,
 }
 
