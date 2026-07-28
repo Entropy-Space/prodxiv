@@ -32,6 +32,13 @@ export interface PublishArguments {
   yes: boolean;
 }
 
+export interface SkillsArguments {
+  command: "skills";
+  scope?: string;
+  component?: string;
+  format: OutputFormat;
+}
+
 export type AuthArguments =
   | {
       command: "auth";
@@ -54,6 +61,7 @@ export type ParsedArguments =
   | ValidateArguments
   | DraftArguments
   | PublishArguments
+  | SkillsArguments
   | AuthArguments
   | {
       command: "help";
@@ -81,10 +89,60 @@ export function parseArguments(args: string[]): ParsedArguments {
   if (args[0] === "publish") {
     return parsePublishArguments(args.slice(1));
   }
+  if (args[0] === "skills") {
+    return parseSkillsArguments(args.slice(1));
+  }
   if (args[0] === "auth") {
     return parseAuthArguments(args.slice(1));
   }
   throw usageError(`unknown command: ${args[0]}`);
+}
+
+function parseSkillsArguments(
+  args: string[],
+): SkillsArguments | { command: "help" } {
+  const positionals: string[] = [];
+  let format: OutputFormat = "text";
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--format") {
+      const value = args[index + 1];
+      if (value === undefined) {
+        throw usageError("missing value for --format");
+      }
+      format = parseFormat(value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(argument.slice("--format=".length));
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    positionals.push(argument);
+  }
+
+  if (positionals.length > 2) {
+    throw usageError("skills accepts at most one scope and one component");
+  }
+
+  const scope = positionals[0];
+  const component = positionals[1];
+  return {
+    command: "skills",
+    ...(scope === undefined ? {} : { scope }),
+    ...(component === undefined ? {} : { component }),
+    format,
+  };
 }
 
 function parsePublishArguments(

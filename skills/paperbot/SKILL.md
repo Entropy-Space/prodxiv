@@ -24,6 +24,24 @@ selected command rather than typing that label literally.
 Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
+## Select focused guidance
+
+Run `PAPERBOT_CMD skills` to discover artifact scopes and their components.
+Run `PAPERBOT_CMD skills <scope> <component>` before focused work:
+
+- Project: [discovery](references/project-discovery.md),
+  [architecture](references/project-architecture.md), and
+  [intent](references/project-intent.md).
+- Paper: [structure](references/paper-structure.md),
+  [references](references/paper-references.md),
+  [benchmarks](references/paper-benchmarks.md), and
+  [figures](references/paper-figures.md).
+- Publication: [readiness](references/publication-readiness.md) and
+  [submission](references/publication-submission.md).
+
+Use multiple components when a task crosses boundaries. Treat the selected
+component as focused guidance, not as authorization for remote writes.
+
 ## Build a draft
 
 1. Confirm the repository root, paper output path, and any additional
@@ -51,7 +69,7 @@ make remote writes unless the user explicitly requests it.
    where practical. Add a Benchmarks section only when reproducible
    methodology or results exist.
 10. Run `PAPERBOT_CMD validate <paper.md> --profile draft --format json`.
-   Resolve every error and explain any warnings that remain.
+    Resolve every error and explain any warnings that remain.
 
 Treat a nonzero CLI exit as a failed step. Do not continue from invalid or
 partial JSON output.
