@@ -94,6 +94,11 @@ The API deploys from the repository-root `Containerfile.vercel` as a separate
 Vercel project. Keep the Astro website on its native Vercel project; the local
 multi-target `Containerfile` is not the website's production artifact.
 
+The root `vercel.json` skips API deployments when none of the API container
+inputs changed. Its ignored-build script fails open: if Vercel cannot provide
+the previous successful deployment SHA, the API is built rather than
+incorrectly skipped.
+
 Set:
 
 - `DATABASE_URL` to Neon's pooled application URL.
