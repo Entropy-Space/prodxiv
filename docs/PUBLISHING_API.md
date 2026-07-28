@@ -37,7 +37,8 @@ set +a
 bun run test:rust
 ```
 
-Run migrations independently when the API is not started through Compose:
+The API runs embedded migrations before it begins serving requests. To run the
+same migrations independently for maintenance or diagnosis:
 
 ```sh
 cargo run -p prodxiv-api --bin prodxiv-migrate
@@ -80,9 +81,19 @@ Set:
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
 
-Run `prodxiv-migrate` with the direct URL before deploying a schema-dependent
-API release. The API process intentionally does not run migrations during
-startup, so autoscaling and cold starts never perform administrative work.
+At startup, the API runs embedded migrations through the direct connection
+before opening its pooled application connection. SQLx serializes concurrent
+migration runners with a PostgreSQL advisory lock, so only one instance applies
+pending migrations and the others observe the completed schema.
+
+Startup locking prevents concurrent migration execution, but it cannot make a
+breaking schema change compatible with old API instances during a rolling
+deployment. Keep production migrations backward compatible:
+
+1. Expand the schema with additive tables, columns, or indexes.
+2. Deploy code that works with both the old and expanded schema.
+3. Backfill data separately when required.
+4. Remove obsolete schema only in a later release.
 
 The bearer token is intentionally temporary MVP authorization. Replace it with
 real user identity before exposing publication to multiple authors. Never put

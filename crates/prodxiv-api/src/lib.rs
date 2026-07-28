@@ -54,6 +54,7 @@ impl AppState {
 pub struct ApiConfig {
     pub bind_address: SocketAddr,
     pub database_url: String,
+    pub migration_database_url: String,
     pub publish_token: String,
     pub publish_actor: String,
 }
@@ -68,6 +69,7 @@ impl ApiConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let database_url =
             env::var("DATABASE_URL").map_err(|_| ConfigError::Missing("DATABASE_URL"))?;
+        let migration_database_url = migration_database_url_from_env()?;
         let publish_token = env::var("PRODXIV_PUBLISH_TOKEN")
             .map_err(|_| ConfigError::Missing("PRODXIV_PUBLISH_TOKEN"))?;
         if publish_token.len() < 32 {
@@ -86,13 +88,14 @@ impl ApiConfig {
         Ok(Self {
             bind_address,
             database_url,
+            migration_database_url,
             publish_token,
             publish_actor,
         })
     }
 }
 
-/// Loads the direct PostgreSQL URL used by the migration command.
+/// Loads the direct PostgreSQL URL used by startup and standalone migrations.
 ///
 /// `DIRECT_DATABASE_URL` is accepted for local and provider-neutral
 /// configuration. `DATABASE_URL_UNPOOLED` matches the variable injected by the
