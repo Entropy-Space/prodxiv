@@ -34,14 +34,23 @@ make remote writes unless the user explicitly requests it.
    irrelevant, generated, or vendored files appear.
 4. Run `PAPERBOT_CMD draft <scan.json> --output <paper.md>`, adding `--title`
    when the title is known.
-5. Read the most relevant selected files and complete sections conservatively.
-   Do not copy repository secrets or private user data into the paper.
-6. Ask focused questions for motivation, history, rejected alternatives,
-   tradeoffs, lessons, and benchmark context that the repository cannot
-   explain.
-7. Incorporate answers while preserving the author's wording and manual edits
-   where practical.
-8. Run `PAPERBOT_CMD validate <paper.md> --profile draft --format json`.
+5. Read the most relevant selected files and record which repository evidence
+   supports each material claim. Do not copy repository secrets or private
+   user data into the paper.
+6. Research the specific products, websites, repositories, documentation, and
+   papers needed for Background and Related Work. Prefer primary sources and
+   do not send private repository contents, paths, or implementation details
+   to a search service.
+7. Cite external claims near the relevant prose and add complete Markdown
+   links to References. Distinguish repository evidence, external sources,
+   author statements, and agent inference during review.
+8. Ask focused questions for motivation, history, rejected alternatives,
+   tradeoffs, lessons, and benchmark context that the available evidence
+   cannot explain.
+9. Incorporate answers while preserving the author's wording and manual edits
+   where practical. Add a Benchmarks section only when reproducible
+   methodology or results exist.
+10. Run `PAPERBOT_CMD validate <paper.md> --profile draft --format json`.
    Resolve every error and explain any warnings that remain.
 
 Treat a nonzero CLI exit as a failed step. Do not continue from invalid or
@@ -84,6 +93,7 @@ Report:
 - paper and private scan manifest paths;
 - repository revision and dirty-state recorded by the scan;
 - validation status;
+- material claims that still lack an inspectable source;
 - unresolved author questions and incomplete sections.
 
 Without explicit author confirmation, stop after validation and never run

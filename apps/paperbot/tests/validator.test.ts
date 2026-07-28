@@ -149,9 +149,9 @@ describe("validatePaperFile", () => {
       "Motivation",
       "Related Work",
       "Core Features",
-      "Benchmarks",
       "Insights and Lessons",
       "Limitations",
+      "References",
     ]);
   });
 });

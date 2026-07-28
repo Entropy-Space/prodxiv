@@ -11,6 +11,9 @@ turning product writing into academic theater. Papers are written in Markdown,
 optimized for reading on the web, and focused on substance rather than
 promotion.
 
+The supported authoring subset, optional sections, citation rules, and safe
+inline SVG figures are documented in `docs/PAPER_FORMAT.md`.
+
 > Product ideas, documented properly.
 
 ## Why it should exist
@@ -64,9 +67,11 @@ repository_url:
 # References
 ```
 
-Not every section must be long, but limitations and benchmark methodology
-should be treated as first-class content. A benchmark should identify its date,
-environment, dataset, comparison target, and reproducibility notes.
+Not every section is required. Omit Benchmarks when no reproducible
+measurement exists rather than publishing an empty placeholder. When a paper
+does make measured claims, benchmark methodology is first-class content and
+should identify its date, environment, dataset, comparison target, and
+reproducibility notes. Limitations remain required.
 
 ## Publishing model
 
@@ -134,8 +139,9 @@ and honest limitations—not from visual imitation.
    than reproduce launch copy.
 2. **History over silent updates.** Meaningful changes create new immutable
    versions.
-3. **Method over confidence.** Benchmarks should explain how they were
-   produced and what they do not establish.
+3. **Method over confidence.** When benchmarks are present, they should
+   explain how they were produced and what they do not establish. Papers
+   without measurements should omit the section rather than imply evidence.
 4. **Open contribution with visible quality signals.** Publishing should be
    accessible while validation and moderation protect the archive.
 5. **Readable by default.** Markdown source should render into an excellent

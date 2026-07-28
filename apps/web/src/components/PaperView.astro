@@ -354,6 +354,30 @@ const statusLabel = metadata.status.replaceAll("_", " ");
     font-size: 0.82em;
   }
 
+  .paper-body :global(figure) {
+    margin: 2rem 0;
+  }
+
+  .paper-body :global(figure svg) {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    padding: clamp(0.75rem, 2vw, 1.25rem);
+    overflow: visible;
+    background: var(--paper-deep);
+    border: 1px solid var(--line);
+    border-radius: 0.2rem;
+  }
+
+  .paper-body :global(figcaption) {
+    margin-top: 0.65rem;
+    color: var(--ink-soft);
+    font-family: var(--sans);
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
   @media (max-width: 840px) {
     .paper-grid {
       grid-template-columns: 1fr;

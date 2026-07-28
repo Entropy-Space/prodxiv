@@ -10,6 +10,15 @@ The on-demand route uses Astro's Vercel adapter and fetches the exact immutable
 version from the public Axum API. Markdown is rendered on the server and
 sanitized before it is included in the page.
 
+Published Markdown may contain inline SVG figures for workflows, architecture,
+and data-backed plots. The renderer accepts only inert shape and text elements
+with a restricted presentation-attribute set. It strips scripts, event
+handlers, embedded HTML, CSS, animation, and external SVG resources. Figures
+should include an accessible label and a `figcaption`; plots should identify
+their source data and method in the caption or surrounding prose.
+
+See `docs/PAPER_FORMAT.md` for the supported paper Markdown and SVG subset.
+
 The homepage is also rendered on demand. It requests cursor-paginated latest
 versions from the public API and links each result to its exact immutable
 reader route. Checked-in reference papers remain visible if the API cannot be

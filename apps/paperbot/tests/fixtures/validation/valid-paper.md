@@ -40,3 +40,7 @@ Validation should keep incomplete drafts visible.
 # Limitations
 
 This is only a test fixture.
+
+# References
+
+1. [prodxiv repository](https://github.com/Entropy-Space/prodxiv).

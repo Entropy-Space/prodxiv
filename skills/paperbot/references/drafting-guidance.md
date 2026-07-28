@@ -10,6 +10,46 @@ README and website marketing statements may help locate features, but do not
 repeat promotional comparisons or superlatives as facts. Prefer precise,
 bounded descriptions.
 
+## Evidence and citations
+
+Treat repository evidence, external sources, author statements, and agent
+inference as different evidence classes during drafting. Every material claim
+should be traceable to at least one of the first three, and an inference should
+be labeled for author review rather than presented as established fact.
+
+For external research:
+
+- name specific products, websites, repositories, documentation, or papers;
+- prefer official product sites, documentation, and source repositories for
+  claims about what a product does;
+- use independent sources when a comparison requires a perspective the product
+  owner cannot establish;
+- cite the source close to the claim with a descriptive Markdown link;
+- include a complete, publicly inspectable link in References;
+- never use a private filesystem path as a public citation;
+- never place private source text, private paths, credentials, or undisclosed
+  implementation details into a search query.
+
+Related Work should explain the relevant relationship, not merely list names.
+State whether another product influenced the work, supplies an underlying
+component, addresses a similar problem, or represents a rejected alternative.
+Do not claim superiority unless a cited comparison supports the exact scope and
+method.
+
+## Figures
+
+Use a figure only when it makes a workflow, architecture boundary, comparison,
+or measured result materially easier to understand than prose. Prefer a small
+inline SVG for durable workflows and plots because it remains part of the exact
+versioned Markdown source.
+
+Inline SVG must use only inert shapes and text. Do not include scripts, event
+handlers, CSS, animation, `foreignObject`, external images, or reusable
+external resources. Every SVG must have `role="img"` and an `aria-label`, and
+every figure must have a `figcaption`. A plot caption or its surrounding prose
+must identify the source data and method. Do not create a plot when no
+inspectable data exists.
+
 ## Section guidance
 
 - **Summary:** State what the product is, who it serves, and the paper's scope.
@@ -17,19 +57,23 @@ bounded descriptions.
   author.
 - **Motivation:** Prefer author answers. Code rarely explains why a product
   exists.
-- **Related Work:** Name inspectable alternatives and influences. Avoid
-  unsupported superiority claims.
+- **Related Work:** Name specific, inspectable alternatives and influences,
+  cite primary sources, and explain each relationship. Avoid unsupported
+  superiority claims.
 - **Core Features:** Describe observable behavior and important user-facing
   constraints.
 - **Architecture:** Separate observed technical boundaries from the author's
   explanation of why they exist.
 - **Benchmarks:** Include results only with reproducible methodology, inputs,
-  environment, and limitations. If no results exist, say so.
+  environment, and limitations. Omit the entire section when no reproducible
+  methodology or results exist. Do not treat tests, planned measurements, or
+  benchmark-shaped code as results.
 - **Insights and Lessons:** Ask about tradeoffs, surprises, failed approaches,
   and changed assumptions.
 - **Limitations:** Preserve known constraints and open questions.
-- **References:** Link relevant repositories, documentation, and related
-  products without exposing private paths or sensitive material.
+- **References:** Provide descriptive public links for cited repositories,
+  documentation, products, websites, and papers. Do not expose private paths
+  or sensitive material.
 
 ## Author interview
 
@@ -51,7 +95,9 @@ Do not imply that author recollection was independently checked.
 Do not quote or summarize secrets, credentials, environment files, private user
 data, generated code, vendored dependencies, or excluded material. Surface
 conflicting repository information instead of choosing the more favorable
-description. Keep absent benchmarks and incomplete sections explicit.
+description. Do not add a Benchmarks section merely to report its absence; keep
+unsupported measured claims and other incomplete sections explicit.
 
 Before handoff, inspect the paper diff, validate the draft, and list unresolved
-questions. Never publish automatically.
+questions plus material claims that lack an inspectable source. Never publish
+automatically.

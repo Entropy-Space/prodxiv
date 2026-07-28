@@ -37,6 +37,7 @@ test("creates a complete scaffold from a scan manifest", async () => {
   expect(result.markdown).toContain('title: "Fixture product"');
   expect(result.markdown).toContain("# Summary");
   expect(result.markdown).toContain("# Architecture");
+  expect(result.markdown).not.toContain("# Benchmarks");
   expect(result.markdown).toContain("# Limitations");
   expect(result.markdown).toContain("# References");
   expect(result.markdown).toContain(

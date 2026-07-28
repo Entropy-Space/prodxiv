@@ -48,15 +48,20 @@ visible instead of filling them with speculation.
 4. **Understand the project.** The drafting agent reads relevant files and
    detects languages, architecture, dependencies, tests, releases, and
    benchmark suites.
-5. **Generate a private draft.** The agent completes sections supported by the
-   repository and leaves uncertain details as questions.
-6. **Interview the author.** It asks a short, adaptive set of questions about
+5. **Research related work.** The agent identifies specific products,
+   websites, repositories, documentation, and papers, verifies claims against
+   inspectable sources, and records public citations without disclosing private
+   repository contents.
+6. **Generate a private draft.** The agent completes sections supported by
+   repository evidence, external sources, or author statements and leaves
+   uncertain details as questions.
+7. **Interview the author.** It asks a short, adaptive set of questions about
    motivation, background, alternatives, tradeoffs, and lessons.
-7. **Revise collaboratively.** Author answers are incorporated without
+8. **Revise collaboratively.** Author answers are incorporated without
    overwriting deliberate manual edits.
-8. **Review and approve.** The author reviews privacy, accuracy, and
+9. **Review and approve.** The author reviews privacy, accuracy, and
    completeness before any submission.
-9. **Publish explicitly.** After approval, the CLI submits the exact reviewed
+10. **Publish explicitly.** After approval, the CLI submits the exact reviewed
    Markdown to the authoritative API and reports its allocated identifier.
 
 ## Example draft behavior
@@ -78,12 +83,10 @@ synchronization.
 > Author review:
 > Is offline operation a product goal or only an implementation detail?
 
-# Benchmarks
+# Limitations
 
-No reproducible benchmark results were found.
-
-> Suggested benchmark:
-> Measure synchronization latency with 1, 10, and 100 concurrent clients.
+No reproducible benchmark results were found, so this draft omits a
+Benchmarks section. It does not make performance claims.
 ```
 
 Paperbot should never turn missing context into polished but unsupported prose.
@@ -143,6 +146,8 @@ The first version should support:
 - Markdown documentation.
 - Repository structure, dependency, test, and benchmark detection.
 - A section-complete Markdown scaffold.
+- An optional Benchmarks section only when reproducible methodology or results
+  exist.
 - Agent-assisted drafting and a focused author interview.
 - Structural validation and private preview.
 - Manual approval before submission.

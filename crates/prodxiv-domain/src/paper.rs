@@ -13,9 +13,9 @@ pub const REQUIRED_SECTIONS: [&str; 8] = [
     "Motivation",
     "Related Work",
     "Core Features",
-    "Benchmarks",
     "Insights and Lessons",
     "Limitations",
+    "References",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
