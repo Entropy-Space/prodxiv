@@ -9,16 +9,20 @@ use std::{
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodxiv_domain::{
-    Diagnostic, PaperDocument, PublishedPaper, ValidationProfile, ValidationReport,
-    canonicalize_paper_id, validate_paper,
+    Diagnostic, PaperDocument, PublishedPaper, PublishedPaperSummary, ValidationProfile,
+    ValidationReport, canonicalize_paper_id, validate_paper,
 };
-use prodxiv_storage::{PostgresStorage, PublishOutcome, StorageError, is_valid_idempotency_key};
+use prodxiv_storage::{
+    PostgresStorage, PublicationCursor, PublicationPage, PublishOutcome, StorageError,
+    is_valid_idempotency_key,
+};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -161,6 +165,12 @@ pub trait PublicationStore: Send + Sync {
         paper_id: &str,
         version: u32,
     ) -> Result<Option<PublishedPaper>, StoreError>;
+
+    async fn list_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+    ) -> Result<PublicationPage, StoreError>;
 }
 
 #[async_trait]
@@ -183,6 +193,16 @@ impl PublicationStore for PostgresStorage {
         version: u32,
     ) -> Result<Option<PublishedPaper>, StoreError> {
         PostgresStorage::find_version(self, paper_id, version)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+    ) -> Result<PublicationPage, StoreError> {
+        PostgresStorage::list_latest(self, limit, cursor)
             .await
             .map_err(StoreError::from)
     }
@@ -289,10 +309,23 @@ struct VersionPath {
     version: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct ListPapersQuery {
+    limit: Option<u32>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PaperListResponse {
+    pub papers: Vec<PublishedPaperSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/v1/papers", post(publish_paper))
+        .route("/v1/papers", get(list_papers).post(publish_paper))
         .route(
             "/v1/papers/{paper_id}/versions/{version}",
             get(get_paper_version),
@@ -310,6 +343,47 @@ pub fn router(state: AppState) -> Router {
 )]
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/papers",
+    params(
+      ("limit" = Option<u32>, Query, minimum = 1, maximum = 100, description = "Maximum papers to return; defaults to 20"),
+      ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page")
+    ),
+    responses(
+      (status = 200, description = "Latest published paper versions", body = PaperListResponse),
+      (status = 400, description = "Pagination parameters are invalid", body = ErrorResponse),
+      (status = 500, description = "Reading failed", body = ErrorResponse)
+    )
+)]
+async fn list_papers(
+    State(state): State<AppState>,
+    Query(query): Query<ListPapersQuery>,
+) -> Result<Json<PaperListResponse>, ApiError> {
+    let limit = query.limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_limit",
+            "limit must be between 1 and 100",
+        ));
+    }
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_publication_cursor)
+        .transpose()?;
+    let page = state
+        .store
+        .list_latest(limit, cursor.as_ref())
+        .await
+        .map_err(store_error)?;
+    Ok(Json(PaperListResponse {
+        papers: page.papers,
+        next_cursor: page.next_cursor.as_ref().map(encode_publication_cursor),
+    }))
 }
 
 #[utoipa::path(
@@ -459,6 +533,38 @@ async fn get_paper_version(
     Ok(Json(published))
 }
 
+fn encode_publication_cursor(cursor: &PublicationCursor) -> String {
+    let mut bytes = cursor.created_at_micros.to_be_bytes().to_vec();
+    bytes.extend_from_slice(cursor.paper_id.as_bytes());
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn decode_publication_cursor(value: &str) -> Result<PublicationCursor, ApiError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| invalid_cursor())?;
+    let (micros, paper_id) = bytes.split_at_checked(8).ok_or_else(invalid_cursor)?;
+    let created_at_micros =
+        i64::from_be_bytes(micros.try_into().expect("cursor timestamp is eight bytes"));
+    let paper_id = std::str::from_utf8(paper_id).map_err(|_| invalid_cursor())?;
+    let paper_id = canonicalize_paper_id(paper_id).ok_or_else(invalid_cursor)?;
+    if created_at_micros <= 0 {
+        return Err(invalid_cursor());
+    }
+    Ok(PublicationCursor {
+        created_at_micros,
+        paper_id,
+    })
+}
+
+fn invalid_cursor() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "request.invalid_cursor",
+        "cursor is invalid or malformed",
+    )
+}
+
 fn authorize(headers: &HeaderMap, expected_token: &str) -> Result<(), ApiError> {
     let provided = headers
         .get(header::AUTHORIZATION)
@@ -509,10 +615,12 @@ fn store_error(error: StoreError) -> ApiError {
         version = "0.1.0",
         description = "Authoritative immutable publication and retrieval API."
     ),
-    paths(health, publish_paper, get_paper_version),
+    paths(health, list_papers, publish_paper, get_paper_version),
     components(schemas(
         PublishPaperRequest,
         PublishedPaper,
+        PublishedPaperSummary,
+        PaperListResponse,
         HealthResponse,
         ErrorResponse,
         ErrorBody,

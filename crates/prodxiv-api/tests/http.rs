@@ -11,8 +11,10 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use prodxiv_api::{AppState, PublicationStore, StoreError, router};
-use prodxiv_domain::{PaperDocument, PublicationIdentity, PublishedPaper, prepare_publication};
-use prodxiv_storage::PublishOutcome;
+use prodxiv_domain::{
+    PaperDocument, PublicationIdentity, PublishedPaper, PublishedPaperSummary, prepare_publication,
+};
+use prodxiv_storage::{PublicationCursor, PublicationPage, PublishOutcome};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -85,6 +87,52 @@ impl PublicationStore for FakeStore {
             .iter()
             .find(|paper| paper.paper_id == paper_id && paper.version == version)
             .cloned())
+    }
+
+    async fn list_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+    ) -> Result<PublicationPage, StoreError> {
+        let publications = self
+            .publications
+            .lock()
+            .expect("fake store should lock")
+            .clone();
+        let mut entries = publications
+            .iter()
+            .enumerate()
+            .map(|(index, paper)| {
+                (
+                    PublishedPaperSummary::from(paper),
+                    PublicationCursor {
+                        created_at_micros: i64::try_from(index + 1)
+                            .expect("test publication count fits in i64"),
+                        paper_id: paper.paper_id.clone(),
+                    },
+                )
+            })
+            .filter(|(_, item_cursor)| {
+                cursor.is_none_or(|cursor| {
+                    (item_cursor.created_at_micros, &item_cursor.paper_id)
+                        < (cursor.created_at_micros, &cursor.paper_id)
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|(_, left), (_, right)| {
+            (right.created_at_micros, &right.paper_id)
+                .cmp(&(left.created_at_micros, &left.paper_id))
+        });
+        let limit = usize::try_from(limit).expect("u32 fits in usize");
+        let has_more = entries.len() > limit;
+        entries.truncate(limit);
+        let next_cursor = has_more
+            .then(|| entries.last().map(|(_, cursor)| cursor.clone()))
+            .flatten();
+        Ok(PublicationPage {
+            papers: entries.into_iter().map(|(paper, _)| paper).collect(),
+            next_cursor,
+        })
     }
 }
 
@@ -182,6 +230,59 @@ async fn publishes_and_reads_one_exact_version() {
         .expect("request should complete");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(json_body(response).await["paper_id"], "prodxiv:2607.000001");
+}
+
+#[tokio::test]
+async fn lists_latest_papers_without_authorization() {
+    let store = Arc::new(FakeStore::default());
+    let application = app(store);
+    let publish_response = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/papers")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "paperbot.test.list")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+    assert_eq!(publish_response.status(), StatusCode::CREATED);
+
+    let response = application
+        .oneshot(
+            Request::get("/v1/papers?limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["papers"][0]["paper_id"], "prodxiv:2607.000001");
+    assert_eq!(body["papers"][0]["version"], 1);
+    assert!(body["papers"][0].get("source_markdown").is_none());
+    assert!(body.get("next_cursor").is_none());
+}
+
+#[tokio::test]
+async fn rejects_invalid_list_pagination() {
+    let application = app(Arc::new(FakeStore::default()));
+    for path in ["/v1/papers?limit=0", "/v1/papers?cursor=not-a-cursor"] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]

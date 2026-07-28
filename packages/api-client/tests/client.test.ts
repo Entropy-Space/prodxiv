@@ -27,6 +27,32 @@ const publishedPaper = {
 } satisfies PublishedPaper;
 
 describe("ProdxivApiClient", () => {
+  test("lists published papers with encoded pagination parameters", async () => {
+    let requestUrl = "";
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example/",
+      fetch: async (input) => {
+        requestUrl = input.toString();
+        const { source_markdown: _, ...summary } = publishedPaper;
+        return Response.json({
+          papers: [summary],
+          next_cursor: "next/page",
+        });
+      },
+    });
+
+    const page = await client.listPapers({
+      limit: 10,
+      cursor: "current/page",
+    });
+
+    expect(page.papers[0]?.paper_id).toBe("prodxiv:2607.000001");
+    expect(page.next_cursor).toBe("next/page");
+    expect(requestUrl).toBe(
+      "https://api.prodxiv.example/v1/papers?limit=10&cursor=current%2Fpage",
+    );
+  });
+
   test("reads an exact public paper version without a token", async () => {
     let requestUrl = "";
     const client = new ProdxivApiClient({
