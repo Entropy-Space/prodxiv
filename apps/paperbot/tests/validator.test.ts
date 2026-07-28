@@ -53,6 +53,40 @@ describe("validatePaperFile", () => {
     ]);
   });
 
+  test("matches authoritative submission metadata rules", async () => {
+    const temporaryDirectory = await mkdtemp(
+      resolve(tmpdir(), "paperbot-submission-"),
+    );
+    const paperPath = resolve(temporaryDirectory, "paper.md");
+    const publishedSource = await readFile(
+      resolve(repositoryRoot, "examples/papers/prodxiv.md"),
+      "utf8",
+    );
+    await writeFile(paperPath, publishedSource);
+
+    try {
+      const published = await validatePaperFile(paperPath, "submission");
+      expect(codes(published)).toEqual([
+        "submission.paper_id_forbidden",
+        "submission.date_forbidden",
+        "submission.version_forbidden",
+      ]);
+
+      await writeFile(
+        paperPath,
+        publishedSource
+          .replace(/^paper_id:.*\n/m, "")
+          .replace(/^published_at:.*\n/m, "")
+          .replace(/^version:.*\n/m, ""),
+      );
+      expect(
+        (await validatePaperFile(paperPath, "submission")).report.valid,
+      ).toBe(true);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("matches authoritative missing-section diagnostics", async () => {
     const result = await validatePaperFile(
       resolve(

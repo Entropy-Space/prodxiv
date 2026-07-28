@@ -1,0 +1,19 @@
+{
+  "name": "@prodxiv/api-client",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./src/client.ts",
+    "./schema": "./src/generated/api.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "generate": "openapi-typescript ../../openapi/prodxiv-api.json -o src/generated/api.ts && prettier --write src/generated/api.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.13",
+    "openapi-typescript": "7.10.1",
+    "typescript": "^6.0.0"
+  }
+}

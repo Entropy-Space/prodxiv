@@ -31,6 +31,14 @@ export async function validatePaperFile(
     throw new PaperbotError(`could not read paper: ${inputPath}`, ExitCode.io);
   }
 
+  return validatePaperSource(source, absoluteInputPath, profile);
+}
+
+export function validatePaperSource(
+  source: string,
+  inputPath: string,
+  profile: ValidationProfile,
+): PaperValidationResult {
   const diagnostics: Diagnostic[] = [];
   const paper = parsePaper(source, diagnostics);
   if (paper !== undefined) {
@@ -40,7 +48,7 @@ export async function validatePaperFile(
 
   sortDiagnostics(diagnostics);
   return {
-    input_path: absoluteInputPath,
+    input_path: inputPath,
     profile,
     report: {
       schema_version: validation_policy.schema_version,

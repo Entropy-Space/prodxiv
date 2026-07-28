@@ -78,7 +78,18 @@ export function validatePaperRules(
   validatePublicationValues(metadata, diagnostics);
   validateUrls(metadata, diagnostics);
 
-  if (profile === "publication") {
+  if (profile === "submission") {
+    for (const field of validation_policy.paper.submission_forbidden_metadata) {
+      if (metadata[field] !== undefined && metadata[field] !== null) {
+        diagnostics.push(submissionForbiddenDiagnostic(field));
+      }
+    }
+    for (const field of validation_policy.paper.submission_required_metadata) {
+      if (metadata[field] === undefined || metadata[field] === null) {
+        diagnostics.push(submissionRequiredDiagnostic(field));
+      }
+    }
+  } else if (profile === "publication") {
     for (const field of validation_policy.paper.publication_required_metadata) {
       if (metadata[field] === undefined || metadata[field] === null) {
         diagnostics.push(publicationRequiredDiagnostic(field));
@@ -87,6 +98,39 @@ export function validatePaperRules(
   }
 
   validateSections(paper.markdown, diagnostics);
+}
+
+function submissionForbiddenDiagnostic(field: string): Diagnostic {
+  const values: Record<string, [string, string]> = {
+    paper_id: [
+      "submission.paper_id_forbidden",
+      "paper identifiers are assigned by the publishing service",
+    ],
+    published_at: [
+      "submission.date_forbidden",
+      "publication dates are assigned by the publishing service",
+    ],
+    version: [
+      "submission.version_forbidden",
+      "paper versions are assigned by the publishing service",
+    ],
+  };
+  const [code, message] = values[field] ?? [
+    "submission.metadata_forbidden",
+    "submission metadata is assigned by the publishing service",
+  ];
+  return diagnostic(code, `metadata.${field}`, message);
+}
+
+function submissionRequiredDiagnostic(field: string): Diagnostic {
+  const [code, message] =
+    field === "license"
+      ? ["submission.license_required", "submitted papers require a license"]
+      : [
+          "submission.metadata_required",
+          "submitted paper metadata is required",
+        ];
+  return diagnostic(code, `metadata.${field}`, message);
 }
 
 function validateRequiredText(
