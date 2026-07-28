@@ -29,6 +29,27 @@ Rendered from the API.
 };
 
 describe("readPublishedPaper", () => {
+  test("rejects invalid identifiers before calling the API", async () => {
+    let fetched = false;
+    const result = await readPublishedPaper({
+      paper_id: "2607.000001",
+      version: "1",
+      api_url: "https://api.prodxiv.example",
+      fetch: async () => {
+        fetched = true;
+        return Response.json({});
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ status: 400 }),
+      }),
+    );
+    expect(fetched).toBe(false);
+  });
+
   test("rejects invalid versions before calling the API", async () => {
     let fetched = false;
     const result = await readPublishedPaper({

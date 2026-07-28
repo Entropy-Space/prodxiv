@@ -4,6 +4,7 @@ import {
   type ApiFetch,
   type PublishedPaper,
 } from "@prodxiv/api-client";
+import { paperSlugFromCanonicalId } from "@prodxiv/api-client/public-paper-url";
 
 import { configuredApiUrl } from "./api-url.ts";
 import {
@@ -39,6 +40,9 @@ export interface PaperReaderOptions {
 export async function readPublishedPaper(
   options: PaperReaderOptions,
 ): Promise<PaperReaderResult> {
+  if (paperSlugFromCanonicalId(options.paper_id) === undefined) {
+    return invalidPaperIdentifier();
+  }
   if (!/^[1-9]\d*$/.test(options.version)) {
     return invalidVersion();
   }
@@ -75,6 +79,17 @@ export async function readPublishedPaper(
       error: publicError(error),
     };
   }
+}
+
+function invalidPaperIdentifier(): PaperReaderResult {
+  return {
+    ok: false,
+    error: {
+      status: 400,
+      title: "Invalid paper identifier",
+      message: "Paper identifiers must use the canonical prodxiv format.",
+    },
+  };
 }
 
 function invalidVersion(): PaperReaderResult {

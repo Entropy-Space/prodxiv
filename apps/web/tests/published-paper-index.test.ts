@@ -47,7 +47,7 @@ describe("readPublishedPaperIndex", () => {
           summary: "A complete index fixture.",
           authors: ["Test Author"],
           topics: ["developer_tools"],
-          href: "/papers/prodxiv%3A2607.000001/versions/1",
+          href: "/papers/2607.000001/v1",
         },
       ],
       next_cursor: "next-page",
