@@ -50,6 +50,16 @@ Submissions contain Markdown with YAML front matter. They must include a
 license and must omit `paper_id`, `published_at`, and `version`; the service
 assigns those fields transactionally.
 
+Paperbot is the preferred client:
+
+```sh
+bun run paperbot auth set --api-url http://127.0.0.1:3000
+bun run paperbot publish path/to/paper.md
+```
+
+For a direct API request, provide an idempotency key that remains stable when
+retrying the same exact Markdown:
+
 ```sh
 jq -n \
   --rawfile source_markdown path/to/paper.md \
@@ -57,9 +67,14 @@ jq -n \
   | curl --fail-with-body \
       --header "Authorization: Bearer ${PRODXIV_PUBLISH_TOKEN}" \
       --header "Content-Type: application/json" \
+      --header "Idempotency-Key: example-publication-001" \
       --data-binary @- \
       http://127.0.0.1:3000/v1/papers
 ```
+
+The first successful request returns `201 Created`. A retry with the same
+actor, idempotency key, and Markdown returns the original publication with
+`200 OK`. Reusing the key for different Markdown returns `409 Conflict`.
 
 Paper identifiers use `prodxiv:YYMM.XXXXXX`. The suffix is uppercase Crockford
 Base32 (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`); lowercase input is accepted and

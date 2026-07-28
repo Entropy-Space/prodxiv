@@ -10,6 +10,8 @@ bun run paperbot scan . --include .env.example
 bun run paperbot draft scan.json --output paper.md
 bun run paperbot validate paper.md
 bun run paperbot validate paper.md --profile publication --format json
+bun run paperbot auth set --api-url https://api.prodxiv.example
+bun run paperbot publish paper.md
 ```
 
 The human-readable format summarizes the scan. JSON output is a versioned,
@@ -37,6 +39,20 @@ and author to resolve. Without `--output`, the scaffold is written to stdout.
 With `--output`, Paperbot creates a new file and refuses to overwrite an
 existing draft.
 
+`auth set` stores the API URL and publishing token in
+`~/.tokn/prodxiv/auth.toml`. Paperbot creates the directory with mode `0700`
+and the file with mode `0600`; it refuses to read a credential file accessible
+by other users. The token is entered through a hidden prompt by default. Use
+`--token-stdin` for a pipe, never a command-line token argument. For CI,
+`PRODXIV_API_URL` and `PRODXIV_PUBLISH_TOKEN` override the file.
+
+`publish` validates with the submission profile, shows the destination and
+exact source hash, and asks for confirmation before making a remote write.
+`--yes` is the explicit non-interactive confirmation for agents and CI. A
+deterministic idempotency key derived from the exact Markdown lets the command
+safely recover the original publication after a timeout instead of creating a
+duplicate.
+
 ## Exit codes
 
 - `0` — success
@@ -44,3 +60,6 @@ existing draft.
 - `3` — the target is not a readable Git repository
 - `4` — reading or scanning failed
 - `5` — validation completed and found errors
+- `6` — authentication is absent or invalid
+- `7` — the publishing API could not be reached
+- `8` — the publishing API rejected the request
