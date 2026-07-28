@@ -9,7 +9,8 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "generate": "openapi-typescript ../../openapi/prodxiv-api.json -o src/generated/api.ts && prettier --write src/generated/api.ts"
+    "generate": "openapi-typescript ../../openapi/prodxiv-api.json -o src/generated/api.ts && prettier --write src/generated/api.ts",
+    "test": "bun test tests/*.test.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.13",

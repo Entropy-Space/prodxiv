@@ -27,9 +27,11 @@
     "paperbot": "bun run apps/paperbot/src/cli.ts",
     "preview": "bun --filter @prodxiv/web preview",
     "schema": "cargo run -p prodxiv-domain --bin generate-schemas -- schemas",
-    "test": "bun run test:rust && bun run test:paperbot",
+    "test": "bun run test:rust && bun run test:paperbot && bun run test:api-client && bun run test:web",
+    "test:api-client": "bun --filter @prodxiv/api-client test",
     "test:domain": "cargo test -p prodxiv-domain",
     "test:paperbot": "bun --filter @prodxiv/paperbot test",
+    "test:web": "bun --filter @prodxiv/web test",
     "test:rust": "cargo test --workspace",
     "test:storage": "cargo test -p prodxiv-storage",
     "typecheck": "bun run check"

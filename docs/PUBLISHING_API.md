@@ -96,6 +96,10 @@ Set:
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
 
+On the separate `prodxiv-web` Vercel project, set `PRODXIV_API_URL` to the
+public HTTPS URL of this API. The website uses it only from its on-demand
+server route; do not configure the publishing token on the website.
+
 At startup, the API runs embedded migrations through the direct connection
 before opening its pooled application connection. SQLx serializes concurrent
 migration runners with a PostgreSQL advisory lock, so only one instance applies
