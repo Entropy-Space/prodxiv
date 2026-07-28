@@ -1,39 +1,40 @@
 ---
-import { getCollection, render, type CollectionEntry } from "astro:content";
-import SiteLayout from "../../layouts/SiteLayout.astro";
+import type { PublishedPaper } from "@prodxiv/api-client";
+import SiteLayout from "../layouts/SiteLayout.astro";
 
-export async function getStaticPaths() {
-  const papers = await getCollection("papers");
+type PaperMetadata = PublishedPaper["metadata"];
 
-  return papers.map((paper) => ({
-    params: { id: paper.id },
-    props: { paper },
-  }));
+export interface SectionHeading {
+  slug: string;
+  text: string;
 }
 
 interface Props {
-  paper: CollectionEntry<"papers">;
+  metadata: PaperMetadata;
+  paper_id: string;
+  version: number;
+  published_at: string;
+  section_headings: SectionHeading[];
 }
 
-const { paper } = Astro.props;
-const { Content, headings } = await render(paper);
+const { metadata, paper_id, version, published_at, section_headings } =
+  Astro.props;
 const publishedAt = new Intl.DateTimeFormat("en", {
   dateStyle: "long",
   timeZone: "UTC",
-}).format(new Date(`${paper.data.published_at}T00:00:00Z`));
-const authorNames = paper.data.authors.map((author) => author.name).join(", ");
-const sectionHeadings = headings.filter((heading) => heading.depth === 1);
-const statusLabel = paper.data.status.replaceAll("_", " ");
+}).format(new Date(`${published_at}T00:00:00Z`));
+const authorNames = metadata.authors.map((author) => author.name).join(", ");
+const statusLabel = metadata.status.replaceAll("_", " ");
 ---
 
 <SiteLayout
-  title={`${paper.data.title} — prodxiv`}
+  title={`${metadata.title} — prodxiv`}
   description={`A product paper by ${authorNames}, published on prodxiv.`}
 >
   <div class="paper-context">
     <div class="shell paper-context__inner">
       <a href="/">← Back to the archive</a>
-      <span>{paper.data.paper_id}</span>
+      <span>{paper_id}</span>
     </div>
   </div>
 
@@ -42,10 +43,10 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
       <div class="paper-kicker">
         <span class="status">{statusLabel}</span>
         <span>Product paper</span>
-        <span>Version {paper.data.version}</span>
+        <span>Version {version}</span>
       </div>
 
-      <h1>{paper.data.title}</h1>
+      <h1>{metadata.title}</h1>
 
       <div class="paper-byline">
         <p>
@@ -59,7 +60,7 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
       </div>
 
       <ul class="topic-list" aria-label="Paper topics">
-        {paper.data.topics.map((topic) => (
+        {metadata.topics.map((topic) => (
           <li>{topic.replaceAll("_", " ")}</li>
         ))}
       </ul>
@@ -72,11 +73,11 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
           <dl>
             <div>
               <dt>Identifier</dt>
-              <dd>{paper.data.paper_id}</dd>
+              <dd>{paper_id}</dd>
             </div>
             <div>
               <dt>Version</dt>
-              <dd>v{paper.data.version}</dd>
+              <dd>v{version}</dd>
             </div>
             <div>
               <dt>Status</dt>
@@ -84,7 +85,7 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
             </div>
             <div>
               <dt>License</dt>
-              <dd>{paper.data.license}</dd>
+              <dd>{metadata.license}</dd>
             </div>
           </dl>
         </div>
@@ -92,15 +93,15 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
         <nav class="sidebar-block" aria-label="Table of contents">
           <p class="sidebar-label">Contents</p>
           <ol>
-            {sectionHeadings.map((heading) => (
+            {section_headings.map((heading) => (
               <li><a href={`#${heading.slug}`}>{heading.text}</a></li>
             ))}
           </ol>
         </nav>
 
         {
-          paper.data.repository_url && (
-            <a class="source-link" href={paper.data.repository_url}>
+          metadata.repository_url && (
+            <a class="source-link" href={metadata.repository_url}>
               View source repository ↗
             </a>
           )
@@ -108,7 +109,7 @@ const statusLabel = paper.data.status.replaceAll("_", " ");
       </aside>
 
       <div class="paper-body">
-        <Content />
+        <slot />
       </div>
     </div>
   </article>

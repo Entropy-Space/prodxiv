@@ -1,0 +1,94 @@
+---
+import PaperView from "../../../../components/PaperView.astro";
+import SiteLayout from "../../../../layouts/SiteLayout.astro";
+import { readPublishedPaper } from "../../../../lib/published-paper-reader.ts";
+
+export const prerender = false;
+
+const paperId = Astro.params.paper_id ?? "";
+const versionParameter = Astro.params.version ?? "";
+const result = await readPublishedPaper({
+  paper_id: paperId,
+  version: versionParameter,
+  api_url: import.meta.env.PRODXIV_API_URL,
+});
+
+if (!result.ok) {
+  Astro.response.status = result.error.status;
+} else {
+  Astro.response.headers.set(
+    "Cache-Control",
+    "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+  );
+}
+---
+
+{
+  result.ok ? (
+    <PaperView
+      metadata={result.paper.metadata}
+      paper_id={result.paper.paper_id}
+      version={result.paper.version}
+      published_at={result.paper.published_at}
+      section_headings={result.rendered.section_headings}
+    >
+      <Fragment set:html={result.rendered.html} />
+    </PaperView>
+  ) : (
+    <SiteLayout
+      title={`${result.error.title} — prodxiv`}
+      description="The requested prodxiv paper version could not be displayed."
+    >
+      <main class="error-page shell">
+        <p class="error-code">{result.error.status}</p>
+        <h1>{result.error.title}</h1>
+        <p>{result.error.message}</p>
+        <a href="/">← Back to the archive</a>
+      </main>
+    </SiteLayout>
+  )
+}
+
+<style>
+  .error-page {
+    min-height: 65vh;
+    padding-block: clamp(5rem, 12vw, 10rem);
+  }
+
+  .error-code {
+    margin: 0 0 1rem;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+
+  .error-page h1 {
+    max-width: 14ch;
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.045em;
+  }
+
+  .error-page > p:not(.error-code) {
+    max-width: 36rem;
+    margin: 1.5rem 0 2rem;
+    color: var(--ink-soft);
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+
+  .error-page a {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+</style>
