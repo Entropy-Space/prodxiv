@@ -38,7 +38,12 @@ describe("Paperbot authentication", () => {
   });
 
   test("stores and resolves a protected TOML credential", async () => {
-    await saveAuth("https://api.prodxiv.example/", token, authPath);
+    await saveAuth(
+      "https://api.prodxiv.example/",
+      token,
+      authPath,
+      "https://prodxiv.example/",
+    );
 
     expect((await stat(authPath)).mode & 0o777).toBe(0o600);
     expect(
@@ -53,6 +58,9 @@ describe("Paperbot authentication", () => {
         "# Base URL of the prodxiv publishing API.",
         'api_url = "https://api.prodxiv.example"',
         "",
+        "# Public prodxiv website used to link successful publications.",
+        'site_url = "https://prodxiv.example"',
+        "",
         "# Bearer token used only for explicit publication requests.",
         `token = "${token}"`,
         "",
@@ -66,6 +74,7 @@ describe("Paperbot authentication", () => {
     ).toEqual({
       version: 1,
       api_url: "https://api.prodxiv.example",
+      site_url: "https://prodxiv.example",
       token,
       source: "file",
     });
@@ -79,6 +88,9 @@ describe("Paperbot authentication", () => {
     expect(template).toContain("# Paperbot publishing credentials.");
     expect(template).toContain(
       '# api_url = "https://your-prodxiv-api.example"',
+    );
+    expect(template).toContain(
+      '# site_url = "https://your-prodxiv-site.example"',
     );
     expect(template).toContain(
       '# token = "replace-with-your-publishing-token"',
@@ -126,11 +138,13 @@ describe("Paperbot authentication", () => {
         auth_path: authPath,
         env: {
           PRODXIV_API_URL: "https://api.prodxiv.example",
+          PRODXIV_SITE_URL: "https://prodxiv.example",
           PRODXIV_PUBLISH_TOKEN: token,
         },
       }),
     ).toMatchObject({
       api_url: "https://api.prodxiv.example",
+      site_url: "https://prodxiv.example",
       token,
       source: "environment",
     });
@@ -139,5 +153,24 @@ describe("Paperbot authentication", () => {
     await saveAuth("https://api.prodxiv.example", token, authPath);
     expect(await removeAuth(authPath)).toBe(true);
     expect(await removeAuth(authPath)).toBe(false);
+  });
+
+  test("parses an optional public site URL", () => {
+    expect(
+      parseArguments([
+        "auth",
+        "set",
+        "--api-url=https://api.prodxiv.example",
+        "--site-url",
+        "https://prodxiv.example",
+        "--token-stdin",
+      ]),
+    ).toEqual({
+      command: "auth",
+      action: "set",
+      api_url: "https://api.prodxiv.example",
+      site_url: "https://prodxiv.example",
+      token_stdin: true,
+    });
   });
 });

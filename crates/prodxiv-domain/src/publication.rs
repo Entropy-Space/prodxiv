@@ -26,6 +26,28 @@ pub struct PublishedPaper {
     pub source_markdown: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublishedPaperSummary {
+    pub schema_version: String,
+    pub paper_id: String,
+    pub version: u32,
+    pub published_at: String,
+    pub metadata: PaperMetadata,
+}
+
+impl From<&PublishedPaper> for PublishedPaperSummary {
+    fn from(paper: &PublishedPaper) -> Self {
+        Self {
+            schema_version: paper.schema_version.clone(),
+            paper_id: paper.paper_id.clone(),
+            version: paper.version,
+            published_at: paper.published_at.clone(),
+            metadata: paper.metadata.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum PublicationPreparationError {
     #[error("published paper is invalid")]

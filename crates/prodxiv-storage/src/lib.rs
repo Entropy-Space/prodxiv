@@ -2,7 +2,7 @@
 
 use prodxiv_domain::{
     PaperDocument, PaperMetadata, PublicationIdentity, PublicationPreparationError, PublishedPaper,
-    encode_paper_id_suffix, prepare_publication,
+    PublishedPaperSummary, encode_paper_id_suffix, prepare_publication,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -25,6 +25,18 @@ pub struct PostgresStorage {
 pub struct PublishOutcome {
     pub paper: PublishedPaper,
     pub replayed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicationCursor {
+    pub created_at_micros: i64,
+    pub paper_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicationPage {
+    pub papers: Vec<PublishedPaperSummary>,
+    pub next_cursor: Option<PublicationCursor>,
 }
 
 #[must_use]
@@ -297,6 +309,90 @@ impl PostgresStorage {
             })
         })
         .transpose()
+    }
+
+    /// Lists the latest immutable version of each paper in reverse publication
+    /// order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn list_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+    ) -> Result<PublicationPage, StorageError> {
+        let fetch_limit = i64::from(limit) + 1;
+        let cursor_micros = cursor.map(|value| value.created_at_micros);
+        let cursor_paper_id = cursor.map(|value| value.paper_id.as_str());
+        let rows = sqlx::query(
+            r#"
+            WITH latest_versions AS (
+              SELECT DISTINCT ON (paper_id)
+                paper_id,
+                version,
+                published_at,
+                metadata,
+                created_at
+              FROM paper_versions
+              ORDER BY paper_id, version DESC
+            )
+            SELECT
+              paper_id,
+              version,
+              published_at::text AS published_at,
+              metadata,
+              (extract(epoch FROM created_at) * 1000000)::bigint AS created_at_micros
+            FROM latest_versions
+            WHERE $1::bigint IS NULL
+              OR (
+                (extract(epoch FROM created_at) * 1000000)::bigint,
+                paper_id
+              ) < ($1, $2)
+            ORDER BY created_at DESC, paper_id DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(cursor_micros)
+        .bind(cursor_paper_id)
+        .bind(fetch_limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+        let mut entries = rows
+            .into_iter()
+            .take(usize::try_from(limit).unwrap_or(usize::MAX))
+            .map(|row| {
+                let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
+                let version: i32 = row.try_get("version")?;
+                let paper_id: String = row.try_get("paper_id")?;
+                let summary = PublishedPaperSummary {
+                    schema_version: metadata.schema_version.clone(),
+                    paper_id: paper_id.clone(),
+                    version: u32::try_from(version)
+                        .map_err(|_| StorageError::CorruptVersion(version))?,
+                    published_at: row.try_get("published_at")?,
+                    metadata: metadata.0,
+                };
+                Ok((
+                    summary,
+                    PublicationCursor {
+                        created_at_micros: row.try_get("created_at_micros")?,
+                        paper_id,
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?;
+        let next_cursor = has_more
+            .then(|| entries.last().map(|(_, cursor)| cursor.clone()))
+            .flatten();
+        let papers = entries.drain(..).map(|(paper, _)| paper).collect();
+
+        Ok(PublicationPage {
+            papers,
+            next_cursor,
+        })
     }
 
     #[must_use]

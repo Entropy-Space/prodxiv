@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 async-trait.workspace = true
 axum.workspace = true
+base64.workspace = true
 prodxiv-domain = { path = "../prodxiv-domain" }
 prodxiv-storage = { path = "../prodxiv-storage" }
 serde.workspace = true

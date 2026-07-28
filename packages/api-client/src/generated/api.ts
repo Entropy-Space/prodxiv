@@ -27,7 +27,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    get: operations["list_papers"];
     put?: never;
     post: operations["publish_paper"];
     delete?: never;
@@ -80,6 +80,10 @@ export interface components {
     HealthResponse: {
       status: string;
     };
+    PaperListResponse: {
+      next_cursor?: string | null;
+      papers: components["schemas"]["PublishedPaperSummary"][];
+    };
     PaperMetadata: {
       authors: components["schemas"]["Author"][];
       license?: string | null;
@@ -116,6 +120,14 @@ export interface components {
       /** Format: int32 */
       version: number;
     };
+    PublishedPaperSummary: {
+      metadata: components["schemas"]["PaperMetadata"];
+      paper_id: string;
+      published_at: string;
+      schema_version: string;
+      /** Format: int32 */
+      version: number;
+    };
     /** @enum {string} */
     RelationshipKind:
       "inspired_by" | "built_on" | "alternative_to" | "supersedes";
@@ -144,6 +156,49 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  list_papers: {
+    parameters: {
+      query?: {
+        /** @description Maximum papers to return; defaults to 20 */
+        limit?: number;
+        /** @description Opaque cursor returned by the previous page */
+        cursor?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Latest published paper versions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaperListResponse"];
+        };
+      };
+      /** @description Pagination parameters are invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reading failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

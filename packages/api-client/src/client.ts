@@ -1,6 +1,8 @@
 import type { components } from "./generated/api.ts";
 
 export type PublishedPaper = components["schemas"]["PublishedPaper"];
+export type PublishedPaperSummary =
+  components["schemas"]["PublishedPaperSummary"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 type ErrorDiagnostics = NonNullable<ErrorResponse["error"]["diagnostics"]>;
 
@@ -13,6 +15,16 @@ export interface PublishPaperResult {
   paper: PublishedPaper;
   location: string;
   replayed: boolean;
+}
+
+export interface ListPapersInput {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface PaperList {
+  papers: PublishedPaperSummary[];
+  next_cursor?: string;
 }
 
 export type ApiFetch = (
@@ -103,6 +115,36 @@ export class ProdxivApiClient {
     return publishedPaper(response, body);
   }
 
+  async listPapers(input: ListPapersInput = {}): Promise<PaperList> {
+    if (
+      input.limit !== undefined &&
+      (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
+    ) {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_limit",
+        "paper list limit must be an integer between 1 and 100",
+      );
+    }
+    if (input.cursor !== undefined && input.cursor.length === 0) {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_cursor",
+        "paper list cursor must not be empty",
+      );
+    }
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) {
+      query.set("limit", String(input.limit));
+    }
+    if (input.cursor !== undefined) {
+      query.set("cursor", input.cursor);
+    }
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    const { response, body } = await this.#request(`/v1/papers${suffix}`);
+    return paperList(response, body);
+  }
+
   async #request(
     path: string,
     init?: RequestInit,
@@ -149,6 +191,45 @@ function publishedPaper(response: Response, body: unknown): PublishedPaper {
   return body;
 }
 
+function paperList(response: Response, body: unknown): PaperList {
+  if (!response.ok) {
+    if (isErrorResponse(body)) {
+      throw new ProdxivApiError(
+        response.status,
+        body.error.code,
+        body.error.message,
+        body.error.diagnostics ?? [],
+      );
+    }
+    throw new ProdxivApiError(
+      response.status,
+      "network.invalid_response",
+      `prodxiv API returned HTTP ${response.status} without a valid error body`,
+    );
+  }
+  if (
+    !isRecord(body) ||
+    !Array.isArray(body.papers) ||
+    !body.papers.every(isPublishedPaperSummary) ||
+    !(
+      body.next_cursor === undefined ||
+      (typeof body.next_cursor === "string" && body.next_cursor.length > 0)
+    )
+  ) {
+    throw new ProdxivApiError(
+      response.status,
+      "network.invalid_response",
+      "prodxiv API returned an invalid paper list",
+    );
+  }
+  return {
+    papers: body.papers,
+    ...(body.next_cursor === undefined
+      ? {}
+      : { next_cursor: body.next_cursor }),
+  };
+}
+
 function isErrorResponse(value: unknown): value is ErrorResponse {
   if (!isRecord(value) || !isRecord(value.error)) {
     return false;
@@ -162,6 +243,18 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
 }
 
 function isPublishedPaper(value: unknown): value is PublishedPaper {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const record = value;
+  return (
+    isPublishedPaperSummary(value) && typeof record.source_markdown === "string"
+  );
+}
+
+function isPublishedPaperSummary(
+  value: unknown,
+): value is PublishedPaperSummary {
   if (!isRecord(value) || !isRecord(value.metadata)) {
     return false;
   }
@@ -172,7 +265,6 @@ function isPublishedPaper(value: unknown): value is PublishedPaper {
     Number.isInteger(value.version) &&
     (value.version as number) > 0 &&
     isDateString(value.published_at) &&
-    typeof value.source_markdown === "string" &&
     metadata.schema_version === value.schema_version &&
     metadata.paper_id === value.paper_id &&
     metadata.version === value.version &&

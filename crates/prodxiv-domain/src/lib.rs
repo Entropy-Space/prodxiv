@@ -14,7 +14,8 @@ pub use policy::{
     PUBLICATION_REQUIRED_METADATA, PaperValidationPolicy, ValidationPolicy, validation_policy,
 };
 pub use publication::{
-    PublicationIdentity, PublicationPreparationError, PublishedPaper, prepare_publication,
+    PublicationIdentity, PublicationPreparationError, PublishedPaper, PublishedPaperSummary,
+    prepare_publication,
 };
 pub use validation::{
     Diagnostic, DiagnosticSeverity, ValidationProfile, ValidationReport, validate_paper,

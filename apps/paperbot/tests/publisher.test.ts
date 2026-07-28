@@ -46,6 +46,7 @@ describe("paper publication", () => {
     const preparation = await preparePublication(paperPath, {
       env: {
         PRODXIV_API_URL: "https://api.prodxiv.example",
+        PRODXIV_SITE_URL: "https://prodxiv.example",
         PRODXIV_PUBLISH_TOKEN: token,
       },
       fetch: async (input, init) => {
@@ -102,6 +103,8 @@ describe("paper publication", () => {
       published_at: "2026-07-28",
       location:
         "https://api.prodxiv.example/v1/papers/prodxiv:2607.000001/versions/1",
+      web_url:
+        "https://prodxiv.example/papers/prodxiv%3A2607.000001/versions/1",
       source_sha256: prepared.source_sha256,
       replayed: false,
     });

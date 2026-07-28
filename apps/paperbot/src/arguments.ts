@@ -41,6 +41,7 @@ export type AuthArguments =
       command: "auth";
       action: "set";
       api_url: string;
+      site_url?: string;
       token_stdin: boolean;
     }
   | {
@@ -162,6 +163,7 @@ function parseAuthArguments(
   }
 
   let api_url: string | undefined;
+  let site_url: string | undefined;
   let token_stdin = false;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index];
@@ -182,6 +184,19 @@ function parseAuthArguments(
       api_url = requiredInlineValue(argument, "--api-url");
       continue;
     }
+    if (argument === "--site-url") {
+      const value = args[index + 1];
+      if (value === undefined || value.length === 0) {
+        throw usageError("missing value for --site-url");
+      }
+      site_url = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--site-url=")) {
+      site_url = requiredInlineValue(argument, "--site-url");
+      continue;
+    }
     throw usageError(`unknown option: ${argument}`);
   }
   if (api_url === undefined) {
@@ -191,6 +206,7 @@ function parseAuthArguments(
     command: "auth",
     action: "set",
     api_url,
+    ...(site_url === undefined ? {} : { site_url }),
     token_stdin,
   };
 }

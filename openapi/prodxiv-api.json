@@ -29,6 +29,65 @@
       }
     },
     "/v1/papers": {
+      "get": {
+        "tags": [],
+        "operationId": "list_papers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum papers to return; defaults to 20",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor returned by the previous page",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest published paper versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Pagination parameters are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [],
         "operationId": "publish_paper",
@@ -312,6 +371,26 @@
           }
         }
       },
+      "PaperListResponse": {
+        "type": "object",
+        "required": [
+          "papers"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "papers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublishedPaperSummary"
+            }
+          }
+        }
+      },
       "PaperMetadata": {
         "type": "object",
         "required": [
@@ -464,6 +543,36 @@
             "type": "string"
           },
           "source_markdown": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublishedPaperSummary": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "paper_id",
+          "version",
+          "published_at",
+          "metadata"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/PaperMetadata"
+          },
+          "paper_id": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "schema_version": {
             "type": "string"
           },
           "version": {

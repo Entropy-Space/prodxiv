@@ -72,6 +72,50 @@ async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn lists_latest_papers_with_stable_cursor_pagination(pool: PgPool) {
+    let storage = PostgresStorage::new(pool);
+    let mut published_ids = HashSet::new();
+    for index in 0..3 {
+        let (source, paper) = submission();
+        let published = storage
+            .publish_new(
+                paper,
+                &source,
+                "listing_test",
+                &format!("paperbot.listing.{index}"),
+            )
+            .await
+            .expect("paper should publish")
+            .paper;
+        published_ids.insert(published.paper_id);
+    }
+
+    let first = storage
+        .list_latest(2, None)
+        .await
+        .expect("first page should load");
+    assert_eq!(first.papers.len(), 2);
+    let cursor = first
+        .next_cursor
+        .as_ref()
+        .expect("first page should include a cursor");
+    let second = storage
+        .list_latest(2, Some(cursor))
+        .await
+        .expect("second page should load");
+    assert_eq!(second.papers.len(), 1);
+    assert!(second.next_cursor.is_none());
+
+    let listed_ids = first
+        .papers
+        .iter()
+        .chain(&second.papers)
+        .map(|paper| paper.paper_id.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(listed_ids, published_ids);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn allocates_unique_identifiers_under_concurrency(pool: PgPool) {
     let storage = PostgresStorage::new(pool);
     let publications = (0..8)
