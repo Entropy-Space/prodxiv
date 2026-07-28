@@ -31,6 +31,12 @@ export function defaultAuthPath(): string {
   return join(homedir(), ".tokn", "prodxiv", "auth.toml");
 }
 
+export async function initializeAuth(
+  authPath = defaultAuthPath(),
+): Promise<boolean> {
+  return createAuthTemplate(authPath);
+}
+
 export async function saveAuth(
   apiUrl: string,
   token: string,
@@ -49,12 +55,7 @@ export async function saveAuth(
     directory,
     `.${basename(authPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
   );
-  const contents = [
-    "version = 1",
-    `api_url = ${JSON.stringify(config.api_url)}`,
-    `token = ${JSON.stringify(config.token)}`,
-    "",
-  ].join("\n");
+  const contents = formatAuthFile(config);
   try {
     await writeFile(temporaryPath, contents, {
       encoding: "utf8",
@@ -126,6 +127,30 @@ export async function removeAuth(
   }
 }
 
+async function createAuthTemplate(authPath: string): Promise<boolean> {
+  const directory = dirname(authPath);
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await chmod(directory, 0o700);
+    await writeFile(authPath, formatAuthFile(), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    await chmod(authPath, 0o600);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      return false;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PaperbotError(
+      `could not create authentication template: ${message}`,
+      ExitCode.auth,
+    );
+  }
+}
+
 async function readAuthFile(authPath: string): Promise<AuthConfig | undefined> {
   let stats;
   try {
@@ -158,7 +183,10 @@ async function readAuthFile(authPath: string): Promise<AuthConfig | undefined> {
       typeof parsed.api_url !== "string" ||
       typeof parsed.token !== "string"
     ) {
-      throw new Error("api_url and token must be strings");
+      throw new PaperbotError(
+        `authentication template is incomplete: ${authPath}; fill in api_url and token`,
+        ExitCode.auth,
+      );
     }
     return {
       version: 1,
@@ -166,8 +194,30 @@ async function readAuthFile(authPath: string): Promise<AuthConfig | undefined> {
       token: validateToken(parsed.token),
     };
   } catch (error) {
+    if (error instanceof PaperbotError) {
+      throw error;
+    }
     throw authReadError(authPath, error);
   }
+}
+
+function formatAuthFile(config?: AuthConfig): string {
+  return [
+    "# Paperbot publishing credentials.",
+    "# This file contains a secret. Keep its permissions set to 0600.",
+    "version = 1",
+    "",
+    "# Base URL of the prodxiv publishing API.",
+    config === undefined
+      ? '# api_url = "https://your-prodxiv-api.example"'
+      : `api_url = ${JSON.stringify(config.api_url)}`,
+    "",
+    "# Bearer token used only for explicit publication requests.",
+    config === undefined
+      ? '# token = "replace-with-your-publishing-token"'
+      : `token = ${JSON.stringify(config.token)}`,
+    "",
+  ].join("\n");
 }
 
 function normalizeApiUrl(value: string): string {

@@ -3,7 +3,13 @@ import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { removeAuth, resolveAuth, saveAuth } from "../src/auth.ts";
+import {
+  initializeAuth,
+  removeAuth,
+  resolveAuth,
+  saveAuth,
+} from "../src/auth.ts";
+import { parseArguments } from "../src/arguments.ts";
 import { ExitCode, PaperbotError } from "../src/errors.ts";
 
 const token = "paperbot_test_token_with_32_characters";
@@ -20,6 +26,17 @@ afterEach(async () => {
 });
 
 describe("Paperbot authentication", () => {
+  test("uses bare auth and auth init to bootstrap credentials", () => {
+    expect(parseArguments(["auth"])).toEqual({
+      command: "auth",
+      action: "init",
+    });
+    expect(parseArguments(["auth", "init"])).toEqual({
+      command: "auth",
+      action: "init",
+    });
+  });
+
   test("stores and resolves a protected TOML credential", async () => {
     await saveAuth("https://api.prodxiv.example/", token, authPath);
 
@@ -29,8 +46,14 @@ describe("Paperbot authentication", () => {
     ).toBe(0o700);
     expect(await readFile(authPath, "utf8")).toBe(
       [
+        "# Paperbot publishing credentials.",
+        "# This file contains a secret. Keep its permissions set to 0600.",
         "version = 1",
+        "",
+        "# Base URL of the prodxiv publishing API.",
         'api_url = "https://api.prodxiv.example"',
+        "",
+        "# Bearer token used only for explicit publication requests.",
         `token = "${token}"`,
         "",
       ].join("\n"),
@@ -46,6 +69,41 @@ describe("Paperbot authentication", () => {
       token,
       source: "file",
     });
+  });
+
+  test("creates a commented template without overwriting it", async () => {
+    expect(await initializeAuth(authPath)).toBe(true);
+
+    expect((await stat(authPath)).mode & 0o777).toBe(0o600);
+    const template = await readFile(authPath, "utf8");
+    expect(template).toContain("# Paperbot publishing credentials.");
+    expect(template).toContain(
+      '# api_url = "https://your-prodxiv-api.example"',
+    );
+    expect(template).toContain(
+      '# token = "replace-with-your-publishing-token"',
+    );
+
+    expect(await initializeAuth(authPath)).toBe(false);
+    expect(await readFile(authPath, "utf8")).toBe(template);
+    await expect(
+      resolveAuth({ auth_path: authPath, env: {} }),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.auth,
+      message: expect.stringContaining("authentication template is incomplete"),
+    });
+    expect(await readFile(authPath, "utf8")).toBe(template);
+  });
+
+  test("does not create credentials while resolving missing auth", async () => {
+    await expect(
+      resolveAuth({ auth_path: authPath, env: {} }),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.auth,
+      message: expect.stringContaining("authentication is not configured"),
+    });
+    expect(Bun.file(authPath).size).toBe(0);
+    expect(await Bun.file(authPath).exists()).toBe(false);
   });
 
   test("refuses to read a credential visible to other users", async () => {

@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 
 import { parseArguments } from "./arguments.ts";
-import { defaultAuthPath, removeAuth, resolveAuth, saveAuth } from "./auth.ts";
+import {
+  defaultAuthPath,
+  initializeAuth,
+  removeAuth,
+  resolveAuth,
+  saveAuth,
+} from "./auth.ts";
 import { preparePaperDraft, writePaperDraft } from "./drafter.ts";
 import { ExitCode, PaperbotError } from "./errors.ts";
 import { formatScanResult, formatValidationResult } from "./output.ts";
@@ -20,6 +26,7 @@ Usage:
   paperbot scan [repository] [--format text|json] [--exclude <glob>] [--include <glob>]
   paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
+  paperbot auth [init]
   paperbot auth set --api-url <url> [--token-stdin]
   paperbot auth status
   paperbot auth remove
@@ -80,6 +87,15 @@ export async function run(
     }
 
     if (parsed.command === "auth") {
+      if (parsed.action === "init") {
+        const created = await initializeAuth();
+        io.stdout(
+          created
+            ? `Created authentication template: ${defaultAuthPath()}`
+            : `Authentication file already exists: ${defaultAuthPath()}`,
+        );
+        return ExitCode.success;
+      }
       if (parsed.action === "set") {
         const token = parsed.token_stdin
           ? await (io.read_stdin ?? defaultIo.read_stdin)()

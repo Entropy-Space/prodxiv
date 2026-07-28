@@ -35,6 +35,10 @@ export interface PublishArguments {
 export type AuthArguments =
   | {
       command: "auth";
+      action: "init";
+    }
+  | {
+      command: "auth";
       action: "set";
       api_url: string;
       token_stdin: boolean;
@@ -138,6 +142,12 @@ function parseAuthArguments(
   args: string[],
 ): AuthArguments | { command: "help" } {
   const action = args[0];
+  if (action === undefined || action === "init") {
+    if (args.length > 1) {
+      throw usageError("auth init does not accept options");
+    }
+    return { command: "auth", action: "init" };
+  }
   if (action === "--help" || action === "-h") {
     return { command: "help" };
   }
@@ -148,7 +158,7 @@ function parseAuthArguments(
     return { command: "auth", action };
   }
   if (action !== "set") {
-    throw usageError("auth requires one of: set, status, remove");
+    throw usageError("auth requires one of: init, set, status, remove");
   }
 
   let api_url: string | undefined;

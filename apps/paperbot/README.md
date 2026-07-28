@@ -10,6 +10,7 @@ bun run paperbot scan . --include .env.example
 bun run paperbot draft scan.json --output paper.md
 bun run paperbot validate paper.md
 bun run paperbot validate paper.md --profile publication --format json
+bun run paperbot auth
 bun run paperbot auth set --api-url https://api.prodxiv.example
 bun run paperbot publish paper.md
 ```
@@ -39,7 +40,8 @@ and author to resolve. Without `--output`, the scaffold is written to stdout.
 With `--output`, Paperbot creates a new file and refuses to overwrite an
 existing draft.
 
-`auth set` stores the API URL and publishing token in
+`auth` creates a commented credential template if it does not exist and never
+overwrites it. `auth set` stores the API URL and publishing token in
 `~/.tokn/prodxiv/auth.toml`. Paperbot creates the directory with mode `0700`
 and the file with mode `0600`; it refuses to read a credential file accessible
 by other users. The token is entered through a hidden prompt by default. Use
@@ -51,7 +53,8 @@ exact source hash, and asks for confirmation before making a remote write.
 `--yes` is the explicit non-interactive confirmation for agents and CI. A
 deterministic idempotency key derived from the exact Markdown lets the command
 safely recover the original publication after a timeout instead of creating a
-duplicate.
+duplicate. It never creates or changes the credential file; run `paperbot auth`
+first to bootstrap the template.
 
 ## Exit codes
 

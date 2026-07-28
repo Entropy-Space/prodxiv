@@ -72,8 +72,10 @@ After the author explicitly asks to publish:
 
 Do not read, display, or copy the token from
 `~/.tokn/prodxiv/auth.toml`. If authentication is missing, ask the author to
-run `PAPERBOT_CMD auth set --api-url <url>` themselves. Never pass a token as a
-command-line argument.
+run `PAPERBOT_CMD auth` to create the commented template or
+`PAPERBOT_CMD auth set --api-url <url>` to configure it directly. Publishing
+does not initialize credentials. Never pass a token as a command-line
+argument.
 
 ## Finish
 

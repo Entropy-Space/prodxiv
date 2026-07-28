@@ -124,7 +124,9 @@ drafting approval also authorizes publication.
 Local publishing credentials live in `~/.tokn/prodxiv/auth.toml` with
 owner-only permissions. Environment variables are supported for CI. The token
 is temporary MVP authorization and must never be included in paper content,
-diagnostics, or command output.
+diagnostics, or command output. `paperbot auth` creates a commented credential
+template when the file does not exist. Publishing never creates or changes the
+credential file.
 
 Private and unpublished code introduces additional trust requirements. Local
 analysis is the default so repository contents do not need to be uploaded. If
