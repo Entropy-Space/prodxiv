@@ -37,7 +37,10 @@ type PublishedPaperMetadata = PaperMetadata & {
   [Field in PublicationField]-?: NonNullable<PaperMetadata[Field]>;
 };
 
-export const paperMetadataSchema = canonicalSchema(validateMetadata)
+export const paperMetadataSchema = canonicalSchema(
+  validateMetadata,
+  normalizeYamlMetadata,
+)
   .superRefine((value, context) => {
     for (const field of validation_policy.paper.publication_required_metadata) {
       if (value[field] === undefined || value[field] === null) {
@@ -51,9 +54,13 @@ export const paperMetadataSchema = canonicalSchema(validateMetadata)
   })
   .transform((value) => value as PublishedPaperMetadata);
 
-function canonicalSchema<Value>(validate: ValidateFunction<Value>) {
+function canonicalSchema<Value>(
+  validate: ValidateFunction<Value>,
+  normalize: (value: unknown) => unknown,
+) {
   return z
     .unknown()
+    .transform(normalize)
     .superRefine((value, context) => {
       if (validate(value)) {
         return;
@@ -67,6 +74,24 @@ function canonicalSchema<Value>(validate: ValidateFunction<Value>) {
       }
     })
     .transform((value) => value as Value);
+}
+
+function normalizeYamlMetadata(value: unknown): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("published_at" in value) ||
+    !(value.published_at instanceof Date) ||
+    Number.isNaN(value.published_at.getTime())
+  ) {
+    return value;
+  }
+
+  return {
+    ...value,
+    published_at: value.published_at.toISOString().slice(0, 10),
+  };
 }
 
 function errorPath(error: ErrorObject): Array<string | number> {
