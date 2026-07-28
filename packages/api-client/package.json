@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "exports": {
     ".": "./src/client.ts",
+    "./public-paper-url": "./src/public-paper-url.ts",
     "./schema": "./src/generated/api.ts"
   },
   "scripts": {
