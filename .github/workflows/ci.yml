@@ -58,8 +58,8 @@ jobs:
           cargo run -p prodxiv-api --bin generate-openapi -- openapi/prodxiv-api.json
           git diff --exit-code -- openapi/prodxiv-api.json
 
-      - name: Test Vercel API build selection
-        run: sh scripts/test-vercel-api-ignore-build.sh
+      - name: Test Vercel build selection
+        run: sh scripts/test-vercel-ignore-build.sh
 
   paperbot:
     name: paperbot
