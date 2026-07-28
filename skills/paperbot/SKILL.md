@@ -24,23 +24,23 @@ selected command rather than typing that label literally.
 Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
-## Select focused guidance
+## Load guidance progressively
 
-Run `PAPERBOT_CMD skills` to discover artifact scopes and their components.
-Run `PAPERBOT_CMD skills <scope> <component>` before focused work:
+Run `PAPERBOT_CMD skills` to discover artifact scopes. Load the relevant
+SKILL.md-like scope guide before loading any detailed component:
 
-- Project: [discovery](references/project-discovery.md),
-  [architecture](references/project-architecture.md), and
-  [intent](references/project-intent.md).
-- Paper: [structure](references/paper-structure.md),
-  [references](references/paper-references.md),
-  [benchmarks](references/paper-benchmarks.md), and
-  [figures](references/paper-figures.md).
-- Publication: [readiness](references/publication-readiness.md) and
-  [submission](references/publication-submission.md).
+- [Project](references/project-skill.md) for repository evidence,
+  architecture, and author intent.
+- [Paper](references/paper-skill.md) for structure, references, benchmarks,
+  and figures.
+- [Publication](references/publication-skill.md) for readiness and explicit
+  submission.
 
-Use multiple components when a task crosses boundaries. Treat the selected
-component as focused guidance, not as authorization for remote writes.
+Run `PAPERBOT_CMD skills <scope>` to load the scope guide. Follow its
+instructions to load a detailed component with
+`PAPERBOT_CMD skills <scope> <component>` only when the current task needs it.
+Do not load every component by default. Treat guidance as procedure, not as
+authorization for remote writes.
 
 ## Build a draft
 

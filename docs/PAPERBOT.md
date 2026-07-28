@@ -101,12 +101,16 @@ than workflow phases:
 - `paper` covers structure, references, benchmarks, and figures;
 - `publication` covers readiness review and explicit submission.
 
-Use `paperbot skills` to discover the catalog,
-`paperbot skills <scope>` to list one scope, and
-`paperbot skills <scope> <component>` to print focused Markdown instructions.
+The catalog follows Agent Skill progressive disclosure:
+
+1. `paperbot skills` returns scope names and descriptions.
+2. `paperbot skills <scope>` returns a concise SKILL.md-like guide that
+   identifies when its components are relevant.
+3. `paperbot skills <scope> <component>` returns one detailed reference.
+
 The command also supports versioned JSON output. Scope names describe stable
 objects; drafting and review are activities that may use components from more
-than one scope.
+than one scope. Agents should not load every component by default.
 
 ## Revision assistance
 

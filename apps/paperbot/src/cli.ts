@@ -102,21 +102,10 @@ export async function run(
             ? JSON.stringify(
                 {
                   schema_version: "1",
-                  scopes: skillCatalog.map(
-                    ({ scope, description, components }) => ({
-                      scope,
-                      description,
-                      components: components.map(
-                        ({
-                          component,
-                          description: component_description,
-                        }) => ({
-                          component,
-                          description: component_description,
-                        }),
-                      ),
-                    }),
-                  ),
+                  scopes: skillCatalog.map(({ scope, description }) => ({
+                    scope,
+                    description,
+                  })),
                 },
                 null,
                 2,
@@ -141,6 +130,7 @@ export async function run(
                   schema_version: "1",
                   scope: scope.scope,
                   description: scope.description,
+                  instructions: scope.instructions.trim(),
                   components: scope.components.map(
                     ({ component, description }) => ({
                       component,
@@ -151,7 +141,7 @@ export async function run(
                 null,
                 2,
               )
-            : formatSkillCatalog(scope),
+            : scope.instructions.trim(),
         );
         return ExitCode.success;
       }

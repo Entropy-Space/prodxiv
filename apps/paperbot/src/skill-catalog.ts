@@ -1,11 +1,14 @@
 import paperBenchmarks from "../../../skills/paperbot/references/paper-benchmarks.md" with { type: "text" };
 import paperFigures from "../../../skills/paperbot/references/paper-figures.md" with { type: "text" };
 import paperReferences from "../../../skills/paperbot/references/paper-references.md" with { type: "text" };
+import paperSkill from "../../../skills/paperbot/references/paper-skill.md" with { type: "text" };
 import paperStructure from "../../../skills/paperbot/references/paper-structure.md" with { type: "text" };
 import projectArchitecture from "../../../skills/paperbot/references/project-architecture.md" with { type: "text" };
 import projectDiscovery from "../../../skills/paperbot/references/project-discovery.md" with { type: "text" };
 import projectIntent from "../../../skills/paperbot/references/project-intent.md" with { type: "text" };
+import projectSkill from "../../../skills/paperbot/references/project-skill.md" with { type: "text" };
 import publicationReadiness from "../../../skills/paperbot/references/publication-readiness.md" with { type: "text" };
+import publicationSkill from "../../../skills/paperbot/references/publication-skill.md" with { type: "text" };
 import publicationSubmission from "../../../skills/paperbot/references/publication-submission.md" with { type: "text" };
 
 export type SkillScope = "project" | "paper" | "publication";
@@ -19,6 +22,7 @@ export interface SkillComponent {
 export interface SkillScopeDefinition {
   scope: SkillScope;
   description: string;
+  instructions: string;
   components: readonly SkillComponent[];
 }
 
@@ -26,6 +30,7 @@ export const skillCatalog: readonly SkillScopeDefinition[] = [
   {
     scope: "project",
     description: "Understand repository evidence and product intent.",
+    instructions: projectSkill,
     components: [
       {
         component: "discovery",
@@ -47,6 +52,7 @@ export const skillCatalog: readonly SkillScopeDefinition[] = [
   {
     scope: "paper",
     description: "Author evidence-backed product paper content.",
+    instructions: paperSkill,
     components: [
       {
         component: "structure",
@@ -73,6 +79,7 @@ export const skillCatalog: readonly SkillScopeDefinition[] = [
   {
     scope: "publication",
     description: "Prepare and explicitly submit an immutable version.",
+    instructions: publicationSkill,
     components: [
       {
         component: "readiness",
@@ -103,28 +110,14 @@ export function findSkillComponent(
   );
 }
 
-export function formatSkillCatalog(
-  scopeDefinition?: SkillScopeDefinition,
-): string {
-  const scopes =
-    scopeDefinition === undefined ? skillCatalog : [scopeDefinition];
-  const heading =
-    scopeDefinition === undefined
-      ? "Paperbot skill scopes"
-      : `Paperbot ${scopeDefinition.scope} skills`;
-  const lines = [heading, ""];
-
-  for (const scope of scopes) {
-    if (scopeDefinition === undefined) {
-      lines.push(`${scope.scope} — ${scope.description}`);
-    }
-    for (const component of scope.components) {
-      lines.push(
-        `  ${scope.scope} ${component.component} — ${component.description}`,
-      );
-    }
-    lines.push("");
-  }
-
-  return lines.join("\n").trimEnd();
+export function formatSkillCatalog(): string {
+  return [
+    "Paperbot skill scopes",
+    "",
+    ...skillCatalog.map(
+      ({ scope, description }) => `${scope} — ${description}`,
+    ),
+    "",
+    "Run paperbot skills <scope> to load its guidance.",
+  ].join("\n");
 }

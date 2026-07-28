@@ -11,6 +11,7 @@ bun run paperbot draft scan.json --output paper.md
 bun run paperbot validate paper.md
 bun run paperbot validate paper.md --profile publication --format json
 bun run paperbot skills
+bun run paperbot skills paper
 bun run paperbot skills paper references
 bun run paperbot skills publication readiness --format json
 bun run paperbot auth
@@ -25,10 +26,11 @@ private manifest containing repository metadata and the selected file
 inventory. Drafting is a separate, agent-guided step.
 
 `skills` exposes focused agent guidance through stable artifact scopes:
-`project`, `paper`, and `publication`. Run `paperbot skills` to discover every
-component, `paperbot skills <scope>` to narrow the list, or
-`paperbot skills <scope> <component>` to print one Markdown instruction
-component. JSON output is versioned for agent integrations. The guidance is
+`project`, `paper`, and `publication`. It follows Agent Skill progressive
+disclosure: `paperbot skills` returns scope metadata,
+`paperbot skills <scope>` returns a concise SKILL.md-like guide, and
+`paperbot skills <scope> <component>` returns one detailed reference only when
+needed. JSON output is versioned for agent integrations. The guidance is
 bundled from the portable Paperbot Agent Skill so the CLI and installed skill
 share one source.
 
