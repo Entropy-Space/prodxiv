@@ -41,9 +41,10 @@ async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
     let (source, paper) = submission();
 
     let published = storage
-        .publish_new(paper, &source, "integration_test")
+        .publish_new(paper, &source, "integration_test", "paperbot.integration")
         .await
-        .expect("paper should publish");
+        .expect("paper should publish")
+        .paper;
     assert_eq!(published.version, 1);
     assert!(published.paper_id.starts_with("prodxiv:"));
 
@@ -74,14 +75,20 @@ async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
 async fn allocates_unique_identifiers_under_concurrency(pool: PgPool) {
     let storage = PostgresStorage::new(pool);
     let publications = (0..8)
-        .map(|_| {
+        .map(|index| {
             let storage = storage.clone();
             let (source, paper) = submission();
             tokio::spawn(async move {
                 storage
-                    .publish_new(paper, &source, "concurrency_test")
+                    .publish_new(
+                        paper,
+                        &source,
+                        "concurrency_test",
+                        &format!("paperbot.concurrent.{index}"),
+                    )
                     .await
                     .expect("concurrent publication should succeed")
+                    .paper
             })
         })
         .collect::<Vec<_>>();
@@ -92,4 +99,31 @@ async fn allocates_unique_identifiers_under_concurrency(pool: PgPool) {
         assert!(paper_ids.insert(published.paper_id));
     }
     assert_eq!(paper_ids.len(), 8);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn publishes_an_idempotency_key_only_once_under_concurrency(pool: PgPool) {
+    let storage = PostgresStorage::new(pool);
+    let publications = (0..8)
+        .map(|_| {
+            let storage = storage.clone();
+            let (source, paper) = submission();
+            tokio::spawn(async move {
+                storage
+                    .publish_new(paper, &source, "retry_test", "paperbot.same-request")
+                    .await
+                    .expect("idempotent publication should succeed")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut paper_ids = HashSet::new();
+    let mut replay_count = 0;
+    for publication in publications {
+        let outcome = publication.await.expect("publication task should finish");
+        paper_ids.insert(outcome.paper.paper_id);
+        replay_count += usize::from(outcome.replayed);
+    }
+    assert_eq!(paper_ids.len(), 1);
+    assert_eq!(replay_count, 7);
 }

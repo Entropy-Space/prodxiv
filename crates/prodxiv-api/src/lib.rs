@@ -18,7 +18,7 @@ use prodxiv_domain::{
     Diagnostic, PaperDocument, PublishedPaper, ValidationProfile, ValidationReport,
     canonicalize_paper_id, validate_paper,
 };
-use prodxiv_storage::{PostgresStorage, StorageError};
+use prodxiv_storage::{PostgresStorage, PublishOutcome, StorageError, is_valid_idempotency_key};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -153,7 +153,8 @@ pub trait PublicationStore: Send + Sync {
         paper: PaperDocument,
         submitted_markdown: &str,
         actor: &str,
-    ) -> Result<PublishedPaper, StoreError>;
+        idempotency_key: &str,
+    ) -> Result<PublishOutcome, StoreError>;
 
     async fn find_version(
         &self,
@@ -169,8 +170,9 @@ impl PublicationStore for PostgresStorage {
         paper: PaperDocument,
         submitted_markdown: &str,
         actor: &str,
-    ) -> Result<PublishedPaper, StoreError> {
-        PostgresStorage::publish_new(self, paper, submitted_markdown, actor)
+        idempotency_key: &str,
+    ) -> Result<PublishOutcome, StoreError> {
+        PostgresStorage::publish_new(self, paper, submitted_markdown, actor, idempotency_key)
             .await
             .map_err(StoreError::from)
     }
@@ -192,6 +194,8 @@ pub enum StoreError {
     InvalidPublication(ValidationReport),
     #[error("paper identifier space for the current month is exhausted")]
     IdentifierSpaceExhausted,
+    #[error("idempotency key was already used for different content")]
+    IdempotencyConflict,
     #[error("storage operation failed")]
     Internal,
 }
@@ -203,12 +207,14 @@ impl From<StorageError> for StoreError {
                 report,
             )) => Self::InvalidPublication(report),
             StorageError::IdentifierSpaceExhausted { .. } => Self::IdentifierSpaceExhausted,
+            StorageError::IdempotencyConflict => Self::IdempotencyConflict,
             StorageError::Database(_)
             | StorageError::Migration(_)
             | StorageError::Publication(prodxiv_domain::PublicationPreparationError::Serialize(
                 _,
             ))
             | StorageError::InvalidActor
+            | StorageError::InvalidIdempotencyKey
             | StorageError::CorruptVersion(_) => {
                 tracing::error!(error = %error, "publication storage operation failed");
                 Self::Internal
@@ -310,10 +316,20 @@ async fn health() -> Json<HealthResponse> {
     post,
     path = "/v1/papers",
     security(("bearer_token" = [])),
+    params(
+      (
+        "Idempotency-Key" = String,
+        Header,
+        description = "Stable key for safely retrying one exact publication request"
+      )
+    ),
     request_body = PublishPaperRequest,
     responses(
-        (status = 201, description = "Paper was published", body = PublishedPaper),
-        (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 201, description = "Paper was published", body = PublishedPaper),
+      (status = 200, description = "Original publication returned for an idempotent retry", body = PublishedPaper),
+      (status = 400, description = "Request or idempotency key is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 409, description = "Idempotency key was reused for different content", body = ErrorResponse),
         (status = 422, description = "Paper is malformed or invalid", body = ErrorResponse),
         (status = 500, description = "Publishing failed", body = ErrorResponse),
         (status = 503, description = "Monthly identifier space is exhausted", body = ErrorResponse)
@@ -325,6 +341,7 @@ async fn publish_paper(
     payload: Result<Json<PublishPaperRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     authorize(&headers, &state.publish_token)?;
+    let idempotency_key = idempotency_key(&headers)?;
     let Json(payload) = payload.map_err(|error| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -344,21 +361,54 @@ async fn publish_paper(
         return Err(ApiError::validation(report));
     }
 
-    let published = state
+    let outcome = state
         .store
-        .publish_new(paper, &payload.source_markdown, &state.publish_actor)
+        .publish_new(
+            paper,
+            &payload.source_markdown,
+            &state.publish_actor,
+            idempotency_key,
+        )
         .await
         .map_err(store_error)?;
+    let published = outcome.paper;
     let location = format!(
         "/v1/papers/{}/versions/{}",
         published.paper_id, published.version
     );
-    let mut response = (StatusCode::CREATED, Json(published)).into_response();
+    let status = if outcome.replayed {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
+    let mut response = (status, Json(published)).into_response();
     response.headers_mut().insert(
         header::LOCATION,
         HeaderValue::from_str(&location).expect("paper locations contain valid header characters"),
     );
     Ok(response)
+}
+
+fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
+    let key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "request.idempotency_key_required",
+                "Idempotency-Key header is required",
+            )
+        })?;
+    if is_valid_idempotency_key(key) {
+        Ok(key)
+    } else {
+        Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.idempotency_key_invalid",
+            "Idempotency-Key must contain 8 to 128 letters, digits, '.', '_', '-', or ':'",
+        ))
+    }
 }
 
 #[utoipa::path(
@@ -438,6 +488,11 @@ fn store_error(error: StoreError) -> ApiError {
             StatusCode::SERVICE_UNAVAILABLE,
             "publication.identifier_space_exhausted",
             "paper identifier space for the current month is exhausted",
+        ),
+        StoreError::IdempotencyConflict => ApiError::new(
+            StatusCode::CONFLICT,
+            "publication.idempotency_conflict",
+            "idempotency key was already used for different paper content",
         ),
         StoreError::Internal => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,

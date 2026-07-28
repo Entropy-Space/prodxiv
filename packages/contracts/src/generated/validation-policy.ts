@@ -19,6 +19,8 @@ export const validation_policy = {
       "version",
       "license",
     ],
+    submission_forbidden_metadata: ["paper_id", "published_at", "version"],
+    submission_required_metadata: ["license"],
   },
 } as const;
 export type ValidationPolicy = typeof validation_policy;

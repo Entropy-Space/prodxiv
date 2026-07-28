@@ -32,6 +32,17 @@
       "post": {
         "tags": [],
         "operationId": "publish_paper",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Stable key for safely retrying one exact publication request",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -43,6 +54,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "Original publication returned for an idempotent retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPaper"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Paper was published",
             "content": {
@@ -53,8 +74,28 @@
               }
             }
           },
+          "400": {
+            "description": "Request or idempotency key is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key was reused for different content",
             "content": {
               "application/json": {
                 "schema": {

@@ -5,6 +5,7 @@ use prodxiv_domain::{
     encode_paper_id_suffix, prepare_publication,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::{
     PgPool, Row,
     migrate::{MigrateError, Migrator},
@@ -18,6 +19,20 @@ pub static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 #[derive(Debug, Clone)]
 pub struct PostgresStorage {
     pool: PgPool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishOutcome {
+    pub paper: PublishedPaper,
+    pub replayed: bool,
+}
+
+#[must_use]
+pub fn is_valid_idempotency_key(value: &str) -> bool {
+    (8..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
 }
 
 impl PostgresStorage {
@@ -56,20 +71,74 @@ impl PostgresStorage {
     ///
     /// # Errors
     ///
-    /// Returns an error when the actor is empty, the monthly identifier space
-    /// is exhausted, the finalized paper is invalid, or PostgreSQL rejects the
+    /// Returns an error when the actor or idempotency key is invalid, the key
+    /// was already used for different content, the monthly identifier space is
+    /// exhausted, the finalized paper is invalid, or PostgreSQL rejects the
     /// transaction.
     pub async fn publish_new(
         &self,
         paper: PaperDocument,
         submitted_markdown: &str,
         actor: &str,
-    ) -> Result<PublishedPaper, StorageError> {
+        idempotency_key: &str,
+    ) -> Result<PublishOutcome, StorageError> {
         if actor.trim().is_empty() {
             return Err(StorageError::InvalidActor);
         }
+        if !is_valid_idempotency_key(idempotency_key) {
+            return Err(StorageError::InvalidIdempotencyKey);
+        }
 
         let mut transaction = self.pool.begin().await?;
+        let request_sha256 = format!("{:x}", Sha256::digest(submitted_markdown.as_bytes()));
+        let lock_key = format!("{}:{actor}{idempotency_key}", actor.len());
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(lock_key)
+            .execute(&mut *transaction)
+            .await?;
+
+        let existing = sqlx::query(
+            r#"
+            SELECT
+              publication_requests.request_sha256,
+              paper_versions.paper_id,
+              paper_versions.version,
+              paper_versions.published_at::text AS published_at,
+              paper_versions.metadata,
+              paper_versions.source_markdown
+            FROM publication_requests
+            JOIN paper_versions USING (paper_id, version)
+            WHERE publication_requests.actor = $1
+              AND publication_requests.idempotency_key = $2
+            "#,
+        )
+        .bind(actor)
+        .bind(idempotency_key)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(row) = existing {
+            let existing_sha256: String = row.try_get("request_sha256")?;
+            if existing_sha256 != request_sha256 {
+                return Err(StorageError::IdempotencyConflict);
+            }
+            let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
+            let version: i32 = row.try_get("version")?;
+            let paper = PublishedPaper {
+                schema_version: metadata.schema_version.clone(),
+                paper_id: row.try_get("paper_id")?,
+                version: u32::try_from(version)
+                    .map_err(|_| StorageError::CorruptVersion(version))?,
+                published_at: row.try_get("published_at")?,
+                metadata: metadata.0,
+                source_markdown: row.try_get("source_markdown")?,
+            };
+            transaction.commit().await?;
+            return Ok(PublishOutcome {
+                paper,
+                replayed: true,
+            });
+        }
+
         let clock = sqlx::query(
             "SELECT to_char(CURRENT_DATE, 'YYMM') AS period, CURRENT_DATE::text AS published_at",
         )
@@ -156,8 +225,31 @@ impl PostgresStorage {
         .execute(&mut *transaction)
         .await?;
 
+        sqlx::query(
+            r#"
+            INSERT INTO publication_requests (
+              actor,
+              idempotency_key,
+              request_sha256,
+              paper_id,
+              version
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(actor)
+        .bind(idempotency_key)
+        .bind(request_sha256)
+        .bind(&published.paper_id)
+        .bind(i32::try_from(published.version).expect("version one fits in i32"))
+        .execute(&mut *transaction)
+        .await?;
+
         transaction.commit().await?;
-        Ok(published)
+        Ok(PublishOutcome {
+            paper: published,
+            replayed: false,
+        })
     }
 
     /// Finds one exact immutable paper version.
@@ -223,6 +315,10 @@ pub enum StorageError {
     Publication(#[from] PublicationPreparationError),
     #[error("publication actor must not be empty")]
     InvalidActor,
+    #[error("publication idempotency key is invalid")]
+    InvalidIdempotencyKey,
+    #[error("publication idempotency key was already used for different content")]
+    IdempotencyConflict,
     #[error("paper identifier space for period {period} is exhausted")]
     IdentifierSpaceExhausted { period: String },
     #[error("stored paper version {0} is invalid")]
