@@ -94,12 +94,21 @@ The API deploys from the repository-root `Containerfile.vercel` as a separate
 Vercel project. Keep the Astro website on its native Vercel project; the local
 multi-target `Containerfile` is not the website's production artifact.
 
-In the `prodxiv-api` Vercel project, set **Settings → Build and Deployment →
-Ignored Build Step** to `sh scripts/vercel-api-ignore-build.sh`. Do not set
-this on `prodxiv-web`; a shared root `vercel.json` would affect both projects.
-The script skips API deployments when none of the API container inputs changed
-and fails open: if Vercel cannot provide the previous successful deployment
-SHA, the API is built rather than incorrectly skipped.
+Configure each Vercel project under **Settings → Build and Deployment →
+Ignored Build Step**:
+
+- `prodxiv-api`: `sh scripts/vercel-ignore-build.sh api`
+- `prodxiv-web`: `sh scripts/vercel-ignore-build.sh web`
+
+The existing `sh scripts/vercel-api-ignore-build.sh` API setting remains
+supported as a compatibility wrapper. Do not use a shared root `vercel.json`
+because the two projects require different targets.
+
+The filter first compares against Vercel's previous deployment SHA. On the
+first preview for a new branch, it falls back to the merge base with
+`origin/main` when that ref is available and older than the deployment commit.
+It builds when neither range can be proven. This fail-open behavior avoids
+silently skipping a required deployment.
 
 Set:
 
