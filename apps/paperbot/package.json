@@ -8,9 +8,10 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test tests/scanner.test.ts tests/validator.test.ts tests/drafter.test.ts tests/workflow.test.ts"
+    "test": "bun test tests/*.test.ts"
   },
   "dependencies": {
+    "@prodxiv/api-client": "workspace:*",
     "@prodxiv/contracts": "workspace:*",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",

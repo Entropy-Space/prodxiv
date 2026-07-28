@@ -990,6 +990,7 @@ dependencies = [
  "prodxiv-domain",
  "serde_json",
  "serde_yaml_neo",
+ "sha2 0.10.9",
  "sqlx",
  "thiserror",
  "tokio",

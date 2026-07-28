@@ -5,6 +5,9 @@ export const ExitCode = {
   scan: 4,
   io: 4,
   validation: 5,
+  auth: 6,
+  network: 7,
+  remote: 8,
 } as const;
 
 export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];

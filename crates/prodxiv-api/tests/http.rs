@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::Path,
     sync::{Arc, Mutex},
@@ -11,6 +12,7 @@ use axum::{
 };
 use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{PaperDocument, PublicationIdentity, PublishedPaper, prepare_publication};
+use prodxiv_storage::PublishOutcome;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -19,6 +21,7 @@ const TOKEN: &str = "test_token_with_at_least_32_characters";
 #[derive(Default)]
 struct FakeStore {
     publications: Mutex<Vec<PublishedPaper>>,
+    requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
 }
 
 #[async_trait]
@@ -26,9 +29,24 @@ impl PublicationStore for FakeStore {
     async fn publish_new(
         &self,
         paper: PaperDocument,
-        _submitted_markdown: &str,
+        submitted_markdown: &str,
         _actor: &str,
-    ) -> Result<PublishedPaper, StoreError> {
+        idempotency_key: &str,
+    ) -> Result<PublishOutcome, StoreError> {
+        if let Some((existing_source, published)) = self
+            .requests
+            .lock()
+            .expect("fake requests should lock")
+            .get(idempotency_key)
+        {
+            if existing_source != submitted_markdown {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            return Ok(PublishOutcome {
+                paper: published.clone(),
+                replayed: true,
+            });
+        }
         let published = prepare_publication(
             paper,
             PublicationIdentity {
@@ -42,7 +60,17 @@ impl PublicationStore for FakeStore {
             .lock()
             .expect("fake store should lock")
             .push(published.clone());
-        Ok(published)
+        self.requests
+            .lock()
+            .expect("fake requests should lock")
+            .insert(
+                idempotency_key.to_owned(),
+                (submitted_markdown.to_owned(), published.clone()),
+            );
+        Ok(PublishOutcome {
+            paper: published,
+            replayed: false,
+        })
     }
 
     async fn find_version(
@@ -97,6 +125,7 @@ async fn publishing_requires_authorization() {
         .oneshot(
             Request::post("/v1/papers")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header("idempotency-key", "paperbot.test.unauthorized")
                 .body(Body::from(
                     json!({ "source_markdown": submission_markdown() }).to_string(),
                 ))
@@ -125,6 +154,7 @@ async fn publishes_and_reads_one_exact_version() {
             Request::post("/v1/papers")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "paperbot.test.publish")
                 .body(Body::from(
                     json!({ "source_markdown": submission_markdown() }).to_string(),
                 ))
@@ -163,6 +193,7 @@ async fn rejects_server_owned_submission_metadata() {
             Request::post("/v1/papers")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "paperbot.test.invalid")
                 .body(Body::from(json!({ "source_markdown": source }).to_string()))
                 .expect("request should build"),
         )
@@ -178,5 +209,95 @@ async fn rejects_server_owned_submission_metadata() {
             .expect("diagnostics should be an array")
             .iter()
             .any(|diagnostic| diagnostic["code"] == "submission.paper_id_forbidden")
+    );
+}
+
+#[tokio::test]
+async fn requires_an_idempotency_key() {
+    let response = app(Arc::new(FakeStore::default()))
+        .oneshot(
+            Request::post("/v1/papers")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json_body(response).await["error"]["code"],
+        "request.idempotency_key_required"
+    );
+}
+
+#[tokio::test]
+async fn returns_the_original_publication_for_an_idempotent_retry() {
+    let store = Arc::new(FakeStore::default());
+    let application = app(store.clone());
+    let request = || {
+        Request::post("/v1/papers")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("idempotency-key", "paperbot.test.retry")
+            .body(Body::from(
+                json!({ "source_markdown": submission_markdown() }).to_string(),
+            ))
+            .expect("request should build")
+    };
+
+    let first = application
+        .clone()
+        .oneshot(request())
+        .await
+        .expect("first request should complete");
+    let second = application
+        .oneshot(request())
+        .await
+        .expect("retry should complete");
+
+    assert_eq!(first.status(), StatusCode::CREATED);
+    assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(
+        store
+            .publications
+            .lock()
+            .expect("fake store should lock")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn rejects_an_idempotency_key_reused_for_different_content() {
+    let application = app(Arc::new(FakeStore::default()));
+    let source = submission_markdown();
+    let request = |source: String| {
+        Request::post("/v1/papers")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("idempotency-key", "paperbot.test.conflict")
+            .body(Body::from(json!({ "source_markdown": source }).to_string()))
+            .expect("request should build")
+    };
+
+    let first = application
+        .clone()
+        .oneshot(request(source.clone()))
+        .await
+        .expect("first request should complete");
+    let conflict = application
+        .oneshot(request(format!("{source}\n")))
+        .await
+        .expect("conflicting request should complete");
+
+    assert_eq!(first.status(), StatusCode::CREATED);
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json_body(conflict).await["error"]["code"],
+        "publication.idempotency_conflict"
     );
 }

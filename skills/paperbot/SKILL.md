@@ -1,6 +1,6 @@
 ---
 name: paperbot
-description: Turn an existing repository and its documentation into a prodxiv product paper draft. Use when an agent needs to scan a codebase, draft or improve a Markdown product paper, interview an author about intent and tradeoffs, review uncertain statements, or validate a draft with the Paperbot CLI.
+description: Turn an existing repository and its documentation into a prodxiv product paper draft, validate it, and publish it after explicit author approval. Use when an agent needs to scan a codebase, draft or improve a Markdown product paper, interview an author about intent and tradeoffs, review uncertain statements, validate a draft, or submit an approved paper with the Paperbot CLI.
 ---
 
 # Paperbot
@@ -56,6 +56,27 @@ contradictory information visible until the author resolves them.
 Do not overwrite an existing paper with `paperbot draft`. Edit it in place
 after reviewing the diff.
 
+## Publish an approved paper
+
+Publication is a remote write and creates an immutable paper version. Never
+infer publication approval from a request to scan, draft, revise, or validate.
+
+After the author explicitly asks to publish:
+
+1. Run `PAPERBOT_CMD validate <paper.md> --profile submission --format json`.
+2. Resolve every error and show warnings to the author.
+3. Confirm the exact paper path and destination shown by Paperbot.
+4. Run `PAPERBOT_CMD publish <paper.md> --yes --format json`.
+5. Report the allocated `paper_id`, version, location, and whether an existing
+   publication was recovered from an idempotent retry.
+
+Do not read, display, or copy the token from
+`~/.tokn/prodxiv/auth.toml`. If authentication is missing, ask the author to
+run `PAPERBOT_CMD auth` to create the commented template or
+`PAPERBOT_CMD auth set --api-url <url>` to configure it directly. Publishing
+does not initialize credentials. Never pass a token as a command-line
+argument.
+
 ## Finish
 
 Report:
@@ -65,5 +86,5 @@ Report:
 - validation status;
 - unresolved author questions and incomplete sections.
 
-Never submit or publish a paper. Publication is a separate operation requiring
-explicit author confirmation.
+Without explicit author confirmation, stop after validation and never run
+`publish`.

@@ -1,7 +1,7 @@
 import { ExitCode, PaperbotError } from "./errors.ts";
 
 export type OutputFormat = "text" | "json";
-export type ValidationProfile = "draft" | "publication";
+export type ValidationProfile = "draft" | "submission" | "publication";
 
 export interface ScanArguments {
   command: "scan";
@@ -25,10 +25,35 @@ export interface DraftArguments {
   title?: string;
 }
 
+export interface PublishArguments {
+  command: "publish";
+  input_path: string;
+  format: OutputFormat;
+  yes: boolean;
+}
+
+export type AuthArguments =
+  | {
+      command: "auth";
+      action: "init";
+    }
+  | {
+      command: "auth";
+      action: "set";
+      api_url: string;
+      token_stdin: boolean;
+    }
+  | {
+      command: "auth";
+      action: "status" | "remove";
+    };
+
 export type ParsedArguments =
   | ScanArguments
   | ValidateArguments
   | DraftArguments
+  | PublishArguments
+  | AuthArguments
   | {
       command: "help";
     }
@@ -52,7 +77,122 @@ export function parseArguments(args: string[]): ParsedArguments {
   if (args[0] === "draft") {
     return parseDraftArguments(args.slice(1));
   }
+  if (args[0] === "publish") {
+    return parsePublishArguments(args.slice(1));
+  }
+  if (args[0] === "auth") {
+    return parseAuthArguments(args.slice(1));
+  }
   throw usageError(`unknown command: ${args[0]}`);
+}
+
+function parsePublishArguments(
+  args: string[],
+): PublishArguments | { command: "help" } {
+  let input_path: string | undefined;
+  let format: OutputFormat = "text";
+  let yes = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--yes") {
+      yes = true;
+      continue;
+    }
+    if (argument === "--format") {
+      const value = args[index + 1];
+      if (value === undefined) {
+        throw usageError("missing value for --format");
+      }
+      format = parseFormat(value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(argument.slice("--format=".length));
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    if (input_path !== undefined) {
+      throw usageError("publish accepts only one paper path");
+    }
+    input_path = argument;
+  }
+
+  if (input_path === undefined) {
+    throw usageError("publish requires a paper path");
+  }
+  return {
+    command: "publish",
+    input_path,
+    format,
+    yes,
+  };
+}
+
+function parseAuthArguments(
+  args: string[],
+): AuthArguments | { command: "help" } {
+  const action = args[0];
+  if (action === undefined || action === "init") {
+    if (args.length > 1) {
+      throw usageError("auth init does not accept options");
+    }
+    return { command: "auth", action: "init" };
+  }
+  if (action === "--help" || action === "-h") {
+    return { command: "help" };
+  }
+  if (action === "status" || action === "remove") {
+    if (args.length !== 1) {
+      throw usageError(`auth ${action} does not accept options`);
+    }
+    return { command: "auth", action };
+  }
+  if (action !== "set") {
+    throw usageError("auth requires one of: init, set, status, remove");
+  }
+
+  let api_url: string | undefined;
+  let token_stdin = false;
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--token-stdin") {
+      token_stdin = true;
+      continue;
+    }
+    if (argument === "--api-url") {
+      const value = args[index + 1];
+      if (value === undefined || value.length === 0) {
+        throw usageError("missing value for --api-url");
+      }
+      api_url = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--api-url=")) {
+      api_url = requiredInlineValue(argument, "--api-url");
+      continue;
+    }
+    throw usageError(`unknown option: ${argument}`);
+  }
+  if (api_url === undefined) {
+    throw usageError("auth set requires --api-url");
+  }
+  return {
+    command: "auth",
+    action: "set",
+    api_url,
+    token_stdin,
+  };
 }
 
 function parseDraftArguments(
@@ -263,7 +403,7 @@ function parseFormat(value: string): OutputFormat {
 }
 
 function parseProfile(value: string): ValidationProfile {
-  if (value === "draft" || value === "publication") {
+  if (value === "draft" || value === "submission" || value === "publication") {
     return value;
   }
   throw usageError(`unsupported validation profile: ${value}`);
