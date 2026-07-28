@@ -27,7 +27,7 @@ Usage:
   paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
   paperbot auth [init]
-  paperbot auth set --api-url <url> [--token-stdin]
+  paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
   paperbot auth remove
   paperbot publish <paper.md> [--format text|json] [--yes]
@@ -49,6 +49,7 @@ Options:
   --title <title>      Set the initial draft title
   --profile <profile>  Validation profile: draft (default), submission, or publication
   --api-url <url>      Publishing API base URL
+  --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin
   --yes                Confirm publication without an interactive prompt
   -h, --help           Show help
@@ -102,9 +103,17 @@ export async function run(
           : await (io.read_secret ?? defaultIo.read_secret)(
               "Publishing token: ",
             );
-        const config = await saveAuth(parsed.api_url, token);
+        const config = await saveAuth(
+          parsed.api_url,
+          token,
+          undefined,
+          parsed.site_url,
+        );
         io.stdout(`Saved authentication: ${defaultAuthPath()}`);
         io.stdout(`API: ${config.api_url}`);
+        if (config.site_url !== undefined) {
+          io.stdout(`Site: ${config.site_url}`);
+        }
         return ExitCode.success;
       }
       if (parsed.action === "remove") {
@@ -125,6 +134,7 @@ export async function run(
         [
           "Paperbot authentication",
           `API: ${auth.api_url}`,
+          ...(auth.site_url === undefined ? [] : [`Site: ${auth.site_url}`]),
           `Source: ${auth.source}`,
           `Token: configured (${fingerprint})`,
         ].join("\n"),
@@ -216,6 +226,7 @@ export async function run(
             `Paper: ${result.paper_id} v${result.version}`,
             `Published: ${result.published_at}`,
             `Location: ${result.location}`,
+            ...(result.web_url === undefined ? [] : [`Web: ${result.web_url}`]),
             `Source SHA-256: ${result.source_sha256}`,
           ].join("\n"),
         );

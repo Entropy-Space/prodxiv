@@ -25,6 +25,7 @@ export interface PublicationResult {
   version: number;
   published_at: string;
   location: string;
+  web_url?: string;
   source_sha256: string;
   replayed: boolean;
 }
@@ -43,6 +44,7 @@ export class PreparedPublication {
   readonly title: string;
   readonly api_url: string;
   readonly auth_source: ResolvedAuth["source"];
+  readonly site_url: string | undefined;
   readonly source_sha256: string;
   readonly idempotency_key: string;
   readonly #sourceMarkdown: string;
@@ -59,6 +61,7 @@ export class PreparedPublication {
     this.title = title;
     this.api_url = auth.api_url;
     this.auth_source = auth.source;
+    this.site_url = auth.site_url;
     this.source_sha256 = new Bun.CryptoHasher("sha256")
       .update(sourceMarkdown)
       .digest("hex");
@@ -78,7 +81,12 @@ export class PreparedPublication {
       source_markdown: this.#sourceMarkdown,
       idempotency_key: this.idempotency_key,
     });
-    return publicationResult(result, this.api_url, this.source_sha256);
+    return publicationResult(
+      result,
+      this.api_url,
+      this.site_url,
+      this.source_sha256,
+    );
   }
 }
 
@@ -125,6 +133,7 @@ export async function preparePublication(
 function publicationResult(
   result: PublishPaperResult,
   apiUrl: string,
+  siteUrl: string | undefined,
   sourceSha256: string,
 ): PublicationResult {
   return {
@@ -133,6 +142,14 @@ function publicationResult(
     version: result.paper.version,
     published_at: result.paper.published_at,
     location: new URL(result.location, `${apiUrl}/`).toString(),
+    ...(siteUrl === undefined
+      ? {}
+      : {
+          web_url: new URL(
+            `/papers/${encodeURIComponent(result.paper.paper_id)}/versions/${result.paper.version}`,
+            `${siteUrl}/`,
+          ).toString(),
+        }),
     source_sha256: sourceSha256,
     replayed: result.replayed,
   };

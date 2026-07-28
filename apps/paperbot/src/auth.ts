@@ -15,6 +15,7 @@ import { ExitCode, PaperbotError } from "./errors.ts";
 export interface AuthConfig {
   version: 1;
   api_url: string;
+  site_url?: string;
   token: string;
 }
 
@@ -41,10 +42,14 @@ export async function saveAuth(
   apiUrl: string,
   token: string,
   authPath = defaultAuthPath(),
+  siteUrl?: string,
 ): Promise<AuthConfig> {
   const config: AuthConfig = {
     version: 1,
-    api_url: normalizeApiUrl(apiUrl),
+    api_url: normalizeBaseUrl(apiUrl, "API"),
+    ...(siteUrl === undefined
+      ? {}
+      : { site_url: normalizeBaseUrl(siteUrl, "site") }),
     token: validateToken(token),
   };
   const directory = dirname(authPath);
@@ -81,6 +86,7 @@ export async function resolveAuth(
   const env = options.env ?? process.env;
   const authPath = options.auth_path ?? defaultAuthPath();
   const envApiUrl = env.PRODXIV_API_URL?.trim();
+  const envSiteUrl = env.PRODXIV_SITE_URL?.trim();
   const envToken = env.PRODXIV_PUBLISH_TOKEN?.trim();
   let fileConfig: AuthConfig | undefined;
 
@@ -88,6 +94,7 @@ export async function resolveAuth(
     fileConfig = await readAuthFile(authPath);
   }
   const apiUrl = envApiUrl ?? fileConfig?.api_url;
+  const siteUrl = envSiteUrl ?? fileConfig?.site_url;
   const token = envToken ?? fileConfig?.token;
   if (apiUrl === undefined || token === undefined) {
     throw new PaperbotError(
@@ -98,7 +105,10 @@ export async function resolveAuth(
 
   return {
     version: 1,
-    api_url: normalizeApiUrl(apiUrl),
+    api_url: normalizeBaseUrl(apiUrl, "API"),
+    ...(siteUrl === undefined
+      ? {}
+      : { site_url: normalizeBaseUrl(siteUrl, "site") }),
     token: validateToken(token),
     source:
       envApiUrl !== undefined && envToken !== undefined
@@ -181,7 +191,8 @@ async function readAuthFile(authPath: string): Promise<AuthConfig | undefined> {
     }
     if (
       typeof parsed.api_url !== "string" ||
-      typeof parsed.token !== "string"
+      typeof parsed.token !== "string" ||
+      !(parsed.site_url === undefined || typeof parsed.site_url === "string")
     ) {
       throw new PaperbotError(
         `authentication template is incomplete: ${authPath}; fill in api_url and token`,
@@ -190,7 +201,10 @@ async function readAuthFile(authPath: string): Promise<AuthConfig | undefined> {
     }
     return {
       version: 1,
-      api_url: normalizeApiUrl(parsed.api_url),
+      api_url: normalizeBaseUrl(parsed.api_url, "API"),
+      ...(parsed.site_url === undefined
+        ? {}
+        : { site_url: normalizeBaseUrl(parsed.site_url, "site") }),
       token: validateToken(parsed.token),
     };
   } catch (error) {
@@ -212,6 +226,11 @@ function formatAuthFile(config?: AuthConfig): string {
       ? '# api_url = "https://your-prodxiv-api.example"'
       : `api_url = ${JSON.stringify(config.api_url)}`,
     "",
+    "# Public prodxiv website used to link successful publications.",
+    config?.site_url === undefined
+      ? '# site_url = "https://your-prodxiv-site.example"'
+      : `site_url = ${JSON.stringify(config.site_url)}`,
+    "",
     "# Bearer token used only for explicit publication requests.",
     config === undefined
       ? '# token = "replace-with-your-publishing-token"'
@@ -220,12 +239,12 @@ function formatAuthFile(config?: AuthConfig): string {
   ].join("\n");
 }
 
-function normalizeApiUrl(value: string): string {
+function normalizeBaseUrl(value: string, label: "API" | "site"): string {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new PaperbotError(`API URL is invalid: ${value}`, ExitCode.auth);
+    throw new PaperbotError(`${label} URL is invalid: ${value}`, ExitCode.auth);
   }
   const isLocal =
     url.hostname === "localhost" ||
@@ -233,7 +252,7 @@ function normalizeApiUrl(value: string): string {
     url.hostname === "::1";
   if (url.protocol !== "https:" && !(isLocal && url.protocol === "http:")) {
     throw new PaperbotError(
-      "API URL must use HTTPS, except for localhost",
+      `${label} URL must use HTTPS, except for localhost`,
       ExitCode.auth,
     );
   }
@@ -244,7 +263,7 @@ function normalizeApiUrl(value: string): string {
     url.hash.length > 0
   ) {
     throw new PaperbotError(
-      "API URL must not contain credentials, a query, or a fragment",
+      `${label} URL must not contain credentials, a query, or a fragment`,
       ExitCode.auth,
     );
   }
