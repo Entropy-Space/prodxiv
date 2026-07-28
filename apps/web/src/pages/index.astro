@@ -6,6 +6,7 @@ import {
   readPublishedPaperIndex,
   type PaperIndexEntry,
 } from "../lib/published-paper-index.ts";
+import { selectReferencePapers } from "../lib/homepage-papers.ts";
 
 export const prerender = false;
 
@@ -15,33 +16,24 @@ const indexResult = await readPublishedPaperIndex({
   cursor: cursorParameter,
   limit: 20,
 });
-const checkedInPapers: PaperIndexEntry[] =
-  cursorParameter === undefined || !indexResult.ok
-    ? (await getCollection("papers")).map((paper) => ({
-        paper_id: paper.data.paper_id,
-        version: paper.data.version,
-        published_at: paper.data.published_at,
-        title: paper.data.title,
-        summary: paper.data.summary,
-        authors: paper.data.authors.map((author) => author.name),
-        topics: paper.data.topics,
-        href: `/papers/${paper.id}`,
-      }))
-    : [];
-const listedPapers = indexResult.ok ? indexResult.papers : [];
-const seenVersions = new Set<string>();
-const papers = [...listedPapers, ...checkedInPapers]
-  .filter((paper) => {
-    const identity = `${paper.paper_id}:${paper.version}`;
-    if (seenVersions.has(identity)) {
-      return false;
-    }
-    seenVersions.add(identity);
-    return true;
-  })
-  .sort((left, right) =>
-    right.published_at.localeCompare(left.published_at),
-  );
+const publishedPapers = indexResult.ok ? indexResult.papers : [];
+const checkedInPapers: PaperIndexEntry[] = (await getCollection("papers")).map(
+  (paper) => ({
+    paper_id: paper.data.paper_id,
+    version: paper.data.version,
+    published_at: paper.data.published_at,
+    title: paper.data.title,
+    summary: paper.data.summary,
+    authors: paper.data.authors.map((author) => author.name),
+    topics: paper.data.topics,
+    href: `/papers/${paper.id}`,
+  }),
+);
+const referencePapers = selectReferencePapers({
+  is_first_page: cursorParameter === undefined,
+  published_papers: publishedPapers,
+  reference_papers: checkedInPapers,
+});
 const nextCursor = indexResult.ok ? indexResult.next_cursor : undefined;
 
 Astro.response.headers.set(
@@ -101,7 +93,7 @@ const topics = [
       <div class="hero__actions">
         <a class="button button--primary" href="#recent">Explore papers</a>
         <a class="button button--text" href="/papers/prodxiv">
-          Read the prodxiv paper <span aria-hidden="true">→</span>
+          Read the reference paper <span aria-hidden="true">→</span>
         </a>
       </div>
     </div>
@@ -135,7 +127,7 @@ const topics = [
     <header class="section-heading">
       <div>
         <p class="eyebrow">Recently filed</p>
-        <h2>Working papers</h2>
+        <h2>Published papers</h2>
       </div>
       <p>
         Recently published product papers, with each listing linked to one
@@ -146,14 +138,23 @@ const topics = [
     {
       !indexResult.ok && (
         <p class="archive-notice" role="status">
-          {indexResult.message} Showing checked-in reference papers.
+          {indexResult.message} Published papers are temporarily unavailable.
         </p>
       )
     }
 
-    <div class="paper-list">
-      {papers.map((paper) => <PaperRow paper={paper} />)}
-    </div>
+    {
+      indexResult.ok &&
+        (publishedPapers.length === 0 ? (
+          <p class="archive-empty">
+            No papers have been published to the archive yet.
+          </p>
+        ) : (
+          <div class="paper-list">
+            {publishedPapers.map((paper) => <PaperRow paper={paper} />)}
+          </div>
+        ))
+    }
 
     {
       nextCursor && (
@@ -165,6 +166,29 @@ const topics = [
       )
     }
   </section>
+
+  {
+    referencePapers.length > 0 && (
+      <section class="section section--references">
+        <div class="shell">
+          <header class="section-heading">
+            <div>
+              <p class="eyebrow">Format preview</p>
+              <h2>Reference examples</h2>
+            </div>
+            <p>
+              Checked-in examples demonstrate the product-paper format. They
+              are repository content, not records published to the archive.
+            </p>
+          </header>
+
+          <div class="paper-list">
+            {referencePapers.map((paper) => <PaperRow paper={paper} />)}
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   <section class="section section--principles" id="about">
     <div class="shell">
@@ -413,6 +437,20 @@ const topics = [
     border: 1px solid var(--line);
     font-family: var(--mono);
     font-size: 0.68rem;
+  }
+
+  .archive-empty {
+    margin: 0;
+    padding: 2rem;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-family: var(--serif);
+    font-size: 1.05rem;
+  }
+
+  .section--references {
+    border-top: 1px solid var(--line);
   }
 
   .archive-pagination {
