@@ -2,9 +2,51 @@
 import { getCollection } from "astro:content";
 import PaperRow from "../components/PaperRow.astro";
 import SiteLayout from "../layouts/SiteLayout.astro";
+import {
+  readPublishedPaperIndex,
+  type PaperIndexEntry,
+} from "../lib/published-paper-index.ts";
 
-const papers = (await getCollection("papers")).sort((a, b) =>
-  b.data.published_at.localeCompare(a.data.published_at),
+export const prerender = false;
+
+const cursorParameter = Astro.url.searchParams.get("cursor")?.trim() || undefined;
+const indexResult = await readPublishedPaperIndex({
+  api_url: import.meta.env.PRODXIV_API_URL,
+  cursor: cursorParameter,
+  limit: 20,
+});
+const checkedInPapers: PaperIndexEntry[] =
+  cursorParameter === undefined || !indexResult.ok
+    ? (await getCollection("papers")).map((paper) => ({
+        paper_id: paper.data.paper_id,
+        version: paper.data.version,
+        published_at: paper.data.published_at,
+        title: paper.data.title,
+        summary: paper.data.summary,
+        authors: paper.data.authors.map((author) => author.name),
+        topics: paper.data.topics,
+        href: `/papers/${paper.id}`,
+      }))
+    : [];
+const listedPapers = indexResult.ok ? indexResult.papers : [];
+const seenVersions = new Set<string>();
+const papers = [...listedPapers, ...checkedInPapers]
+  .filter((paper) => {
+    const identity = `${paper.paper_id}:${paper.version}`;
+    if (seenVersions.has(identity)) {
+      return false;
+    }
+    seenVersions.add(identity);
+    return true;
+  })
+  .sort((left, right) =>
+    right.published_at.localeCompare(left.published_at),
+  );
+const nextCursor = indexResult.ok ? indexResult.next_cursor : undefined;
+
+Astro.response.headers.set(
+  "Cache-Control",
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
 );
 
 const paperSections = [
@@ -83,7 +125,7 @@ const topics = [
 
   <section class="archive-strip">
     <div class="shell archive-strip__inner">
-      <p><span>Archive status</span> Accepting working papers soon</p>
+      <p><span>Archive status</span> Accepting product papers</p>
       <p><span>Format</span> Structured Markdown</p>
       <p><span>Revision model</span> Immutable versions</p>
     </div>
@@ -96,14 +138,32 @@ const topics = [
         <h2>Working papers</h2>
       </div>
       <p>
-        The archive begins with its own product paper: a public record of the
-        assumptions, architecture, and unresolved questions behind prodxiv.
+        Recently published product papers, with each listing linked to one
+        exact immutable version.
       </p>
     </header>
+
+    {
+      !indexResult.ok && (
+        <p class="archive-notice" role="status">
+          {indexResult.message} Showing checked-in reference papers.
+        </p>
+      )
+    }
 
     <div class="paper-list">
       {papers.map((paper) => <PaperRow paper={paper} />)}
     </div>
+
+    {
+      nextCursor && (
+        <nav class="archive-pagination" aria-label="Paper archive pagination">
+          <a href={`/?cursor=${encodeURIComponent(nextCursor)}#recent`}>
+            Older papers <span aria-hidden="true">→</span>
+          </a>
+        </nav>
+      )
+    }
   </section>
 
   <section class="section section--principles" id="about">
@@ -343,6 +403,37 @@ const topics = [
     color: var(--ink-soft);
     font-family: var(--serif);
     font-size: 1.05rem;
+  }
+
+  .archive-notice {
+    margin: -1.5rem 0 2rem;
+    padding: 0.8rem 1rem;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+  }
+
+  .archive-pagination {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 2rem;
+  }
+
+  .archive-pagination a {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .archive-pagination span {
+    display: inline-block;
+    margin-left: 0.25rem;
   }
 
   .section--principles {

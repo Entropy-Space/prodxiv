@@ -1,8 +1,8 @@
 ---
-import type { CollectionEntry } from "astro:content";
+import type { PaperIndexEntry } from "../lib/published-paper-index.ts";
 
 interface Props {
-  paper: CollectionEntry<"papers">;
+  paper: PaperIndexEntry;
 }
 
 const { paper } = Astro.props;
@@ -11,33 +11,33 @@ const publishedAt = new Intl.DateTimeFormat("en", {
   month: "short",
   timeZone: "UTC",
   year: "numeric",
-}).format(new Date(`${paper.data.published_at}T00:00:00Z`));
+}).format(new Date(`${paper.published_at}T00:00:00Z`));
 ---
 
 <article class="paper-row">
   <div class="paper-row__meta">
-    <span>{paper.data.paper_id}</span>
-    <span>v{paper.data.version}</span>
+    <span>{paper.paper_id}</span>
+    <span>v{paper.version}</span>
     <span>{publishedAt}</span>
   </div>
 
   <div class="paper-row__content">
     <p class="paper-row__topics">
-      {paper.data.topics.map((topic) => topic.replaceAll("_", " ")).join(" · ")}
+      {paper.topics.map((topic) => topic.replaceAll("_", " ")).join(" · ")}
     </p>
     <h3>
-      <a href={`/papers/${paper.id}`}>{paper.data.title}</a>
+      <a href={paper.href}>{paper.title}</a>
     </h3>
     <p class="paper-row__authors">
-      {paper.data.authors.map((author) => author.name).join(", ")}
+      {paper.authors.join(", ")}
     </p>
-    <p class="paper-row__summary">{paper.data.summary}</p>
+    <p class="paper-row__summary">{paper.summary}</p>
   </div>
 
   <a
     class="paper-row__open"
-    href={`/papers/${paper.id}`}
-    aria-label={`Read ${paper.data.title}`}
+    href={paper.href}
+    aria-label={`Read ${paper.title}`}
   >
     Read paper <span aria-hidden="true">→</span>
   </a>
