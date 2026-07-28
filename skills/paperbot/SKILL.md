@@ -24,6 +24,24 @@ selected command rather than typing that label literally.
 Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
+## Load guidance progressively
+
+Run `PAPERBOT_CMD skills` to discover artifact scopes. Load the relevant
+SKILL.md-like scope guide before loading any detailed component:
+
+- [Project](references/project-skill.md) for repository evidence,
+  architecture, and author intent.
+- [Paper](references/paper-skill.md) for structure, references, benchmarks,
+  and figures.
+- [Publication](references/publication-skill.md) for readiness and explicit
+  submission.
+
+Run `PAPERBOT_CMD skills <scope>` to load the scope guide. Follow its
+instructions to load a detailed component with
+`PAPERBOT_CMD skills <scope> <component>` only when the current task needs it.
+Do not load every component by default. Treat guidance as procedure, not as
+authorization for remote writes.
+
 ## Build a draft
 
 1. Confirm the repository root, paper output path, and any additional
@@ -51,7 +69,7 @@ make remote writes unless the user explicitly requests it.
    where practical. Add a Benchmarks section only when reproducible
    methodology or results exist.
 10. Run `PAPERBOT_CMD validate <paper.md> --profile draft --format json`.
-   Resolve every error and explain any warnings that remain.
+    Resolve every error and explain any warnings that remain.
 
 Treat a nonzero CLI exit as a failed step. Do not continue from invalid or
 partial JSON output.

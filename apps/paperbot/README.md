@@ -10,6 +10,10 @@ bun run paperbot scan . --include .env.example
 bun run paperbot draft scan.json --output paper.md
 bun run paperbot validate paper.md
 bun run paperbot validate paper.md --profile publication --format json
+bun run paperbot skills
+bun run paperbot skills paper
+bun run paperbot skills paper references
+bun run paperbot skills publication readiness --format json
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -20,6 +24,15 @@ bun run paperbot publish paper.md
 The human-readable format summarizes the scan. JSON output is a versioned,
 private manifest containing repository metadata and the selected file
 inventory. Drafting is a separate, agent-guided step.
+
+`skills` exposes focused agent guidance through stable artifact scopes:
+`project`, `paper`, and `publication`. It follows Agent Skill progressive
+disclosure: `paperbot skills` returns scope metadata,
+`paperbot skills <scope>` returns a concise SKILL.md-like guide, and
+`paperbot skills <scope> <component>` returns one detailed reference only when
+needed. JSON output is versioned for agent integrations. The guidance is
+bundled from the portable Paperbot Agent Skill so the CLI and installed skill
+share one source.
 
 The scanner requires a Git worktree. It uses Git's file index so `.gitignore`
 and global ignore rules are respected. Sensitive, generated, vendored, binary,

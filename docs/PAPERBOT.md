@@ -62,7 +62,7 @@ visible instead of filling them with speculation.
 9. **Review and approve.** The author reviews privacy, accuracy, and
    completeness before any submission.
 10. **Publish explicitly.** After approval, the CLI submits the exact reviewed
-   Markdown to the authoritative API and reports its allocated identifier.
+    Markdown to the authoritative API and reports its allocated identifier.
 
 ## Example draft behavior
 
@@ -90,6 +90,27 @@ Benchmarks section. It does not make performance claims.
 ```
 
 Paperbot should never turn missing context into polished but unsupported prose.
+
+## Skill catalog
+
+Paperbot exposes its agent guidance through artifact-oriented scopes rather
+than workflow phases:
+
+- `project` covers repository discovery, observed architecture, and author
+  intent;
+- `paper` covers structure, references, benchmarks, and figures;
+- `publication` covers readiness review and explicit submission.
+
+The catalog follows Agent Skill progressive disclosure:
+
+1. `paperbot skills` returns scope names and descriptions.
+2. `paperbot skills <scope>` returns a concise SKILL.md-like guide that
+   identifies when its components are relevant.
+3. `paperbot skills <scope> <component>` returns one detailed reference.
+
+The command also supports versioned JSON output. Scope names describe stable
+objects; drafting and review are activities that may use components from more
+than one scope. Agents should not load every component by default.
 
 ## Revision assistance
 

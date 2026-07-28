@@ -13,6 +13,12 @@ import { ExitCode, PaperbotError } from "./errors.ts";
 import { formatScanResult, formatValidationResult } from "./output.ts";
 import { preparePublication } from "./publisher.ts";
 import { scanRepository } from "./scanner.ts";
+import {
+  findSkillComponent,
+  findSkillScope,
+  formatSkillCatalog,
+  skillCatalog,
+} from "./skill-catalog.ts";
 import { validatePaperFile } from "./validator.ts";
 import { ProdxivApiError } from "@prodxiv/api-client";
 import { createInterface } from "node:readline/promises";
@@ -26,6 +32,7 @@ Usage:
   paperbot scan [repository] [--format text|json] [--exclude <glob>] [--include <glob>]
   paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
+  paperbot skills [scope] [component] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
@@ -38,6 +45,7 @@ Commands:
   scan      Select relevant repository files into a private scan manifest
   draft     Create a Markdown paper scaffold from a scan manifest
   validate  Validate a product paper
+  skills    Discover focused agent guidance by artifact scope and component
   auth      Configure local publishing authentication
   publish   Validate and explicitly publish a product paper
 
@@ -84,6 +92,82 @@ export async function run(
     }
     if (parsed.command === "version") {
       io.stdout(VERSION);
+      return ExitCode.success;
+    }
+
+    if (parsed.command === "skills") {
+      if (parsed.scope === undefined) {
+        io.stdout(
+          parsed.format === "json"
+            ? JSON.stringify(
+                {
+                  schema_version: "1",
+                  scopes: skillCatalog.map(({ scope, description }) => ({
+                    scope,
+                    description,
+                  })),
+                },
+                null,
+                2,
+              )
+            : formatSkillCatalog(),
+        );
+        return ExitCode.success;
+      }
+
+      const scope = findSkillScope(parsed.scope);
+      if (scope === undefined) {
+        throw new PaperbotError(
+          `unknown skill scope: ${parsed.scope}; expected one of: ${skillCatalog.map((entry) => entry.scope).join(", ")}`,
+          ExitCode.usage,
+        );
+      }
+      if (parsed.component === undefined) {
+        io.stdout(
+          parsed.format === "json"
+            ? JSON.stringify(
+                {
+                  schema_version: "1",
+                  scope: scope.scope,
+                  description: scope.description,
+                  instructions: scope.instructions.trim(),
+                  components: scope.components.map(
+                    ({ component, description }) => ({
+                      component,
+                      description,
+                    }),
+                  ),
+                },
+                null,
+                2,
+              )
+            : scope.instructions.trim(),
+        );
+        return ExitCode.success;
+      }
+
+      const component = findSkillComponent(scope.scope, parsed.component);
+      if (component === undefined) {
+        throw new PaperbotError(
+          `unknown ${scope.scope} skill component: ${parsed.component}; expected one of: ${scope.components.map((entry) => entry.component).join(", ")}`,
+          ExitCode.usage,
+        );
+      }
+      io.stdout(
+        parsed.format === "json"
+          ? JSON.stringify(
+              {
+                schema_version: "1",
+                scope: scope.scope,
+                component: component.component,
+                description: component.description,
+                instructions: component.instructions.trim(),
+              },
+              null,
+              2,
+            )
+          : component.instructions.trim(),
+      );
       return ExitCode.success;
     }
 
