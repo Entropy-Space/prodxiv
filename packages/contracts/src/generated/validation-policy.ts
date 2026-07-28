@@ -9,9 +9,9 @@ export const validation_policy = {
       "Motivation",
       "Related Work",
       "Core Features",
-      "Benchmarks",
       "Insights and Lessons",
       "Limitations",
+      "References",
     ],
     publication_required_metadata: [
       "paper_id",

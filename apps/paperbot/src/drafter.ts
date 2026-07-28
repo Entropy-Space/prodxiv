@@ -36,17 +36,16 @@ const SECTION_PROMPTS = [
     "Explain observed architecture, dependencies, and boundaries without inventing design intent.",
   ],
   [
-    "Benchmarks",
-    "Do not invent results. Record reproducible methodology or state that no benchmark results were found.",
-  ],
-  [
     "Insights and Lessons",
     "Author input required: capture tradeoffs, surprises, failed approaches, and lessons.",
   ],
-  ["Limitations", "State known limitations and unresolved questions directly."],
+  [
+    "Limitations",
+    "State known limitations and unresolved questions directly. Add a Benchmarks section before Insights and Lessons only when reproducible methodology or results exist.",
+  ],
   [
     "References",
-    "List repositories, documentation, related products, and other inspectable sources.",
+    "Cite the specific products, websites, repositories, documentation, and other inspectable sources used by the paper.",
   ],
 ] as const;
 

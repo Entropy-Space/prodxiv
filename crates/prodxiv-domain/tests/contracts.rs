@@ -37,6 +37,30 @@ fn exemplary_paper_is_publication_valid() {
 }
 
 #[test]
+fn publication_allows_benchmarks_to_be_omitted() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+    let benchmarks_start = paper
+        .markdown
+        .find("# Benchmarks")
+        .expect("exemplary paper should contain benchmarks");
+    let insights_offset = paper.markdown[benchmarks_start..]
+        .find("# Insights and Lessons")
+        .expect("insights should follow benchmarks");
+    paper
+        .markdown
+        .replace_range(benchmarks_start..benchmarks_start + insights_offset, "");
+
+    let report = validate_paper(&paper, ValidationProfile::Publication);
+    assert!(
+        report.valid,
+        "paper without benchmarks should be valid: {:#?}",
+        report.diagnostics
+    );
+}
+
+#[test]
 fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
     let mut paper = PaperDocument {
         metadata: PaperMetadata {
