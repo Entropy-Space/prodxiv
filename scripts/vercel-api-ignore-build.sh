@@ -27,7 +27,6 @@ if git diff --quiet "$previous_sha" "$current_sha" -- \
   Cargo.lock \
   Cargo.toml \
   Containerfile.vercel \
-  vercel.json \
   crates \
   migrations \
   scripts/vercel-api-ignore-build.sh
