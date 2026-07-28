@@ -10,6 +10,11 @@ The on-demand route uses Astro's Vercel adapter and fetches the exact immutable
 version from the public Axum API. Markdown is rendered on the server and
 sanitized before it is included in the page.
 
+The homepage is also rendered on demand. It requests cursor-paginated latest
+versions from the public API and links each result to its exact immutable
+reader route. Checked-in reference papers remain visible if the API cannot be
+reached.
+
 ## Configuration
 
 Set `PRODXIV_API_URL` to the publishing API's public base URL:

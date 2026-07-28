@@ -57,6 +57,9 @@ bun run paperbot auth set --api-url http://127.0.0.1:3000
 bun run paperbot publish path/to/paper.md
 ```
 
+Pass `--site-url http://localhost:4321` as well when Paperbot should return the
+human-readable paper URL after publication.
+
 For a direct API request, provide an idempotency key that remains stable when
 retrying the same exact Markdown:
 
@@ -79,6 +82,11 @@ actor, idempotency key, and Markdown returns the original publication with
 Paper identifiers use `prodxiv:YYMM.XXXXXX`. The suffix is uppercase Crockford
 Base32 (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`); lowercase input is accepted and
 canonicalized.
+
+Public readers can request the latest version of each paper with
+`GET /v1/papers`. The endpoint accepts `limit` from 1 to 100 and an opaque
+`cursor` returned as `next_cursor`. Exact historical versions remain available
+through `GET /v1/papers/{paper_id}/versions/{version}`.
 
 ## Production configuration
 

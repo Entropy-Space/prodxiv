@@ -67,15 +67,15 @@ After the author explicitly asks to publish:
 2. Resolve every error and show warnings to the author.
 3. Confirm the exact paper path and destination shown by Paperbot.
 4. Run `PAPERBOT_CMD publish <paper.md> --yes --format json`.
-5. Report the allocated `paper_id`, version, location, and whether an existing
-   publication was recovered from an idempotent retry.
+5. Report the allocated `paper_id`, version, API location, optional web URL,
+   and whether an existing publication was recovered from an idempotent retry.
 
 Do not read, display, or copy the token from
 `~/.tokn/prodxiv/auth.toml`. If authentication is missing, ask the author to
 run `PAPERBOT_CMD auth` to create the commented template or
-`PAPERBOT_CMD auth set --api-url <url>` to configure it directly. Publishing
-does not initialize credentials. Never pass a token as a command-line
-argument.
+`PAPERBOT_CMD auth set --api-url <url> [--site-url <url>]` to configure it
+directly. Publishing does not initialize credentials. Never pass a token as a
+command-line argument.
 
 ## Finish
 
