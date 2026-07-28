@@ -10,7 +10,7 @@ const publishedPaper: PaperIndexEntry = {
   summary: "A paper stored in the publishing database.",
   authors: ["Archive author"],
   topics: ["developer_tools"],
-  href: "/papers/prodxiv%3A2607.000001/versions/1",
+  href: "/papers/2607.000001/v1",
 };
 
 const referencePaper: PaperIndexEntry = {

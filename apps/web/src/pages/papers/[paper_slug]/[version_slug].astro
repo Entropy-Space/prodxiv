@@ -1,15 +1,19 @@
 ---
-import PaperView from "../../../../components/PaperView.astro";
-import SiteLayout from "../../../../layouts/SiteLayout.astro";
-import { readPublishedPaper } from "../../../../lib/published-paper-reader.ts";
+import {
+  canonicalPaperIdFromSlug,
+  paperVersionFromSlug,
+} from "@prodxiv/api-client/public-paper-url";
+import PaperView from "../../../components/PaperView.astro";
+import SiteLayout from "../../../layouts/SiteLayout.astro";
+import { readPublishedPaper } from "../../../lib/published-paper-reader.ts";
 
 export const prerender = false;
 
-const paperId = Astro.params.paper_id ?? "";
-const versionParameter = Astro.params.version ?? "";
+const paperId = canonicalPaperIdFromSlug(Astro.params.paper_slug ?? "");
+const version = paperVersionFromSlug(Astro.params.version_slug ?? "");
 const result = await readPublishedPaper({
-  paper_id: paperId,
-  version: versionParameter,
+  paper_id: paperId ?? "",
+  version: version?.toString() ?? "",
   api_url: import.meta.env.PRODXIV_API_URL,
 });
 

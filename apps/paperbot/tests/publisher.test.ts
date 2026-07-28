@@ -103,8 +103,7 @@ describe("paper publication", () => {
       published_at: "2026-07-28",
       location:
         "https://api.prodxiv.example/v1/papers/prodxiv:2607.000001/versions/1",
-      web_url:
-        "https://prodxiv.example/papers/prodxiv%3A2607.000001/versions/1",
+      web_url: "https://prodxiv.example/papers/2607.000001/v1",
       source_sha256: prepared.source_sha256,
       replayed: false,
     });

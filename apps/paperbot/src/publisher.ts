@@ -3,6 +3,7 @@ import {
   type ApiFetch,
   type PublishPaperResult,
 } from "@prodxiv/api-client";
+import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
@@ -146,7 +147,7 @@ function publicationResult(
       ? {}
       : {
           web_url: new URL(
-            `/papers/${encodeURIComponent(result.paper.paper_id)}/versions/${result.paper.version}`,
+            publicPaperPath(result.paper.paper_id, result.paper.version),
             `${siteUrl}/`,
           ).toString(),
         }),

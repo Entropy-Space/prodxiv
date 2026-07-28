@@ -3,6 +3,7 @@ import {
   type ApiFetch,
   type PublishedPaperSummary,
 } from "@prodxiv/api-client";
+import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 
 import { configuredApiUrl } from "./api-url.ts";
 
@@ -79,6 +80,6 @@ function paperIndexEntry(paper: PublishedPaperSummary): PaperIndexEntry {
     summary: paper.metadata.summary,
     authors: paper.metadata.authors.map((author) => author.name),
     topics: paper.metadata.topics,
-    href: `/papers/${encodeURIComponent(paper.paper_id)}/versions/${paper.version}`,
+    href: publicPaperPath(paper.paper_id, paper.version),
   };
 }
