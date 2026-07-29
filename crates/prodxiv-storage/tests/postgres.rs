@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use prodxiv_domain::PaperDocument;
-use prodxiv_storage::PostgresStorage;
+use prodxiv_storage::{NewGitHubTrendingSnapshot, PostgresStorage};
 use sqlx::PgPool;
 
 fn repository_root() -> &'static Path {
@@ -327,4 +327,76 @@ async fn publishes_an_idempotency_key_only_once_under_concurrency(pool: PgPool) 
     }
     assert_eq!(paper_ids.len(), 1);
     assert_eq!(replay_count, 7);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
+    let storage = PostgresStorage::new(pool.clone());
+    let source =
+        fs::read_to_string(repository_root().join("examples/github-trending/2026-07-29.json"))
+            .expect("Trending fixture should be readable");
+    let snapshot: NewGitHubTrendingSnapshot =
+        serde_json::from_str(&source).expect("Trending fixture should parse");
+
+    let first = storage
+        .import_github_trending_snapshot(&snapshot)
+        .await
+        .expect("Trending snapshot should import");
+    let replay = storage
+        .import_github_trending_snapshot(&snapshot)
+        .await
+        .expect("re-import should succeed");
+
+    assert!(first.inserted);
+    assert!(!replay.inserted);
+    assert_eq!(replay.snapshot_id, first.snapshot_id);
+    assert_eq!(first.entry_count, 13);
+
+    let stored = storage
+        .latest_github_trending("daily", None, None)
+        .await
+        .expect("Trending snapshot should be readable")
+        .expect("Trending snapshot should exist");
+    assert_eq!(stored.snapshot_date, "2026-07-29");
+    assert_eq!(stored.entries.len(), 13);
+    assert_eq!(stored.entries[0].repository_full_name, "pascalorg/editor");
+
+    let mut previous = snapshot.clone();
+    previous.snapshot_date = "2026-07-28".to_owned();
+    previous.source_revision = "previous".to_owned();
+    storage
+        .import_github_trending_snapshot(&previous)
+        .await
+        .expect("previous snapshot should import");
+    let mut next = snapshot.clone();
+    next.snapshot_date = "2026-07-30".to_owned();
+    next.source_revision = "next".to_owned();
+    storage
+        .import_github_trending_snapshot(&next)
+        .await
+        .expect("next snapshot should import");
+    let mut rust = snapshot.clone();
+    rust.language = Some("rust".to_owned());
+    rust.source_revision = "rust".to_owned();
+    storage
+        .import_github_trending_snapshot(&rust)
+        .await
+        .expect("language snapshot should import");
+
+    let view = storage
+        .github_trending_view("daily", None, None, Some("2026-07-29"))
+        .await
+        .expect("Trending navigation should be readable");
+    assert_eq!(view.previous_date.as_deref(), Some("2026-07-28"));
+    assert_eq!(view.next_date.as_deref(), Some("2026-07-30"));
+    assert_eq!(view.available_languages, ["rust"]);
+
+    let update = sqlx::query("UPDATE github_trending_entries SET rank = 2 WHERE snapshot_id = $1")
+        .bind(first.snapshot_id)
+        .execute(&pool)
+        .await;
+    assert!(
+        update.is_err(),
+        "Trending observations must remain immutable"
+    );
 }

@@ -20,8 +20,8 @@ use prodxiv_domain::{
     ValidationReport, canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
-    PostgresStorage, PublicationCursor, PublicationPage, PublishOutcome, StorageError,
-    is_valid_idempotency_key,
+    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, PostgresStorage,
+    PublicationCursor, PublicationPage, PublishOutcome, StorageError, is_valid_idempotency_key,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -172,6 +172,14 @@ pub trait PublicationStore: Send + Sync {
         limit: u32,
         cursor: Option<&PublicationCursor>,
     ) -> Result<PublicationPage, StoreError>;
+
+    async fn github_trending_view(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+        snapshot_date: Option<&str>,
+    ) -> Result<GitHubTrendingView, StoreError>;
 }
 
 #[async_trait]
@@ -215,6 +223,24 @@ impl PublicationStore for PostgresStorage {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn github_trending_view(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+        snapshot_date: Option<&str>,
+    ) -> Result<GitHubTrendingView, StoreError> {
+        PostgresStorage::github_trending_view(
+            self,
+            period,
+            language,
+            spoken_language,
+            snapshot_date,
+        )
+        .await
+        .map_err(StoreError::from)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -246,7 +272,9 @@ impl From<StorageError> for StoreError {
             ))
             | StorageError::InvalidActor
             | StorageError::InvalidIdempotencyKey
-            | StorageError::CorruptRevision(_) => {
+            | StorageError::CorruptRevision(_)
+            | StorageError::InvalidTrendingSnapshot(_)
+            | StorageError::CorruptTrendingRank(_) => {
                 tracing::error!(error = %error, "publication storage operation failed");
                 Self::Internal
             }
@@ -331,11 +359,85 @@ struct ListPapersQuery {
     cursor: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubTrendingQuery {
+    date: Option<String>,
+    period: Option<String>,
+    language: Option<String>,
+    spoken_language: Option<String>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PaperListResponse {
     pub papers: Vec<PublishedPaperSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GitHubTrendingResponse {
+    pub snapshot: Option<GitHubTrendingSnapshotResponse>,
+    pub previous_date: Option<String>,
+    pub next_date: Option<String>,
+    pub available_languages: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GitHubTrendingSnapshotResponse {
+    pub snapshot_date: String,
+    pub captured_at: Option<String>,
+    pub period: String,
+    pub language: Option<String>,
+    pub spoken_language: Option<String>,
+    pub source_kind: String,
+    pub source_url: String,
+    pub source_revision: String,
+    pub entries: Vec<GitHubTrendingEntryResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GitHubTrendingEntryResponse {
+    pub rank: u32,
+    pub repository_full_name: String,
+    pub repository_node_id: Option<String>,
+    pub repository_url: String,
+    pub description: Option<String>,
+    pub primary_language: Option<String>,
+    pub stars: Option<i64>,
+    pub forks: Option<i64>,
+    pub stars_in_period: Option<i64>,
+}
+
+impl From<GitHubTrendingSnapshot> for GitHubTrendingSnapshotResponse {
+    fn from(snapshot: GitHubTrendingSnapshot) -> Self {
+        Self {
+            snapshot_date: snapshot.snapshot_date,
+            captured_at: snapshot.captured_at,
+            period: snapshot.period,
+            language: snapshot.language,
+            spoken_language: snapshot.spoken_language,
+            source_kind: snapshot.source_kind,
+            source_url: snapshot.source_url,
+            source_revision: snapshot.source_revision,
+            entries: snapshot.entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<GitHubTrendingEntry> for GitHubTrendingEntryResponse {
+    fn from(entry: GitHubTrendingEntry) -> Self {
+        Self {
+            repository_url: format!("https://github.com/{}", entry.repository_full_name),
+            rank: entry.rank,
+            repository_full_name: entry.repository_full_name,
+            repository_node_id: entry.repository_node_id,
+            description: entry.description,
+            primary_language: entry.primary_language,
+            stars: entry.stars,
+            forks: entry.forks,
+            stars_in_period: entry.stars_in_period,
+        }
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -350,8 +452,87 @@ pub fn router(state: AppState) -> Router {
             "/v1/papers/{paper_id}/versions/{revision}",
             get(get_paper_revision),
         )
+        .route("/v1/github/trending", get(get_github_trending))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/github/trending",
+    params(
+      ("period" = Option<String>, Query, description = "daily, weekly, or monthly; defaults to daily"),
+      ("date" = Option<String>, Query, description = "Exact snapshot date in YYYY-MM-DD form; defaults to latest"),
+      ("language" = Option<String>, Query, description = "Exact GitHub Trending language scope"),
+      ("spoken_language" = Option<String>, Query, description = "Exact GitHub Trending spoken-language scope")
+    ),
+    responses(
+      (status = 200, description = "Latest imported snapshot for the requested scope", body = GitHubTrendingResponse),
+      (status = 400, description = "Trending scope is invalid", body = ErrorResponse),
+      (status = 500, description = "Reading failed", body = ErrorResponse)
+    )
+)]
+async fn get_github_trending(
+    State(state): State<AppState>,
+    Query(query): Query<GitHubTrendingQuery>,
+) -> Result<Json<GitHubTrendingResponse>, ApiError> {
+    let period = query.period.as_deref().unwrap_or("daily");
+    if !matches!(period, "daily" | "weekly" | "monthly") {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_trending_period",
+            "period must be daily, weekly, or monthly",
+        ));
+    }
+    let language = normalized_scope(query.language.as_deref());
+    let spoken_language = normalized_scope(query.spoken_language.as_deref());
+    let snapshot_date = normalized_scope(query.date.as_deref());
+    if snapshot_date.is_some_and(|value| !is_iso_date(value)) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_trending_date",
+            "date must be a real calendar date in YYYY-MM-DD form",
+        ));
+    }
+    let view = state
+        .store
+        .github_trending_view(period, language, spoken_language, snapshot_date)
+        .await
+        .map_err(store_error)?;
+    Ok(Json(GitHubTrendingResponse {
+        snapshot: view.snapshot.map(Into::into),
+        previous_date: view.previous_date,
+        next_date: view.next_date,
+        available_languages: view.available_languages,
+    }))
+}
+
+fn normalized_scope(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn is_iso_date(value: &str) -> bool {
+    let parts = value
+        .split('-')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>();
+    let Ok(parts) = parts else {
+        return false;
+    };
+    if parts.len() != 3 || value.len() != 10 {
+        return false;
+    }
+    let (year, month, day) = (parts[0], parts[1], parts[2]);
+    let leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=max_day).contains(&day)
 }
 
 #[utoipa::path(
@@ -641,12 +822,21 @@ fn store_error(error: StoreError) -> ApiError {
         version = "0.1.0",
         description = "Authoritative immutable publication and retrieval API."
     ),
-    paths(health, list_papers, publish_paper, get_paper_revision),
+    paths(
+        health,
+        list_papers,
+        publish_paper,
+        get_paper_revision,
+        get_github_trending
+    ),
     components(schemas(
         PublishPaperRequest,
         PublishedPaper,
         PublishedPaperSummary,
         PaperListResponse,
+        GitHubTrendingResponse,
+        GitHubTrendingSnapshotResponse,
+        GitHubTrendingEntryResponse,
         HealthResponse,
         ErrorResponse,
         ErrorBody,

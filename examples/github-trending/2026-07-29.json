@@ -1,0 +1,27 @@
+{
+  "snapshot_date": "2026-07-29",
+  "captured_at": null,
+  "period": "daily",
+  "language": null,
+  "spoken_language": null,
+  "source_kind": "third_party_archive",
+  "source_url": "https://github.com/antonkomarev/github-trending-archive/blob/bd6c3cee9c12e1958797b3716e12b6278edd792a/archive/repository/2026/2026-07-29/(null).json",
+  "source_revision": "bd6c3cee9c12e1958797b3716e12b6278edd792a",
+  "entries": [
+    { "repository_full_name": "pascalorg/editor" },
+    { "repository_full_name": "jenkinsci/jenkins" },
+    { "repository_full_name": "moeru-ai/airi" },
+    { "repository_full_name": "andrewyng/aisuite" },
+    { "repository_full_name": "affaan-m/ECC" },
+    { "repository_full_name": "hello245m/free-stockdb" },
+    { "repository_full_name": "huggingface/speech-to-speech" },
+    { "repository_full_name": "virgiliojr94/book-to-skill" },
+    { "repository_full_name": "opengeos/GeoLibre" },
+    {
+      "repository_full_name": "paperswithbacktest/awesome-systematic-trading"
+    },
+    { "repository_full_name": "microsoft/agent-governance-toolkit" },
+    { "repository_full_name": "yorukot/superfile" },
+    { "repository_full_name": "bradautomates/claude-video" }
+  ]
+}

@@ -7,14 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 prodxiv-domain = { path = "../prodxiv-domain" }
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 serde_yaml.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

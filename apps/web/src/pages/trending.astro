@@ -1,0 +1,473 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { readGitHubTrending } from "../lib/github-trending.ts";
+
+export const prerender = false;
+
+const periodParameter = Astro.url.searchParams.get("period");
+const period =
+  periodParameter === "weekly" || periodParameter === "monthly"
+    ? periodParameter
+    : "daily";
+const language = Astro.url.searchParams.get("language")?.trim() || undefined;
+const date = Astro.url.searchParams.get("date")?.trim() || undefined;
+const result = await readGitHubTrending({
+  api_url: import.meta.env.PRODXIV_API_URL,
+  date,
+  period,
+  language,
+});
+const view = result.ok ? result.view : undefined;
+const snapshot = view?.snapshot;
+const selectedDate = snapshot?.snapshot_date ?? date;
+const availableLanguages = Array.from(
+  new Set([
+    ...(language === undefined ? [] : [language]),
+    ...(view?.available_languages ?? []),
+  ]),
+);
+
+function trendingUrl(options: { date?: string; language?: string }): string {
+  const search = new URLSearchParams({ period });
+  if (options.date !== undefined) {
+    search.set("date", options.date);
+  }
+  if (options.language !== undefined) {
+    search.set("language", options.language);
+  }
+  return `/trending?${search.toString()}`;
+}
+
+Astro.response.headers.set(
+  "Cache-Control",
+  "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+);
+---
+
+<SiteLayout
+  title="GitHub Trending history — prodxiv"
+  description="A provenance-preserving mirror of imported GitHub Trending snapshots."
+>
+  <section class="trend-hero shell">
+    <p class="eyebrow">External observation · Local archive</p>
+    <h1>GitHub Trending</h1>
+    <p>
+      A dated mirror of repository rankings. These observations describe the
+      surrounding ecosystem; they are not claims made by product papers.
+    </p>
+  </section>
+
+  <section class="trend-content shell">
+    <nav class="day-navigation" aria-label="Trending snapshot date">
+      {
+        view?.previous_date ? (
+          <a
+            class="day-navigation__button day-navigation__button--previous"
+            href={trendingUrl({
+              date: view.previous_date,
+              language,
+            })}
+            aria-label={`Previous snapshot: ${view.previous_date}`}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </a>
+        ) : (
+          <span
+            class="day-navigation__button day-navigation__button--previous is-disabled"
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </span>
+        )
+      }
+      {
+        view?.next_date ? (
+          <a
+            class="day-navigation__button day-navigation__button--next"
+            href={trendingUrl({ date: view.next_date, language })}
+            aria-label={`Next snapshot: ${view.next_date}`}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </a>
+        ) : (
+          <span
+            class="day-navigation__button day-navigation__button--next is-disabled"
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        )
+      }
+    </nav>
+
+    <form class="trend-filters" method="get">
+      <label>
+        Period
+        <select name="period">
+          <option value="daily" selected={period === "daily"}>Daily</option>
+          <option value="weekly" selected={period === "weekly"}>Weekly</option>
+          <option value="monthly" selected={period === "monthly"}>Monthly</option>
+        </select>
+      </label>
+      <button type="submit">View snapshot</button>
+    </form>
+
+    <nav class="language-tabs" aria-label="Programming language">
+      <a
+        href={trendingUrl({ date: selectedDate })}
+        aria-current={language === undefined ? "page" : undefined}>All</a
+      >
+      {
+        availableLanguages.map((availableLanguage) => (
+          <a
+            href={trendingUrl({
+              date: selectedDate,
+              language: availableLanguage,
+            })}
+            aria-current={
+              language === availableLanguage ? "page" : undefined
+            }
+          >
+            {availableLanguage}
+          </a>
+        ))
+      }
+    </nav>
+
+    {!result.ok && <p class="trend-notice">{result.message}</p>}
+    {result.ok && snapshot === undefined && (
+      <p class="trend-notice">
+        No snapshot has been imported for this scope yet.
+      </p>
+    )}
+
+    {snapshot && (
+      <>
+        <header class="snapshot-header">
+          <div>
+            <p class="snapshot-label">
+              {date === undefined ? "Latest matching snapshot" : "Snapshot"}
+            </p>
+            <h2>{snapshot.snapshot_date}</h2>
+          </div>
+          <dl>
+            <div>
+              <dt>Period</dt>
+              <dd>{snapshot.period}</dd>
+            </div>
+            <div>
+              <dt>Scope</dt>
+              <dd>{snapshot.language ?? "All languages"}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>
+                <a href={snapshot.source_url} rel="noreferrer">
+                  {snapshot.source_kind.replaceAll("_", " ")}
+                </a>
+              </dd>
+            </div>
+          </dl>
+        </header>
+
+        <ol class="trend-list">
+          {snapshot.entries.map((entry) => (
+            <li>
+              <span class="trend-rank">{String(entry.rank).padStart(2, "0")}</span>
+              <div>
+                <h3>
+                  <a href={entry.repository_url} rel="noreferrer">
+                    {entry.repository_full_name}
+                  </a>
+                </h3>
+                {entry.description && <p>{entry.description}</p>}
+                <div class="trend-meta">
+                  {entry.primary_language && <span>{entry.primary_language}</span>}
+                  {entry.stars_in_period !== null &&
+                    entry.stars_in_period !== undefined && (
+                      <span>+{entry.stars_in_period.toLocaleString()} stars</span>
+                    )}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </>
+    )}
+  </section>
+</SiteLayout>
+
+<style>
+  .trend-hero {
+    max-width: 62rem;
+    padding-block: clamp(4rem, 9vw, 7rem) 3rem;
+  }
+
+  .trend-hero h1 {
+    max-width: none;
+    margin: 0.45rem 0 1rem;
+    font-family: var(--serif);
+    font-size: clamp(3.5rem, 10vw, 7.5rem);
+    font-weight: 400;
+    letter-spacing: -0.075em;
+    line-height: 0.9;
+  }
+
+  .trend-hero > p:last-child {
+    max-width: 46rem;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+    line-height: 1.5;
+  }
+
+  .trend-content {
+    max-width: 62rem;
+  }
+
+  .day-navigation__button {
+    position: fixed;
+    z-index: 2;
+    top: 52%;
+    display: grid;
+    width: 3rem;
+    height: 3rem;
+    place-items: center;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease,
+      transform 120ms ease;
+  }
+
+  .day-navigation__button--previous {
+    left: max(1rem, calc(50vw - 36rem));
+  }
+
+  .day-navigation__button--next {
+    right: max(1rem, calc(50vw - 36rem));
+  }
+
+  .day-navigation__button:not(.is-disabled):hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.05);
+  }
+
+  .day-navigation__button.is-disabled {
+    color: var(--line-strong);
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .day-navigation__button svg {
+    width: 1.35rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+  }
+
+  .trend-filters {
+    display: flex;
+    gap: 1rem;
+    align-items: end;
+    padding: 1.2rem;
+    border-block: 1px solid var(--line-strong);
+  }
+
+  .trend-filters label {
+    display: grid;
+    flex: 1;
+    gap: 0.4rem;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .trend-filters select,
+  .trend-filters button {
+    min-height: 2.7rem;
+    padding-inline: 0.75rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.15rem;
+    color: var(--ink);
+    background: var(--surface);
+    font: inherit;
+  }
+
+  .trend-filters button {
+    color: var(--surface);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+
+  .language-tabs {
+    display: flex;
+    gap: 1.6rem;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line-strong);
+    scrollbar-width: thin;
+  }
+
+  .language-tabs a {
+    position: relative;
+    flex: 0 0 auto;
+    padding-block: 1.1rem 0.9rem;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    text-transform: capitalize;
+  }
+
+  .language-tabs a:hover,
+  .language-tabs a[aria-current="page"] {
+    color: var(--accent);
+  }
+
+  .language-tabs a[aria-current="page"]::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    background: var(--accent);
+    content: "";
+  }
+
+  .trend-notice {
+    padding-block: 3rem;
+    color: var(--ink-soft);
+    font-family: var(--serif);
+    font-size: 1.2rem;
+  }
+
+  .snapshot-header {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 2rem;
+    padding-block: 3rem 1.5rem;
+  }
+
+  .snapshot-label,
+  .snapshot-header dt {
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .snapshot-header h2 {
+    margin: 0.35rem 0 0;
+    font-family: var(--serif);
+    font-size: 2.3rem;
+    font-weight: 400;
+  }
+
+  .snapshot-header dl {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin: 0;
+  }
+
+  .snapshot-header dd {
+    margin: 0.35rem 0 0;
+    font-size: 0.9rem;
+    text-transform: capitalize;
+  }
+
+  .trend-list {
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line-strong);
+    list-style: none;
+  }
+
+  .trend-list li {
+    display: grid;
+    grid-template-columns: 3.5rem 1fr;
+    gap: 1rem;
+    padding-block: 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .trend-rank {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+  }
+
+  .trend-list h3 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 1.4rem;
+    font-weight: 600;
+  }
+
+  .trend-list h3 a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .trend-list h3 a:hover {
+    color: var(--accent);
+  }
+
+  .trend-list p {
+    max-width: 48rem;
+    margin: 0.45rem 0;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+
+  .trend-meta {
+    display: flex;
+    gap: 1rem;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 640px) {
+    .day-navigation {
+      display: flex;
+      justify-content: space-between;
+      padding-bottom: 1rem;
+    }
+
+    .day-navigation__button {
+      position: static;
+    }
+
+    .trend-filters,
+    .snapshot-header {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .snapshot-header dl {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>
