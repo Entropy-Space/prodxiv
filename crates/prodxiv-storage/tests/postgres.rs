@@ -17,7 +17,7 @@ fn submission() -> (String, PaperDocument) {
     let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
     paper.metadata.paper_id = None;
     paper.metadata.published_at = None;
-    paper.metadata.version = None;
+    paper.metadata.revision = None;
     let metadata =
         serde_yaml::to_string(&paper.metadata).expect("submission metadata should serialize");
     let source = format!("---\n{metadata}---\n{}", paper.markdown);
@@ -35,28 +35,132 @@ async fn serializes_concurrent_migration_runners(pool: PgPool) {
     second_result.expect("second concurrent migrator should succeed");
 }
 
+#[sqlx::test]
+async fn migrates_existing_publications_to_products_and_revisions(pool: PgPool) {
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20260727153000_initial_publishing.sql"
+    ))
+    .execute(&pool)
+    .await
+    .expect("initial publishing migration should apply");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20260728090000_publication_idempotency.sql"
+    ))
+    .execute(&pool)
+    .await
+    .expect("idempotency migration should apply");
+
+    let metadata = serde_json::json!({
+      "schema_version": "1",
+      "paper_id": "prodxiv:2607.000001",
+      "title": "Existing product paper",
+      "summary": "Existing publication",
+      "authors": [{ "name": "Existing author" }],
+      "published_at": "2026-07-28",
+      "version": 1,
+      "status": "launched",
+      "topics": ["developer_tools"],
+      "license": "CC BY 4.0",
+      "product_url": "https://example.com",
+      "repository_url": "https://github.com/example/product"
+    });
+    let source_markdown = "---\nversion: 1\n---\n# Summary\n\nExisting source.\n";
+
+    sqlx::query("INSERT INTO papers (paper_id) VALUES ($1)")
+        .bind("prodxiv:2607.000001")
+        .execute(&pool)
+        .await
+        .expect("existing paper should insert");
+    sqlx::query(
+        r#"
+        INSERT INTO paper_versions (
+          paper_id,
+          version,
+          published_at,
+          published_by,
+          metadata,
+          submitted_markdown,
+          source_markdown
+        )
+        VALUES ($1, 1, '2026-07-28', 'migration_test', $2, $3, $3)
+        "#,
+    )
+    .bind("prodxiv:2607.000001")
+    .bind(metadata)
+    .bind(source_markdown)
+    .execute(&pool)
+    .await
+    .expect("existing paper version should insert");
+
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20260729120000_product_paper_revisions.sql"
+    ))
+    .execute(&pool)
+    .await
+    .expect("product and revision migration should apply");
+
+    let migrated_source: String = sqlx::query_scalar(
+        "SELECT source_markdown FROM paper_revisions WHERE paper_id = $1 AND revision = 1",
+    )
+    .bind("prodxiv:2607.000001")
+    .fetch_one(&pool)
+    .await
+    .expect("migrated source should be readable");
+    assert_eq!(migrated_source, source_markdown);
+
+    let product_id: String =
+        sqlx::query_scalar("SELECT product_id FROM papers WHERE paper_id = $1")
+            .bind("prodxiv:2607.000001")
+            .fetch_one(&pool)
+            .await
+            .expect("paper should reference a product");
+    assert_eq!(product_id, "prodxiv-product:2607.000001");
+
+    let resource_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM product_resources WHERE product_id = $1")
+            .bind(&product_id)
+            .fetch_one(&pool)
+            .await
+            .expect("backfilled resources should be readable");
+    assert_eq!(resource_count, 2);
+
+    let update =
+        sqlx::query("UPDATE paper_revisions SET source_markdown = 'changed' WHERE paper_id = $1")
+            .bind("prodxiv:2607.000001")
+            .execute(&pool)
+            .await;
+    assert!(update.is_err(), "migrated revisions must remain immutable");
+}
+
 #[sqlx::test(migrations = "../../migrations")]
-async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
+async fn publishes_and_reads_an_immutable_revision(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let (source, paper) = submission();
 
     let published = storage
-        .publish_new(paper, &source, "integration_test", "paperbot.integration")
+        .publish_new(
+            paper,
+            &source,
+            "integration_test",
+            "paperbot.integration",
+            None,
+        )
         .await
         .expect("paper should publish")
         .paper;
-    assert_eq!(published.version, 1);
+    assert_eq!(published.revision, 1);
     assert!(published.paper_id.starts_with("prodxiv:"));
+    assert!(published.product_id.starts_with("prodxiv-product:"));
 
     let found = storage
-        .find_version(&published.paper_id, published.version)
+        .find_revision(&published.paper_id, published.revision)
         .await
         .expect("paper should be readable")
-        .expect("paper version should exist");
+        .expect("paper revision should exist");
     assert_eq!(found, published);
 
     let update = sqlx::query(
-        "UPDATE paper_versions SET source_markdown = 'changed' WHERE paper_id = $1 AND version = 1",
+        "UPDATE paper_revisions SET source_markdown = 'changed' WHERE paper_id = $1 AND revision = 1",
     )
     .bind(&published.paper_id)
     .execute(&pool)
@@ -69,6 +173,57 @@ async fn publishes_and_reads_an_immutable_version(pool: PgPool) {
         .await
         .expect("audit record should be readable");
     assert_eq!(audit_count, 1);
+
+    let repository_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM product_resources WHERE product_id = $1 AND kind = 'repository'",
+    )
+    .bind(&published.product_id)
+    .fetch_one(&pool)
+    .await
+    .expect("normalized product resources should be readable");
+    assert_eq!(repository_count, 1);
+
+    let repository_resource_id: i64 = sqlx::query_scalar(
+        "SELECT resource_id FROM product_resources WHERE product_id = $1 AND kind = 'repository'",
+    )
+    .bind(&published.product_id)
+    .fetch_one(&pool)
+    .await
+    .expect("repository resource should be addressable");
+    sqlx::query(
+        r#"
+        INSERT INTO github_repository_observations (
+          resource_id,
+          repository_node_id,
+          repository_full_name,
+          stars
+        )
+        VALUES ($1, 'R_test', 'example/product', 42)
+        "#,
+    )
+    .bind(repository_resource_id)
+    .execute(&pool)
+    .await
+    .expect("external GitHub observation should insert");
+    assert!(
+        !published.source_markdown.contains("stars"),
+        "external observations must not enter immutable paper source"
+    );
+
+    let (second_source, second_paper) = submission();
+    let second = storage
+        .publish_new(
+            second_paper,
+            &second_source,
+            "integration_test",
+            "paperbot.integration.second",
+            Some(&published.product_id),
+        )
+        .await
+        .expect("another paper should attach to the existing product")
+        .paper;
+    assert_eq!(second.product_id, published.product_id);
+    assert_ne!(second.paper_id, published.paper_id);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -83,6 +238,7 @@ async fn lists_latest_papers_with_stable_cursor_pagination(pool: PgPool) {
                 &source,
                 "listing_test",
                 &format!("paperbot.listing.{index}"),
+                None,
             )
             .await
             .expect("paper should publish")
@@ -129,6 +285,7 @@ async fn allocates_unique_identifiers_under_concurrency(pool: PgPool) {
                         &source,
                         "concurrency_test",
                         &format!("paperbot.concurrent.{index}"),
+                        None,
                     )
                     .await
                     .expect("concurrent publication should succeed")
@@ -154,7 +311,7 @@ async fn publishes_an_idempotency_key_only_once_under_concurrency(pool: PgPool) 
             let (source, paper) = submission();
             tokio::spawn(async move {
                 storage
-                    .publish_new(paper, &source, "retry_test", "paperbot.same-request")
+                    .publish_new(paper, &source, "retry_test", "paperbot.same-request", None)
                     .await
                     .expect("idempotent publication should succeed")
             })

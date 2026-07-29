@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use utoipa::ToSchema;
 
-use crate::{PaperDocument, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION, canonicalize_paper_id};
+use crate::{
+    PaperDocument, PaperScopeKind, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION,
+    canonicalize_paper_id,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationProfile {
@@ -46,6 +49,10 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
     require_supported_schema(&metadata.schema_version, &mut diagnostics);
     require_nonempty("metadata.title", &metadata.title, &mut diagnostics);
     require_nonempty("metadata.summary", &metadata.summary, &mut diagnostics);
+    if let Some(product_name) = &metadata.product_name {
+        require_nonempty("metadata.product_name", product_name, &mut diagnostics);
+    }
+    validate_scope(paper, &mut diagnostics);
 
     if metadata.authors.is_empty() {
         error(
@@ -133,12 +140,12 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
             "publication date must use YYYY-MM-DD",
         );
     }
-    if metadata.version == Some(0) {
+    if metadata.revision == Some(0) {
         error(
             &mut diagnostics,
-            "publication.invalid_version",
+            "publication.invalid_revision",
             "metadata.version",
-            "paper version must be positive",
+            "paper revision must be positive",
         );
     }
     if metadata
@@ -171,12 +178,28 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
                 "publication dates are assigned by the publishing service",
             );
         }
-        if metadata.version.is_some() {
+        if metadata.revision.is_some() {
             error(
                 &mut diagnostics,
                 "submission.version_forbidden",
                 "metadata.version",
-                "paper versions are assigned by the publishing service",
+                "paper revisions are assigned by the publishing service",
+            );
+        }
+        if metadata.product_name.is_none() {
+            error(
+                &mut diagnostics,
+                "submission.product_name_required",
+                "metadata.product_name",
+                "submitted papers must identify their product",
+            );
+        }
+        if metadata.scope.is_none() {
+            error(
+                &mut diagnostics,
+                "submission.scope_required",
+                "metadata.scope",
+                "submitted papers must identify their scope",
             );
         }
         if metadata.license.is_none() {
@@ -204,12 +227,28 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
                 "published papers require a publication date",
             );
         }
-        if metadata.version.is_none() {
+        if metadata.revision.is_none() {
             error(
                 &mut diagnostics,
-                "publication.version_required",
+                "publication.revision_required",
                 "metadata.version",
-                "published papers require a positive version",
+                "published papers require a positive revision",
+            );
+        }
+        if metadata.product_name.is_none() {
+            error(
+                &mut diagnostics,
+                "publication.product_name_required",
+                "metadata.product_name",
+                "published papers must identify their product",
+            );
+        }
+        if metadata.scope.is_none() {
+            error(
+                &mut diagnostics,
+                "publication.scope_required",
+                "metadata.scope",
+                "published papers must identify their scope",
             );
         }
         if metadata.license.is_none() {
@@ -224,6 +263,52 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
 
     validate_sections(&paper.markdown, &mut diagnostics);
     report(diagnostics)
+}
+
+fn validate_scope(paper: &PaperDocument, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(scope) = &paper.metadata.scope else {
+        return;
+    };
+    match scope.kind {
+        PaperScopeKind::Product => {
+            if scope.name.is_some() || scope.product_version.is_some() {
+                error(
+                    diagnostics,
+                    "scope.product_has_detail",
+                    "metadata.scope",
+                    "product scope must not specify a feature name or product version",
+                );
+            }
+        }
+        PaperScopeKind::Feature => {
+            if scope
+                .name
+                .as_ref()
+                .is_none_or(|name| name.trim().is_empty())
+            {
+                error(
+                    diagnostics,
+                    "scope.feature_name_required",
+                    "metadata.scope.name",
+                    "feature scope requires a name",
+                );
+            }
+        }
+        PaperScopeKind::Release => {
+            if scope
+                .product_version
+                .as_ref()
+                .is_none_or(|version| version.trim().is_empty())
+            {
+                error(
+                    diagnostics,
+                    "scope.product_version_required",
+                    "metadata.scope.product_version",
+                    "release scope requires a product version",
+                );
+            }
+        }
+    }
 }
 
 fn validate_sections(markdown: &str, diagnostics: &mut Vec<Diagnostic>) {

@@ -36,14 +36,26 @@ shape the publishing format.
 
 ## The product paper
 
-A product paper is a structured introduction to a product, concept, or major
-product revision. It combines narrative context with implementation detail.
+A product paper is a structured work about a product, concept, feature, or
+release. A product is the durable subject; multiple papers may cover different
+parts of the same product. Each paper may itself have multiple immutable
+revisions.
+
+Product releases and paper revisions are separate concepts. A new product
+release normally receives a new paper when it presents a distinct argument or
+body of knowledge. Corrections or expansions to that same paper create a new
+paper revision.
 
 A recommended paper structure is:
 
 ```markdown
 ---
 title:
+product_name:
+scope:
+  kind: product | feature | release
+  name:
+  product_version:
 product_url:
 authors:
 organization:
@@ -67,6 +79,19 @@ repository_url:
 # References
 ```
 
+The serialized `version` field is retained as compact publication notation and
+represents the paper revision number. A product release identifier belongs in
+`scope.product_version`; it must never be inferred from the paper revision.
+
+Homepage, repository, and documentation links are product resources. Published
+paper metadata preserves the links used by that revision as historical
+context, while the archive normalizes them separately for product-level
+queries and external enrichment.
+
+Mutable external observations such as GitHub star counts never enter paper
+Markdown or revision metadata. The archive may display them as timestamped
+product-resource enrichment, preserving their observation history separately.
+
 Not every section is required. Omit Benchmarks when no reproducible
 measurement exists rather than publishing an empty placeholder. When a paper
 does make measured claims, benchmark methodology is first-class content and
@@ -79,16 +104,16 @@ Individuals and teams should be able to publish papers for both working
 products and pre-build concepts. Submissions should be open, subject to format
 validation and community moderation rather than mandatory editorial approval.
 
-Published versions are immutable. Authors update a paper by publishing a new
-version instead of silently changing its historical record.
+Published revisions are immutable. Authors update a paper by publishing a new
+revision instead of silently changing its historical record.
 
 An identifier may look like:
 
 ```text
 prodxiv:2607.00001A
-v1 — Initial concept
-v2 — Public launch
-v3 — Architecture and benchmark update
+v1 — Initial publication
+v2 — Corrected architecture description
+v3 — Expanded benchmark methodology
 ```
 
 Each paper should expose:
@@ -97,7 +122,7 @@ Each paper should expose:
 - Authors and organization.
 - Product status and topics.
 - Publication and revision dates.
-- Version history.
+- Revision history.
 - Rendered Markdown and raw source.
 - References and links to related products.
 - Benchmark methodology and reproducibility notes.
@@ -111,7 +136,7 @@ relationships include `inspired_by`, `built_on`, `alternative_to`, and
 The first release should focus on five surfaces:
 
 1. **Explore** — Recent and notable papers, topic filters, and search.
-2. **Paper** — The rendered paper, metadata, version history, citations, and
+2. **Paper** — The rendered paper, metadata, revision history, citations, and
    raw Markdown.
 3. **Submit** — A Markdown editor with preview and structural validation.
 4. **Lineage** — Connections among related products and ideas.
@@ -130,7 +155,7 @@ arXiv's identity literally.
 - Excellent support for tables, code, diagrams, footnotes, and citations.
 - Clear identifiers, version information, and product status near the title.
 
-The product's credibility should come from its content model, version history,
+The product's credibility should come from its content model, revision history,
 and honest limitations—not from visual imitation.
 
 ## Product principles

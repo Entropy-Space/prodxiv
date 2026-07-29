@@ -73,6 +73,13 @@
           ],
           "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
         },
+        "product_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
         "product_url": {
           "type": [
             "string",
@@ -103,6 +110,16 @@
         "schema_version": {
           "type": "string",
           "pattern": "^1$"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PaperScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "$ref": "#/$defs/ProductStatus"
@@ -140,6 +157,38 @@
         "authors",
         "status",
         "topics"
+      ]
+    },
+    "PaperScope": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PaperScopeKind"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    "PaperScopeKind": {
+      "type": "string",
+      "enum": [
+        "product",
+        "feature",
+        "release"
       ]
     },
     "ProductRelationship": {

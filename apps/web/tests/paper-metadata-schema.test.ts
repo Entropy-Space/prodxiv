@@ -6,6 +6,8 @@ const canonicalMetadata = {
   schema_version: "1",
   paper_id: "prodxiv:2607.000001",
   title: "A published product paper",
+  product_name: "A product",
+  scope: { kind: "product" },
   summary: "A complete fixture for the published metadata boundary.",
   authors: [{ name: "prodxiv contributors" }],
   published_at: "2026-07-28",

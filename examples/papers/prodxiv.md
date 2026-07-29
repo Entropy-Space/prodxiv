@@ -2,6 +2,9 @@
 schema_version: '1'
 paper_id: prodxiv:2607.000001
 title: 'prodxiv: A Versioned Archive for Product Knowledge'
+product_name: prodxiv
+scope:
+  kind: product
 summary: A proposal for preserving the motivations, decisions, results, and lessons behind products as durable, versioned Markdown papers.
 authors:
 - name: prodxiv contributors
@@ -24,7 +27,7 @@ builders a durable place to explain why a product exists, which alternatives
 they considered, how the product works, what results they observed, and what
 they learned.
 
-Papers are written in Markdown and published as immutable versions. The format
+Papers are written in Markdown and published as immutable revisions. The format
 borrows the useful archival properties of academic publishing without asking
 product teams to imitate academic writing.
 
@@ -77,9 +80,9 @@ motivation, related work, core features, architecture, benchmarks, insights,
 limitations, and references. Authors may adapt the structure when a section
 does not fit their product.
 
-## Immutable versions
+## Immutable revisions
 
-Published versions are immutable. Authors publish a new version when the
+Published revisions are immutable. Authors publish a new revision when the
 product or its documented understanding changes. Readers can inspect the
 history instead of encountering silent edits.
 
@@ -107,7 +110,7 @@ The planned system has three primary components:
 
 - An Astro website for reading and editing product papers.
 - A Rust and Axum API that owns publication, authorization, identifiers,
-  immutable versions, and audit records.
+  immutable revisions, and audit records.
 - Paperbot, implemented as a Bun and TypeScript CLI with an Agent Skill.
 
 PostgreSQL stores paper metadata, Markdown, relationships, and audit records.

@@ -30,7 +30,7 @@ Usage:
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
   paperbot auth remove
-  paperbot publish <paper.md> [--format text|json] [--yes]
+  paperbot publish <paper.md> [--product-id <id>] [--format text|json] [--yes]
   paperbot --help
   paperbot --version
 
@@ -51,6 +51,7 @@ Options:
   --api-url <url>      Publishing API base URL
   --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin
+  --product-id <id>    Attach a new paper to an existing product
   --yes                Confirm publication without an interactive prompt
   -h, --help           Show help
   -V, --version        Show version
@@ -184,7 +185,11 @@ export async function run(
     }
 
     if (parsed.command === "publish") {
-      const preparation = await preparePublication(parsed.input_path);
+      const preparation = await preparePublication(parsed.input_path, {
+        ...(parsed.product_id === undefined
+          ? {}
+          : { product_id: parsed.product_id }),
+      });
       if (
         !preparation.validation.report.valid ||
         preparation.publication === undefined
@@ -205,7 +210,7 @@ export async function run(
       if (
         !parsed.yes &&
         !(await (io.confirm ?? defaultIo.confirm)(
-          "Publish this immutable paper version? [y/N] ",
+          "Publish this immutable paper revision? [y/N] ",
         ))
       ) {
         io.stderr("paperbot: publication cancelled");

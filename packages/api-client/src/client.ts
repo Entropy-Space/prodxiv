@@ -9,6 +9,7 @@ type ErrorDiagnostics = NonNullable<ErrorResponse["error"]["diagnostics"]>;
 export interface PublishPaperInput {
   source_markdown: string;
   idempotency_key: string;
+  product_id?: string;
 }
 
 export interface PublishPaperResult {
@@ -85,6 +86,9 @@ export class ProdxivApiClient {
       },
       body: JSON.stringify({
         source_markdown: input.source_markdown,
+        ...(input.product_id === undefined
+          ? {}
+          : { product_id: input.product_id }),
       }),
     });
 
@@ -94,25 +98,33 @@ export class ProdxivApiClient {
       paper,
       location:
         response.headers.get("location") ??
-        `/v1/papers/${paper.paper_id}/versions/${paper.version}`,
+        `/v1/papers/${paper.paper_id}/revisions/${paper.version}`,
       replayed: response.status === 200,
     };
   }
 
+  async getPaperRevision(
+    paperId: string,
+    revision: number,
+  ): Promise<PublishedPaper> {
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_revision",
+        "paper revision must be a positive safe integer",
+      );
+    }
+    const path = `/v1/papers/${encodeURIComponent(paperId)}/revisions/${revision}`;
+    const { response, body } = await this.#request(path);
+    return publishedPaper(response, body);
+  }
+
+  /** @deprecated Use getPaperRevision. */
   async getPaperVersion(
     paperId: string,
     version: number,
   ): Promise<PublishedPaper> {
-    if (!Number.isSafeInteger(version) || version < 1) {
-      throw new ProdxivApiError(
-        0,
-        "request.invalid_version",
-        "paper version must be a positive safe integer",
-      );
-    }
-    const path = `/v1/papers/${encodeURIComponent(paperId)}/versions/${version}`;
-    const { response, body } = await this.#request(path);
-    return publishedPaper(response, body);
+    return this.getPaperRevision(paperId, version);
   }
 
   async listPapers(input: ListPapersInput = {}): Promise<PaperList> {
@@ -262,6 +274,7 @@ function isPublishedPaperSummary(
   return (
     isNonEmptyString(value.schema_version) &&
     isNonEmptyString(value.paper_id) &&
+    isNonEmptyString(value.product_id) &&
     Number.isInteger(value.version) &&
     (value.version as number) > 0 &&
     isDateString(value.published_at) &&
@@ -270,6 +283,8 @@ function isPublishedPaperSummary(
     metadata.version === value.version &&
     metadata.published_at === value.published_at &&
     isNonEmptyString(metadata.title) &&
+    isOptionalString(metadata.product_name) &&
+    (metadata.scope === undefined || isPaperScope(metadata.scope)) &&
     isNonEmptyString(metadata.summary) &&
     isProductStatus(metadata.status) &&
     isNonEmptyString(metadata.license) &&
@@ -285,6 +300,25 @@ function isPublishedPaperSummary(
     (metadata.relationships === undefined ||
       (Array.isArray(metadata.relationships) &&
         metadata.relationships.every(isRelationship)))
+  );
+}
+
+function isPaperScope(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.kind === "product") {
+    return value.name === undefined && value.product_version === undefined;
+  }
+  if (value.kind === "feature") {
+    return (
+      isNonEmptyString(value.name) && isOptionalString(value.product_version)
+    );
+  }
+  return (
+    value.kind === "release" &&
+    isOptionalString(value.name) &&
+    isNonEmptyString(value.product_version)
   );
 }
 

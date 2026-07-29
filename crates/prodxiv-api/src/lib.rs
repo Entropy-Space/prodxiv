@@ -158,12 +158,13 @@ pub trait PublicationStore: Send + Sync {
         submitted_markdown: &str,
         actor: &str,
         idempotency_key: &str,
+        product_id: Option<&str>,
     ) -> Result<PublishOutcome, StoreError>;
 
-    async fn find_version(
+    async fn find_revision(
         &self,
         paper_id: &str,
-        version: u32,
+        revision: u32,
     ) -> Result<Option<PublishedPaper>, StoreError>;
 
     async fn list_latest(
@@ -181,18 +182,26 @@ impl PublicationStore for PostgresStorage {
         submitted_markdown: &str,
         actor: &str,
         idempotency_key: &str,
+        product_id: Option<&str>,
     ) -> Result<PublishOutcome, StoreError> {
-        PostgresStorage::publish_new(self, paper, submitted_markdown, actor, idempotency_key)
-            .await
-            .map_err(StoreError::from)
+        PostgresStorage::publish_new(
+            self,
+            paper,
+            submitted_markdown,
+            actor,
+            idempotency_key,
+            product_id,
+        )
+        .await
+        .map_err(StoreError::from)
     }
 
-    async fn find_version(
+    async fn find_revision(
         &self,
         paper_id: &str,
-        version: u32,
+        revision: u32,
     ) -> Result<Option<PublishedPaper>, StoreError> {
-        PostgresStorage::find_version(self, paper_id, version)
+        PostgresStorage::find_revision(self, paper_id, revision)
             .await
             .map_err(StoreError::from)
     }
@@ -216,6 +225,8 @@ pub enum StoreError {
     IdentifierSpaceExhausted,
     #[error("idempotency key was already used for different content")]
     IdempotencyConflict,
+    #[error("product identifier is invalid or does not exist")]
+    InvalidProduct,
     #[error("storage operation failed")]
     Internal,
 }
@@ -235,9 +246,12 @@ impl From<StorageError> for StoreError {
             ))
             | StorageError::InvalidActor
             | StorageError::InvalidIdempotencyKey
-            | StorageError::CorruptVersion(_) => {
+            | StorageError::CorruptRevision(_) => {
                 tracing::error!(error = %error, "publication storage operation failed");
                 Self::Internal
+            }
+            StorageError::InvalidProductId | StorageError::UnknownProduct(_) => {
+                Self::InvalidProduct
             }
         }
     }
@@ -247,6 +261,8 @@ impl From<StorageError> for StoreError {
 #[serde(deny_unknown_fields)]
 pub struct PublishPaperRequest {
     pub source_markdown: String,
+    #[serde(default)]
+    pub product_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -304,9 +320,9 @@ impl IntoResponse for ApiError {
 }
 
 #[derive(Debug, Deserialize)]
-struct VersionPath {
+struct RevisionPath {
     paper_id: String,
-    version: u32,
+    revision: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -327,8 +343,12 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/papers", get(list_papers).post(publish_paper))
         .route(
-            "/v1/papers/{paper_id}/versions/{version}",
-            get(get_paper_version),
+            "/v1/papers/{paper_id}/revisions/{revision}",
+            get(get_paper_revision),
+        )
+        .route(
+            "/v1/papers/{paper_id}/versions/{revision}",
+            get(get_paper_revision),
         )
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -353,7 +373,7 @@ async fn health() -> Json<HealthResponse> {
       ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page")
     ),
     responses(
-      (status = 200, description = "Latest published paper versions", body = PaperListResponse),
+      (status = 200, description = "Latest published paper revisions", body = PaperListResponse),
       (status = 400, description = "Pagination parameters are invalid", body = ErrorResponse),
       (status = 500, description = "Reading failed", body = ErrorResponse)
     )
@@ -442,13 +462,14 @@ async fn publish_paper(
             &payload.source_markdown,
             &state.publish_actor,
             idempotency_key,
+            payload.product_id.as_deref(),
         )
         .await
         .map_err(store_error)?;
     let published = outcome.paper;
     let location = format!(
-        "/v1/papers/{}/versions/{}",
-        published.paper_id, published.version
+        "/v1/papers/{}/revisions/{}",
+        published.paper_id, published.revision
     );
     let status = if outcome.replayed {
         StatusCode::OK
@@ -487,21 +508,21 @@ fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
 
 #[utoipa::path(
     get,
-    path = "/v1/papers/{paper_id}/versions/{version}",
+    path = "/v1/papers/{paper_id}/revisions/{revision}",
     params(
         ("paper_id" = String, Path, description = "Canonical prodxiv paper identifier"),
-        ("version" = u32, Path, minimum = 1)
+        ("revision" = u32, Path, minimum = 1)
     ),
     responses(
-        (status = 200, description = "Exact immutable paper version", body = PublishedPaper),
-        (status = 400, description = "Paper identifier or version is invalid", body = ErrorResponse),
-        (status = 404, description = "Paper version does not exist", body = ErrorResponse),
+        (status = 200, description = "Exact immutable paper revision", body = PublishedPaper),
+        (status = 400, description = "Paper identifier or revision is invalid", body = ErrorResponse),
+        (status = 404, description = "Paper revision does not exist", body = ErrorResponse),
         (status = 500, description = "Reading failed", body = ErrorResponse)
     )
 )]
-async fn get_paper_version(
+async fn get_paper_revision(
     State(state): State<AppState>,
-    Path(path): Path<VersionPath>,
+    Path(path): Path<RevisionPath>,
 ) -> Result<Json<PublishedPaper>, ApiError> {
     let paper_id = canonicalize_paper_id(&path.paper_id).ok_or_else(|| {
         ApiError::new(
@@ -510,24 +531,24 @@ async fn get_paper_version(
             "paper identifier must match prodxiv:YYMM.XXXXXX using Crockford Base32",
         )
     })?;
-    if path.version == 0 {
+    if path.revision == 0 {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "paper.invalid_version",
-            "paper version must be positive",
+            "paper.invalid_revision",
+            "paper revision must be positive",
         ));
     }
 
     let published = state
         .store
-        .find_version(&paper_id, path.version)
+        .find_revision(&paper_id, path.revision)
         .await
         .map_err(store_error)?
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::NOT_FOUND,
                 "paper.not_found",
-                "paper version does not exist",
+                "paper revision does not exist",
             )
         })?;
     Ok(Json(published))
@@ -600,6 +621,11 @@ fn store_error(error: StoreError) -> ApiError {
             "publication.idempotency_conflict",
             "idempotency key was already used for different paper content",
         ),
+        StoreError::InvalidProduct => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "product.invalid",
+            "product_id must identify an existing prodxiv product",
+        ),
         StoreError::Internal => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "storage.internal",
@@ -615,7 +641,7 @@ fn store_error(error: StoreError) -> ApiError {
         version = "0.1.0",
         description = "Authoritative immutable publication and retrieval API."
     ),
-    paths(health, list_papers, publish_paper, get_paper_version),
+    paths(health, list_papers, publish_paper, get_paper_revision),
     components(schemas(
         PublishPaperRequest,
         PublishedPaper,

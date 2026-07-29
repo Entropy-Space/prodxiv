@@ -49,7 +49,7 @@ describe("validatePaperFile", () => {
       "publication.license_required",
       "publication.paper_id_required",
       "publication.date_required",
-      "publication.version_required",
+      "publication.revision_required",
     ]);
   });
 

@@ -32,12 +32,19 @@ afterEach(async () => {
 describe("paper publication", () => {
   test("parses explicit non-interactive publication arguments", () => {
     expect(
-      parseArguments(["publish", "paper.md", "--format=json", "--yes"]),
+      parseArguments([
+        "publish",
+        "paper.md",
+        "--product-id=prodxiv-product:2607.000001",
+        "--format=json",
+        "--yes",
+      ]),
     ).toEqual({
       command: "publish",
       input_path: "paper.md",
       format: "json",
       yes: true,
+      product_id: "prodxiv-product:2607.000001",
     });
   });
 
@@ -49,18 +56,22 @@ describe("paper publication", () => {
         PRODXIV_SITE_URL: "https://prodxiv.example",
         PRODXIV_PUBLISH_TOKEN: token,
       },
+      product_id: "prodxiv-product:2607.000001",
       fetch: async (input, init) => {
         request = new Request(input, init);
         return new Response(
           JSON.stringify({
             schema_version: "1",
             paper_id: "prodxiv:2607.000001",
+            product_id: "prodxiv-product:2607.000001",
             version: 1,
             published_at: "2026-07-28",
             metadata: {
               schema_version: "1",
               paper_id: "prodxiv:2607.000001",
               title: "prodxiv",
+              product_name: "prodxiv",
+              scope: { kind: "product" },
               summary: "summary",
               authors: [{ name: "Author" }],
               published_at: "2026-07-28",
@@ -75,7 +86,7 @@ describe("paper publication", () => {
             status: 201,
             headers: {
               "content-type": "application/json",
-              location: "/v1/papers/prodxiv:2607.000001/versions/1",
+              location: "/v1/papers/prodxiv:2607.000001/revisions/1",
             },
           },
         );
@@ -91,10 +102,11 @@ describe("paper publication", () => {
 
     expect(request?.headers.get("authorization")).toBe(`Bearer ${token}`);
     expect(request?.headers.get("idempotency-key")).toBe(
-      `paperbot.v1.${prepared.source_sha256}`,
+      prepared.idempotency_key,
     );
     expect(await request?.json()).toEqual({
       source_markdown: await readFile(paperPath, "utf8"),
+      product_id: "prodxiv-product:2607.000001",
     });
     expect(result).toEqual({
       format_version: 1,
@@ -102,7 +114,7 @@ describe("paper publication", () => {
       version: 1,
       published_at: "2026-07-28",
       location:
-        "https://api.prodxiv.example/v1/papers/prodxiv:2607.000001/versions/1",
+        "https://api.prodxiv.example/v1/papers/prodxiv:2607.000001/revisions/1",
       web_url: "https://prodxiv.example/papers/2607.000001/v1",
       source_sha256: prepared.source_sha256,
       replayed: false,
@@ -120,12 +132,15 @@ describe("paper publication", () => {
           JSON.stringify({
             schema_version: "1",
             paper_id: "prodxiv:2607.000001",
+            product_id: "prodxiv-product:2607.000001",
             version: 1,
             published_at: "2026-07-28",
             metadata: {
               schema_version: "1",
               paper_id: "prodxiv:2607.000001",
               title: "prodxiv",
+              product_name: "prodxiv",
+              scope: { kind: "product" },
               summary: "summary",
               authors: [{ name: "Author" }],
               published_at: "2026-07-28",

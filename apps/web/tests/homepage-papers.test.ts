@@ -35,7 +35,7 @@ describe("selectReferencePapers", () => {
     ).toEqual([referencePaper]);
   });
 
-  test("does not repeat an exact version that was published", () => {
+  test("does not repeat an exact revision that was published", () => {
     expect(
       selectReferencePapers({
         is_first_page: true,

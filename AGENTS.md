@@ -18,8 +18,8 @@ Read these documents before making product or architecture decisions:
 ## Product principles
 
 - Optimize for durable product knowledge, not launch-page promotion.
-- Published paper versions are immutable. Meaningful changes create a new
-  version.
+- Published paper revisions are immutable. Meaningful changes create a new
+  revision.
 - Treat limitations and benchmark methodology as first-class content.
 - Prefer visible uncertainty over unsupported fluent prose.
 - Paperbot may draft and revise, but it must never publish automatically.
@@ -82,7 +82,7 @@ The service boundary is deliberate:
 - Paperbot performs local analysis and produces a draft.
 - The website provides reading and editing experiences.
 - The Axum API owns authentication, authorization, identifier allocation,
-  immutable version creation, authoritative validation, moderation, and audit
+  immutable revision creation, authoritative validation, moderation, and audit
   records.
 
 ## Build order
@@ -151,8 +151,8 @@ validation, but the API must validate every submission again.
 The API must:
 
 - Allocate paper identifiers and version numbers transactionally.
-- Treat every published version as immutable.
-- Associate authors and source Markdown with the exact paper version they
+- Treat every published revision as immutable.
+- Associate authors and source Markdown with the exact paper revision they
   belong to.
 - Reject unsupported schema versions with a useful diagnostic.
 - Require authorization for draft access, submission, and revision creation.

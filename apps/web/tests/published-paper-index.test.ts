@@ -5,12 +5,15 @@ import { readPublishedPaperIndex } from "../src/lib/published-paper-index.ts";
 const summary = {
   schema_version: "1",
   paper_id: "prodxiv:2607.000001",
+  product_id: "prodxiv-product:2607.000001",
   version: 1,
   published_at: "2026-07-28",
   metadata: {
     schema_version: "1",
     paper_id: "prodxiv:2607.000001",
     title: "Index fixture",
+    product_name: "Index product",
+    scope: { kind: "product" },
     summary: "A complete index fixture.",
     authors: [{ name: "Test Author" }],
     published_at: "2026-07-28",

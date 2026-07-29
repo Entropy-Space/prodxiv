@@ -5,7 +5,7 @@ MVP exposes three routes:
 
 - `GET /health`
 - `POST /v1/papers`
-- `GET /v1/papers/{paper_id}/versions/{version}`
+- `GET /v1/papers/{paper_id}/revisions/{revision}`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`.
 
@@ -57,6 +57,23 @@ bun run paperbot auth set --api-url http://127.0.0.1:3000
 bun run paperbot publish path/to/paper.md
 ```
 
+To publish another paper about an existing product:
+
+```sh
+bun run paperbot publish path/to/paper.md \
+  --product-id prodxiv-product:2607.000001
+```
+
+Without `--product-id`, publication creates a new product identity. Product
+homepage and repository URLs are normalized into `product_resources`; they
+also remain historical metadata in the immutable paper source for
+compatibility.
+
+GitHub metrics are not paper metadata. Periodic collectors append timestamped
+rows to `github_repository_observations`, keyed by a repository resource and
+GitHub's stable repository node identifier. A collector must run from an
+external scheduler; the API process must not rely on an in-process timer.
+
 Pass `--site-url http://localhost:4321` as well when Paperbot should return the
 human-readable paper URL after publication.
 
@@ -83,10 +100,11 @@ Paper identifiers use `prodxiv:YYMM.XXXXXX`. The suffix is uppercase Crockford
 Base32 (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`); lowercase input is accepted and
 canonicalized.
 
-Public readers can request the latest version of each paper with
+Public readers can request the latest revision of each paper with
 `GET /v1/papers`. The endpoint accepts `limit` from 1 to 100 and an opaque
-`cursor` returned as `next_cursor`. Exact historical versions remain available
-through `GET /v1/papers/{paper_id}/versions/{version}`.
+`cursor` returned as `next_cursor`. Exact historical revisions remain
+available through `GET /v1/papers/{paper_id}/revisions/{revision}`. The legacy
+`/versions/{revision}` route remains readable for existing clients.
 
 ## Production configuration
 

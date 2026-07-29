@@ -12,12 +12,12 @@ export interface SectionHeading {
 interface Props {
   metadata: PaperMetadata;
   paper_id: string;
-  version: number;
+  revision: number;
   published_at: string;
   section_headings: SectionHeading[];
 }
 
-const { metadata, paper_id, version, published_at, section_headings } =
+const { metadata, paper_id, revision, published_at, section_headings } =
   Astro.props;
 const publishedAt = new Intl.DateTimeFormat("en", {
   dateStyle: "long",
@@ -25,6 +25,12 @@ const publishedAt = new Intl.DateTimeFormat("en", {
 }).format(new Date(`${published_at}T00:00:00Z`));
 const authorNames = metadata.authors.map((author) => author.name).join(", ");
 const statusLabel = metadata.status.replaceAll("_", " ");
+const scopeLabel =
+  metadata.scope?.kind === "feature"
+    ? `Feature · ${metadata.scope.name}`
+    : metadata.scope?.kind === "release"
+      ? `Release · ${metadata.scope.product_version}`
+      : "Product overview";
 ---
 
 <SiteLayout
@@ -42,8 +48,8 @@ const statusLabel = metadata.status.replaceAll("_", " ");
     <header class="paper-header">
       <div class="paper-kicker">
         <span class="status">{statusLabel}</span>
-        <span>Product paper</span>
-        <span>Version {version}</span>
+        <span>{scopeLabel}</span>
+        <span>Revision {revision}</span>
       </div>
 
       <h1>{metadata.title}</h1>
@@ -76,8 +82,20 @@ const statusLabel = metadata.status.replaceAll("_", " ");
               <dd>{paper_id}</dd>
             </div>
             <div>
-              <dt>Version</dt>
-              <dd>v{version}</dd>
+              <dt>Revision</dt>
+              <dd>v{revision}</dd>
+            </div>
+            {
+              metadata.product_name && (
+                <div>
+                  <dt>Product</dt>
+                  <dd>{metadata.product_name}</dd>
+                </div>
+              )
+            }
+            <div>
+              <dt>Scope</dt>
+              <dd>{scopeLabel}</dd>
             </div>
             <div>
               <dt>Status</dt>

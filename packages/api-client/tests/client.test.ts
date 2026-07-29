@@ -9,12 +9,15 @@ import {
 const publishedPaper = {
   schema_version: "1",
   paper_id: "prodxiv:2607.000001",
+  product_id: "prodxiv-product:2607.000001",
   version: 1,
   published_at: "2026-07-28",
   metadata: {
     schema_version: "1",
     paper_id: "prodxiv:2607.000001",
     title: "Test paper",
+    product_name: "Test product",
+    scope: { kind: "product" },
     summary: "A complete API client fixture.",
     authors: [{ name: "Test Author" }],
     published_at: "2026-07-28",
@@ -53,7 +56,7 @@ describe("ProdxivApiClient", () => {
     );
   });
 
-  test("reads an exact public paper version without a token", async () => {
+  test("reads an exact public paper revision without a token", async () => {
     let requestUrl = "";
     const client = new ProdxivApiClient({
       api_url: "https://api.prodxiv.example/",
@@ -63,11 +66,31 @@ describe("ProdxivApiClient", () => {
       },
     });
 
-    expect(await client.getPaperVersion("prodxiv:2607.000001", 1)).toEqual(
+    expect(await client.getPaperRevision("prodxiv:2607.000001", 1)).toEqual(
       publishedPaper,
     );
     expect(requestUrl).toBe(
-      "https://api.prodxiv.example/v1/papers/prodxiv%3A2607.000001/versions/1",
+      "https://api.prodxiv.example/v1/papers/prodxiv%3A2607.000001/revisions/1",
+    );
+  });
+
+  test("keeps historical publications readable without new product metadata", async () => {
+    const {
+      product_name: _,
+      scope: __,
+      ...historicalMetadata
+    } = publishedPaper.metadata;
+    const historicalPaper = {
+      ...publishedPaper,
+      metadata: historicalMetadata,
+    };
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      fetch: async () => Response.json(historicalPaper),
+    });
+
+    expect(await client.getPaperRevision("prodxiv:2607.000001", 1)).toEqual(
+      historicalPaper,
     );
   });
 
@@ -79,7 +102,7 @@ describe("ProdxivApiClient", () => {
           {
             error: {
               code: "paper.not_found",
-              message: "paper version does not exist",
+              message: "paper revision does not exist",
             },
           },
           { status: 404 },
@@ -87,7 +110,7 @@ describe("ProdxivApiClient", () => {
     });
 
     await expect(
-      client.getPaperVersion("prodxiv:2607.000001", 2),
+      client.getPaperRevision("prodxiv:2607.000001", 2),
     ).rejects.toEqual(
       expect.objectContaining({
         name: "ProdxivApiError",
@@ -111,7 +134,7 @@ describe("ProdxivApiClient", () => {
     });
 
     await expect(
-      client.getPaperVersion("prodxiv:2607.000001", 1),
+      client.getPaperRevision("prodxiv:2607.000001", 1),
     ).rejects.toEqual(
       expect.objectContaining({
         code: "network.invalid_response",
@@ -134,7 +157,7 @@ describe("ProdxivApiClient", () => {
     });
 
     await expect(
-      client.getPaperVersion("prodxiv:2607.000001", 1),
+      client.getPaperRevision("prodxiv:2607.000001", 1),
     ).rejects.toEqual(
       expect.objectContaining({
         code: "network.invalid_response",

@@ -2,6 +2,7 @@
 
 export type RelationshipKind =
   "inspired_by" | "built_on" | "alternative_to" | "supersedes";
+export type PaperScopeKind = "product" | "feature" | "release";
 export type ProductStatus =
   "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
 
@@ -17,11 +18,13 @@ export interface PaperMetadata {
   license?: string | null;
   organization?: string | null;
   paper_id?: string | null;
+  product_name?: string | null;
   product_url?: string | null;
   published_at?: string | null;
   relationships?: ProductRelationship[];
   repository_url?: string | null;
   schema_version: string;
+  scope?: PaperScope | null;
   status: ProductStatus;
   summary: string;
   title: string;
@@ -39,4 +42,9 @@ export interface Author {
 export interface ProductRelationship {
   kind: RelationshipKind;
   paper_id: string;
+}
+export interface PaperScope {
+  kind: PaperScopeKind;
+  name?: string | null;
+  product_version?: string | null;
 }

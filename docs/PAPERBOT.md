@@ -102,7 +102,7 @@ A revision proposal might report:
 > documented limitations may no longer apply.
 
 The proposal should identify affected sections and preserve all existing author
-edits. The author decides whether the changes justify a new published version.
+edits. The author decides whether the changes justify a new published revision.
 
 ## Safety and trust boundaries
 
@@ -164,5 +164,5 @@ Paperbot succeeds when it:
 - Makes incomplete or unsupported statements easier to notice.
 - Asks questions that improve the paper rather than merely filling sections.
 - Describes observed product behavior without inventing product intent.
-- Helps authors keep papers current without erasing historical versions.
+- Helps authors keep papers current without erasing historical revisions.
 - Leaves authors feeling that the paper is theirs.

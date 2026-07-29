@@ -67,7 +67,7 @@ after reviewing the diff.
 
 ## Publish an approved paper
 
-Publication is a remote write and creates an immutable paper version. Never
+Publication is a remote write and creates an immutable paper revision. Never
 infer publication approval from a request to scan, draft, revise, or validate.
 
 After the author explicitly asks to publish:
@@ -75,7 +75,8 @@ After the author explicitly asks to publish:
 1. Run `PAPERBOT_CMD validate <paper.md> --profile submission --format json`.
 2. Resolve every error and show warnings to the author.
 3. Confirm the exact paper path and destination shown by Paperbot.
-4. Run `PAPERBOT_CMD publish <paper.md> --yes --format json`.
+4. Run `PAPERBOT_CMD publish <paper.md> --yes --format json`. Add
+   `--product-id <id>` when the paper is about an existing product.
 5. Report the allocated `paper_id`, version, API location, optional web URL,
    and whether an existing publication was recovered from an idempotent retry.
 
