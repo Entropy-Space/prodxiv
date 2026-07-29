@@ -1,11 +1,12 @@
 # Publishing API
 
 The Axum service is the authoritative boundary for immutable publication. The
-MVP exposes three routes:
+MVP exposes public paper routes plus a read-only external-observation route:
 
 - `GET /health`
 - `POST /v1/papers`
 - `GET /v1/papers/{paper_id}/revisions/{revision}`
+- `GET /v1/github/trending`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`.
 
@@ -43,6 +44,34 @@ same migrations independently for maintenance or diagnosis:
 ```sh
 cargo run -p prodxiv-api --bin prodxiv-migrate
 ```
+
+## Import a local GitHub Trending snapshot
+
+Start PostgreSQL, then import the checked-in provenance-preserving fixture:
+
+```sh
+podman compose up -d postgres
+DIRECT_DATABASE_URL=postgres://prodxiv:prodxiv@127.0.0.1:54329/prodxiv \
+  bun run import:github-trending examples/github-trending/2026-07-29.json
+```
+
+The importer runs migrations, inserts the snapshot and its ordered entries in
+one transaction, and is idempotent for the same date, scope, and source
+revision. It does not fetch GitHub or alter a previously imported observation.
+It accepts multiple JSON paths in one invocation and records successful
+zero-entry snapshots, preserving the distinction between an empty Trending
+scope and a failed collection attempt.
+
+With the API and website running, open `http://127.0.0.1:4321/trending`. The
+page reads the latest exact match for `period`, `language`, and
+`spoken_language`. A missing scope returns an empty result rather than silently
+falling back to a different observation.
+
+Passing `date=YYYY-MM-DD` reads an exact historical snapshot. Each response
+also includes the nearest earlier and later imported dates for that scope, plus
+the language scopes available on the selected date. The website uses that
+metadata for day arrows and language tabs; it does not assume observations
+exist for every calendar day or language.
 
 ## Publish a paper
 

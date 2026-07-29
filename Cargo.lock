@@ -989,6 +989,7 @@ name = "prodxiv-storage"
 version = "0.1.0"
 dependencies = [
  "prodxiv-domain",
+ "serde",
  "serde_json",
  "serde_yaml_neo",
  "sha2 0.10.9",

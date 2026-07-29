@@ -5,6 +5,7 @@ use prodxiv_domain::{
     PublishedPaperSummary, canonicalize_product_id, encode_paper_id_suffix, prepare_publication,
     product_id_from_paper_id,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{
@@ -38,6 +39,81 @@ pub struct PublicationCursor {
 pub struct PublicationPage {
     pub papers: Vec<PublishedPaperSummary>,
     pub next_cursor: Option<PublicationCursor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewGitHubTrendingSnapshot {
+    pub snapshot_date: String,
+    #[serde(default)]
+    pub captured_at: Option<String>,
+    pub period: String,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub spoken_language: Option<String>,
+    pub source_kind: String,
+    pub source_url: String,
+    pub source_revision: String,
+    pub entries: Vec<NewGitHubTrendingEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewGitHubTrendingEntry {
+    pub repository_full_name: String,
+    #[serde(default)]
+    pub repository_node_id: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub primary_language: Option<String>,
+    #[serde(default)]
+    pub stars: Option<i64>,
+    #[serde(default)]
+    pub forks: Option<i64>,
+    #[serde(default)]
+    pub stars_in_period: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrendingImportOutcome {
+    pub snapshot_id: i64,
+    pub entry_count: usize,
+    pub inserted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitHubTrendingSnapshot {
+    pub snapshot_date: String,
+    pub captured_at: Option<String>,
+    pub period: String,
+    pub language: Option<String>,
+    pub spoken_language: Option<String>,
+    pub source_kind: String,
+    pub source_url: String,
+    pub source_revision: String,
+    pub entries: Vec<GitHubTrendingEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitHubTrendingEntry {
+    pub rank: u32,
+    pub repository_full_name: String,
+    pub repository_node_id: Option<String>,
+    pub description: Option<String>,
+    pub primary_language: Option<String>,
+    pub stars: Option<i64>,
+    pub forks: Option<i64>,
+    pub stars_in_period: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubTrendingView {
+    pub snapshot: Option<GitHubTrendingSnapshot>,
+    pub previous_date: Option<String>,
+    pub next_date: Option<String>,
+    pub available_languages: Vec<String>,
 }
 
 #[must_use]
@@ -483,6 +559,316 @@ impl PostgresStorage {
         })
     }
 
+    /// Imports one immutable GitHub Trending snapshot.
+    ///
+    /// Re-importing the same source revision and scope is an idempotent no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when snapshot metadata is invalid, repository entries
+    /// are duplicated, or PostgreSQL rejects the transaction.
+    pub async fn import_github_trending_snapshot(
+        &self,
+        snapshot: &NewGitHubTrendingSnapshot,
+    ) -> Result<TrendingImportOutcome, StorageError> {
+        validate_trending_snapshot(snapshot)?;
+
+        let mut transaction = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO github_trending_snapshots (
+              snapshot_date,
+              captured_at,
+              period,
+              language,
+              spoken_language,
+              source_kind,
+              source_url,
+              source_revision
+            )
+            VALUES ($1::date, $2::timestamptz, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (
+              snapshot_date,
+              captured_at,
+              period,
+              language,
+              spoken_language,
+              source_kind,
+              source_url,
+              source_revision
+            ) DO NOTHING
+            RETURNING snapshot_id
+            "#,
+        )
+        .bind(&snapshot.snapshot_date)
+        .bind(&snapshot.captured_at)
+        .bind(&snapshot.period)
+        .bind(&snapshot.language)
+        .bind(&snapshot.spoken_language)
+        .bind(&snapshot.source_kind)
+        .bind(&snapshot.source_url)
+        .bind(&snapshot.source_revision)
+        .fetch_optional(&mut *transaction)
+        .await?;
+
+        let (snapshot_id, was_inserted) = if let Some(row) = inserted {
+            (row.try_get("snapshot_id")?, true)
+        } else {
+            let row = sqlx::query(
+                r#"
+                SELECT snapshot_id
+                FROM github_trending_snapshots
+                WHERE snapshot_date = $1::date
+                  AND captured_at IS NOT DISTINCT FROM $2::timestamptz
+                  AND period = $3
+                  AND language IS NOT DISTINCT FROM $4
+                  AND spoken_language IS NOT DISTINCT FROM $5
+                  AND source_kind = $6
+                  AND source_url = $7
+                  AND source_revision = $8
+                "#,
+            )
+            .bind(&snapshot.snapshot_date)
+            .bind(&snapshot.captured_at)
+            .bind(&snapshot.period)
+            .bind(&snapshot.language)
+            .bind(&snapshot.spoken_language)
+            .bind(&snapshot.source_kind)
+            .bind(&snapshot.source_url)
+            .bind(&snapshot.source_revision)
+            .fetch_one(&mut *transaction)
+            .await?;
+            (row.try_get("snapshot_id")?, false)
+        };
+
+        if was_inserted {
+            for (index, entry) in snapshot.entries.iter().enumerate() {
+                let rank = i32::try_from(index + 1)
+                    .map_err(|_| StorageError::InvalidTrendingSnapshot("too many entries"))?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO github_trending_entries (
+                      snapshot_id,
+                      rank,
+                      repository_full_name,
+                      repository_node_id,
+                      description,
+                      primary_language,
+                      stars,
+                      forks,
+                      stars_in_period
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    "#,
+                )
+                .bind(snapshot_id)
+                .bind(rank)
+                .bind(&entry.repository_full_name)
+                .bind(&entry.repository_node_id)
+                .bind(&entry.description)
+                .bind(&entry.primary_language)
+                .bind(entry.stars)
+                .bind(entry.forks)
+                .bind(entry.stars_in_period)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+
+        transaction.commit().await?;
+        Ok(TrendingImportOutcome {
+            snapshot_id,
+            entry_count: snapshot.entries.len(),
+            inserted: was_inserted,
+        })
+    }
+
+    /// Returns the latest snapshot for an exact Trending scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn latest_github_trending(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+    ) -> Result<Option<GitHubTrendingSnapshot>, StorageError> {
+        self.github_trending_snapshot(period, language, spoken_language, None)
+            .await
+    }
+
+    /// Returns one snapshot plus navigation derived from imported history.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn github_trending_view(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+        snapshot_date: Option<&str>,
+    ) -> Result<GitHubTrendingView, StorageError> {
+        let snapshot = self
+            .github_trending_snapshot(period, language, spoken_language, snapshot_date)
+            .await?;
+        let anchor_date = snapshot
+            .as_ref()
+            .map(|value| value.snapshot_date.as_str())
+            .or(snapshot_date);
+        let Some(anchor_date) = anchor_date else {
+            return Ok(GitHubTrendingView {
+                snapshot,
+                previous_date: None,
+                next_date: None,
+                available_languages: Vec::new(),
+            });
+        };
+        let navigation = sqlx::query(
+            r#"
+            SELECT
+              (
+                SELECT max(snapshot_date)::text
+                FROM github_trending_snapshots
+                WHERE period = $1
+                  AND language IS NOT DISTINCT FROM $2
+                  AND spoken_language IS NOT DISTINCT FROM $3
+                  AND snapshot_date < $4::date
+              ) AS previous_date,
+              (
+                SELECT min(snapshot_date)::text
+                FROM github_trending_snapshots
+                WHERE period = $1
+                  AND language IS NOT DISTINCT FROM $2
+                  AND spoken_language IS NOT DISTINCT FROM $3
+                  AND snapshot_date > $4::date
+              ) AS next_date
+            "#,
+        )
+        .bind(period)
+        .bind(language)
+        .bind(spoken_language)
+        .bind(anchor_date)
+        .fetch_one(&self.pool)
+        .await?;
+        let language_rows = sqlx::query(
+            r#"
+            SELECT DISTINCT language
+            FROM github_trending_snapshots
+            WHERE period = $1
+              AND snapshot_date = $2::date
+              AND spoken_language IS NOT DISTINCT FROM $3
+              AND language IS NOT NULL
+            ORDER BY language
+            "#,
+        )
+        .bind(period)
+        .bind(anchor_date)
+        .bind(spoken_language)
+        .fetch_all(&self.pool)
+        .await?;
+        let available_languages = language_rows
+            .into_iter()
+            .map(|row| row.try_get("language"))
+            .collect::<Result<Vec<String>, sqlx::Error>>()?;
+
+        Ok(GitHubTrendingView {
+            snapshot,
+            previous_date: navigation.try_get("previous_date")?,
+            next_date: navigation.try_get("next_date")?,
+            available_languages,
+        })
+    }
+
+    async fn github_trending_snapshot(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+        snapshot_date: Option<&str>,
+    ) -> Result<Option<GitHubTrendingSnapshot>, StorageError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              snapshot_id,
+              snapshot_date::text AS snapshot_date,
+              captured_at::text AS captured_at,
+              period,
+              language,
+              spoken_language,
+              source_kind,
+              source_url,
+              source_revision
+            FROM github_trending_snapshots
+            WHERE period = $1
+              AND language IS NOT DISTINCT FROM $2
+              AND spoken_language IS NOT DISTINCT FROM $3
+              AND ($4::date IS NULL OR snapshot_date = $4::date)
+            ORDER BY snapshot_date DESC, created_at DESC, snapshot_id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(period)
+        .bind(language)
+        .bind(spoken_language)
+        .bind(snapshot_date)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let snapshot_id: i64 = row.try_get("snapshot_id")?;
+        let entry_rows = sqlx::query(
+            r#"
+            SELECT
+              rank,
+              repository_full_name,
+              repository_node_id,
+              description,
+              primary_language,
+              stars,
+              forks,
+              stars_in_period
+            FROM github_trending_entries
+            WHERE snapshot_id = $1
+            ORDER BY rank
+            "#,
+        )
+        .bind(snapshot_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let entries = entry_rows
+            .into_iter()
+            .map(|entry| {
+                let rank: i32 = entry.try_get("rank")?;
+                Ok(GitHubTrendingEntry {
+                    rank: u32::try_from(rank)
+                        .map_err(|_| StorageError::CorruptTrendingRank(rank))?,
+                    repository_full_name: entry.try_get("repository_full_name")?,
+                    repository_node_id: entry.try_get("repository_node_id")?,
+                    description: entry.try_get("description")?,
+                    primary_language: entry.try_get("primary_language")?,
+                    stars: entry.try_get("stars")?,
+                    forks: entry.try_get("forks")?,
+                    stars_in_period: entry.try_get("stars_in_period")?,
+                })
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?;
+
+        Ok(Some(GitHubTrendingSnapshot {
+            snapshot_date: row.try_get("snapshot_date")?,
+            captured_at: row.try_get("captured_at")?,
+            period: row.try_get("period")?,
+            language: row.try_get("language")?,
+            spoken_language: row.try_get("spoken_language")?,
+            source_kind: row.try_get("source_kind")?,
+            source_url: row.try_get("source_url")?,
+            source_revision: row.try_get("source_revision")?,
+            entries,
+        }))
+    }
+
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -511,4 +897,60 @@ pub enum StorageError {
     InvalidProductId,
     #[error("product {0} does not exist")]
     UnknownProduct(String),
+    #[error("GitHub Trending snapshot is invalid: {0}")]
+    InvalidTrendingSnapshot(&'static str),
+    #[error("stored GitHub Trending rank {0} is invalid")]
+    CorruptTrendingRank(i32),
+}
+
+fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<(), StorageError> {
+    if !matches!(snapshot.period.as_str(), "daily" | "weekly" | "monthly") {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "period must be daily, weekly, or monthly",
+        ));
+    }
+    if !matches!(
+        snapshot.source_kind.as_str(),
+        "direct_fetch" | "third_party_archive" | "wayback_reconstruction"
+    ) {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "source_kind is not recognized",
+        ));
+    }
+    if snapshot.source_url.trim().is_empty() || snapshot.source_revision.trim().is_empty() {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "source_url and source_revision are required",
+        ));
+    }
+    let mut repository_names = std::collections::HashSet::new();
+    for entry in &snapshot.entries {
+        let mut parts = entry.repository_full_name.split('/');
+        let valid_name = parts
+            .next()
+            .is_some_and(|part| !part.is_empty() && !part.chars().any(char::is_whitespace))
+            && parts
+                .next()
+                .is_some_and(|part| !part.is_empty() && !part.chars().any(char::is_whitespace))
+            && parts.next().is_none();
+        if !valid_name {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "repository_full_name must be owner/name",
+            ));
+        }
+        if !repository_names.insert(entry.repository_full_name.to_ascii_lowercase()) {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "repository names must be unique",
+            ));
+        }
+        if [entry.stars, entry.forks, entry.stars_in_period]
+            .into_iter()
+            .flatten()
+            .any(|value| value < 0)
+        {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "repository counts must not be negative",
+            ));
+        }
+    }
+    Ok(())
 }

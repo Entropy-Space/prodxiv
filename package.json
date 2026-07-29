@@ -22,6 +22,7 @@
     "dev": "bun --filter @prodxiv/web dev",
     "format": "cargo fmt --all -- --check && bun run format:ts",
     "format:ts": "prettier --check \"apps/paperbot/**/*.{ts,json,md}\" \"apps/web/**/*.ts\" \"packages/**/*.{ts,json}\" package.json",
+    "import:github-trending": "cargo run -p prodxiv-storage --bin prodxiv-import-github-trending --",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
     "openapi": "cargo run -p prodxiv-api --bin generate-openapi -- openapi/prodxiv-api.json && bun --filter @prodxiv/api-client generate",
     "paperbot": "bun run apps/paperbot/src/cli.ts",

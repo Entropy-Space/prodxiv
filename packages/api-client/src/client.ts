@@ -3,6 +3,10 @@ import type { components } from "./generated/api.ts";
 export type PublishedPaper = components["schemas"]["PublishedPaper"];
 export type PublishedPaperSummary =
   components["schemas"]["PublishedPaperSummary"];
+export type GitHubTrendingEntry =
+  components["schemas"]["GitHubTrendingEntryResponse"];
+export type GitHubTrendingSnapshot =
+  components["schemas"]["GitHubTrendingSnapshotResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 type ErrorDiagnostics = NonNullable<ErrorResponse["error"]["diagnostics"]>;
 
@@ -26,6 +30,20 @@ export interface ListPapersInput {
 export interface PaperList {
   papers: PublishedPaperSummary[];
   next_cursor?: string;
+}
+
+export interface GetGitHubTrendingInput {
+  date?: string;
+  period?: "daily" | "weekly" | "monthly";
+  language?: string;
+  spoken_language?: string;
+}
+
+export interface GitHubTrendingView {
+  snapshot?: GitHubTrendingSnapshot;
+  previous_date?: string;
+  next_date?: string;
+  available_languages: string[];
 }
 
 export type ApiFetch = (
@@ -157,6 +175,29 @@ export class ProdxivApiClient {
     return paperList(response, body);
   }
 
+  async getGitHubTrending(
+    input: GetGitHubTrendingInput = {},
+  ): Promise<GitHubTrendingView> {
+    const query = new URLSearchParams();
+    if (input.date !== undefined) {
+      query.set("date", input.date);
+    }
+    if (input.period !== undefined) {
+      query.set("period", input.period);
+    }
+    if (input.language !== undefined) {
+      query.set("language", input.language);
+    }
+    if (input.spoken_language !== undefined) {
+      query.set("spoken_language", input.spoken_language);
+    }
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    const { response, body } = await this.#request(
+      `/v1/github/trending${suffix}`,
+    );
+    return githubTrending(response, body);
+  }
+
   async #request(
     path: string,
     init?: RequestInit,
@@ -240,6 +281,90 @@ function paperList(response: Response, body: unknown): PaperList {
       ? {}
       : { next_cursor: body.next_cursor }),
   };
+}
+
+function githubTrending(response: Response, body: unknown): GitHubTrendingView {
+  if (!response.ok) {
+    if (isErrorResponse(body)) {
+      throw new ProdxivApiError(
+        response.status,
+        body.error.code,
+        body.error.message,
+        body.error.diagnostics ?? [],
+      );
+    }
+    throw new ProdxivApiError(
+      response.status,
+      "network.invalid_response",
+      `prodxiv API returned HTTP ${response.status} without a valid error body`,
+    );
+  }
+  if (
+    !isRecord(body) ||
+    !(
+      body.snapshot === undefined ||
+      body.snapshot === null ||
+      isGitHubTrendingSnapshot(body.snapshot)
+    ) ||
+    !isOptionalDateString(body.previous_date) ||
+    !isOptionalDateString(body.next_date) ||
+    !Array.isArray(body.available_languages) ||
+    !body.available_languages.every(isNonEmptyString)
+  ) {
+    throw new ProdxivApiError(
+      response.status,
+      "network.invalid_response",
+      "prodxiv API returned an invalid GitHub Trending snapshot",
+    );
+  }
+  return {
+    ...(body.snapshot === undefined || body.snapshot === null
+      ? {}
+      : { snapshot: body.snapshot }),
+    ...(body.previous_date === undefined || body.previous_date === null
+      ? {}
+      : { previous_date: body.previous_date }),
+    ...(body.next_date === undefined || body.next_date === null
+      ? {}
+      : { next_date: body.next_date }),
+    available_languages: body.available_languages,
+  };
+}
+
+function isGitHubTrendingSnapshot(
+  value: unknown,
+): value is GitHubTrendingSnapshot {
+  return (
+    isRecord(value) &&
+    isDateString(value.snapshot_date) &&
+    isOptionalString(value.captured_at) &&
+    (value.period === "daily" ||
+      value.period === "weekly" ||
+      value.period === "monthly") &&
+    isOptionalString(value.language) &&
+    isOptionalString(value.spoken_language) &&
+    isNonEmptyString(value.source_kind) &&
+    isNonEmptyString(value.source_url) &&
+    isNonEmptyString(value.source_revision) &&
+    Array.isArray(value.entries) &&
+    value.entries.every(isGitHubTrendingEntry)
+  );
+}
+
+function isGitHubTrendingEntry(value: unknown): value is GitHubTrendingEntry {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.rank) &&
+    (value.rank as number) > 0 &&
+    isNonEmptyString(value.repository_full_name) &&
+    isOptionalString(value.repository_node_id) &&
+    isNonEmptyString(value.repository_url) &&
+    isOptionalString(value.description) &&
+    isOptionalString(value.primary_language) &&
+    isOptionalNonNegativeInteger(value.stars) &&
+    isOptionalNonNegativeInteger(value.forks) &&
+    isOptionalNonNegativeInteger(value.stars_in_period)
+  );
 }
 
 function isErrorResponse(value: unknown): value is ErrorResponse {
@@ -369,12 +494,26 @@ function isDateString(value: unknown): boolean {
   );
 }
 
+function isOptionalDateString(
+  value: unknown,
+): value is string | null | undefined {
+  return value === undefined || value === null || isDateString(value);
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalNonNegativeInteger(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (Number.isSafeInteger(value) && (value as number) >= 0)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

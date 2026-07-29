@@ -28,6 +28,82 @@
         }
       }
     },
+    "/v1/github/trending": {
+      "get": {
+        "tags": [],
+        "operationId": "get_github_trending",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "description": "daily, weekly, or monthly; defaults to daily",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "description": "Exact snapshot date in YYYY-MM-DD form; defaults to latest",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "description": "Exact GitHub Trending language scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "spoken_language",
+            "in": "query",
+            "description": "Exact GitHub Trending spoken-language scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest imported snapshot for the requested scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubTrendingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Trending scope is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/papers": {
       "get": {
         "tags": [],
@@ -357,6 +433,154 @@
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "GitHubTrendingEntryResponse": {
+        "type": "object",
+        "required": [
+          "rank",
+          "repository_full_name",
+          "repository_url"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "forks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "primary_language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "repository_full_name": {
+            "type": "string"
+          },
+          "repository_node_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repository_url": {
+            "type": "string"
+          },
+          "stars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "stars_in_period": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "GitHubTrendingResponse": {
+        "type": "object",
+        "required": [
+          "available_languages"
+        ],
+        "properties": {
+          "available_languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "previous_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GitHubTrendingSnapshotResponse"
+              }
+            ]
+          }
+        }
+      },
+      "GitHubTrendingSnapshotResponse": {
+        "type": "object",
+        "required": [
+          "snapshot_date",
+          "period",
+          "source_kind",
+          "source_url",
+          "source_revision",
+          "entries"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubTrendingEntryResponse"
+            }
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "type": "string"
+          },
+          "snapshot_date": {
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "spoken_language": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

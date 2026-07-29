@@ -14,7 +14,10 @@ use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{
     PaperDocument, PublicationIdentity, PublishedPaper, PublishedPaperSummary, prepare_publication,
 };
-use prodxiv_storage::{PublicationCursor, PublicationPage, PublishOutcome};
+use prodxiv_storage::{
+    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, PublicationCursor,
+    PublicationPage, PublishOutcome,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -24,6 +27,7 @@ const TOKEN: &str = "test_token_with_at_least_32_characters";
 struct FakeStore {
     publications: Mutex<Vec<PublishedPaper>>,
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
+    github_trending: Mutex<Option<GitHubTrendingSnapshot>>,
 }
 
 #[async_trait]
@@ -138,6 +142,33 @@ impl PublicationStore for FakeStore {
             next_cursor,
         })
     }
+
+    async fn github_trending_view(
+        &self,
+        period: &str,
+        language: Option<&str>,
+        spoken_language: Option<&str>,
+        snapshot_date: Option<&str>,
+    ) -> Result<GitHubTrendingView, StoreError> {
+        let snapshot = self
+            .github_trending
+            .lock()
+            .expect("fake Trending snapshot should lock")
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.period == period
+                    && snapshot.language.as_deref() == language
+                    && snapshot.spoken_language.as_deref() == spoken_language
+                    && snapshot_date.is_none_or(|date| snapshot.snapshot_date == date)
+            })
+            .cloned();
+        Ok(GitHubTrendingView {
+            snapshot,
+            previous_date: None,
+            next_date: None,
+            available_languages: vec!["rust".to_owned(), "typescript".to_owned()],
+        })
+    }
 }
 
 fn repository_root() -> &'static Path {
@@ -168,6 +199,51 @@ async fn json_body(response: axum::response::Response) -> Value {
         .await
         .expect("response body should be readable");
     serde_json::from_slice(&bytes).expect("response should contain JSON")
+}
+
+#[tokio::test]
+async fn reads_the_latest_github_trending_snapshot() {
+    let store = Arc::new(FakeStore {
+        github_trending: Mutex::new(Some(GitHubTrendingSnapshot {
+            snapshot_date: "2026-07-29".to_owned(),
+            captured_at: None,
+            period: "daily".to_owned(),
+            language: None,
+            spoken_language: None,
+            source_kind: "third_party_archive".to_owned(),
+            source_url: "https://example.com/archive".to_owned(),
+            source_revision: "abc123".to_owned(),
+            entries: vec![GitHubTrendingEntry {
+                rank: 1,
+                repository_full_name: "pascalorg/editor".to_owned(),
+                repository_node_id: None,
+                description: Some("A repository".to_owned()),
+                primary_language: Some("TypeScript".to_owned()),
+                stars: None,
+                forks: None,
+                stars_in_period: None,
+            }],
+        })),
+        ..FakeStore::default()
+    });
+    let response = app(store)
+        .oneshot(
+            Request::get("/v1/github/trending?period=daily")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["snapshot"]["snapshot_date"], "2026-07-29");
+    assert_eq!(body["available_languages"][0], "rust");
+    assert!(body["previous_date"].is_null());
+    assert_eq!(
+        body["snapshot"]["entries"][0]["repository_url"],
+        "https://github.com/pascalorg/editor"
+    );
 }
 
 #[tokio::test]

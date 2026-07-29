@@ -20,6 +20,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/github/trending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_github_trending"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/papers": {
     parameters: {
       query?: never;
@@ -76,6 +92,38 @@ export interface components {
     };
     ErrorResponse: {
       error: components["schemas"]["ErrorBody"];
+    };
+    GitHubTrendingEntryResponse: {
+      description?: string | null;
+      /** Format: int64 */
+      forks?: number | null;
+      primary_language?: string | null;
+      /** Format: int32 */
+      rank: number;
+      repository_full_name: string;
+      repository_node_id?: string | null;
+      repository_url: string;
+      /** Format: int64 */
+      stars?: number | null;
+      /** Format: int64 */
+      stars_in_period?: number | null;
+    };
+    GitHubTrendingResponse: {
+      available_languages: string[];
+      next_date?: string | null;
+      previous_date?: string | null;
+      snapshot?: null | components["schemas"]["GitHubTrendingSnapshotResponse"];
+    };
+    GitHubTrendingSnapshotResponse: {
+      captured_at?: string | null;
+      entries: components["schemas"]["GitHubTrendingEntryResponse"][];
+      language?: string | null;
+      period: string;
+      snapshot_date: string;
+      source_kind: string;
+      source_revision: string;
+      source_url: string;
+      spoken_language?: string | null;
     };
     HealthResponse: {
       status: string;
@@ -168,6 +216,53 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  get_github_trending: {
+    parameters: {
+      query?: {
+        /** @description daily, weekly, or monthly; defaults to daily */
+        period?: string;
+        /** @description Exact snapshot date in YYYY-MM-DD form; defaults to latest */
+        date?: string;
+        /** @description Exact GitHub Trending language scope */
+        language?: string;
+        /** @description Exact GitHub Trending spoken-language scope */
+        spoken_language?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Latest imported snapshot for the requested scope */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitHubTrendingResponse"];
+        };
+      };
+      /** @description Trending scope is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reading failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
