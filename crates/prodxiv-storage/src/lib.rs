@@ -565,8 +565,8 @@ impl PostgresStorage {
     ///
     /// # Errors
     ///
-    /// Returns an error when snapshot metadata is invalid, entries are empty or
-    /// duplicated, or PostgreSQL rejects the transaction.
+    /// Returns an error when snapshot metadata is invalid, repository entries
+    /// are duplicated, or PostgreSQL rejects the transaction.
     pub async fn import_github_trending_snapshot(
         &self,
         snapshot: &NewGitHubTrendingSnapshot,
@@ -920,11 +920,6 @@ fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<()
     if snapshot.source_url.trim().is_empty() || snapshot.source_revision.trim().is_empty() {
         return Err(StorageError::InvalidTrendingSnapshot(
             "source_url and source_revision are required",
-        ));
-    }
-    if snapshot.entries.is_empty() {
-        return Err(StorageError::InvalidTrendingSnapshot(
-            "at least one entry is required",
         ));
     }
     let mut repository_names = std::collections::HashSet::new();

@@ -58,6 +58,9 @@ DIRECT_DATABASE_URL=postgres://prodxiv:prodxiv@127.0.0.1:54329/prodxiv \
 The importer runs migrations, inserts the snapshot and its ordered entries in
 one transaction, and is idempotent for the same date, scope, and source
 revision. It does not fetch GitHub or alter a previously imported observation.
+It accepts multiple JSON paths in one invocation and records successful
+zero-entry snapshots, preserving the distinction between an empty Trending
+scope and a failed collection attempt.
 
 With the API and website running, open `http://127.0.0.1:4321/trending`. The
 page reads the latest exact match for `period`, `language`, and

@@ -382,6 +382,15 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
         .import_github_trending_snapshot(&rust)
         .await
         .expect("language snapshot should import");
+    let mut empty = snapshot.clone();
+    empty.language = Some("raku".to_owned());
+    empty.source_revision = "empty-raku".to_owned();
+    empty.entries.clear();
+    let empty_outcome = storage
+        .import_github_trending_snapshot(&empty)
+        .await
+        .expect("empty language observation should import");
+    assert_eq!(empty_outcome.entry_count, 0);
 
     let view = storage
         .github_trending_view("daily", None, None, Some("2026-07-29"))
@@ -389,7 +398,7 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
         .expect("Trending navigation should be readable");
     assert_eq!(view.previous_date.as_deref(), Some("2026-07-28"));
     assert_eq!(view.next_date.as_deref(), Some("2026-07-30"));
-    assert_eq!(view.available_languages, ["rust"]);
+    assert_eq!(view.available_languages, ["raku", "rust"]);
 
     let update = sqlx::query("UPDATE github_trending_entries SET rank = 2 WHERE snapshot_id = $1")
         .bind(first.snapshot_id)
