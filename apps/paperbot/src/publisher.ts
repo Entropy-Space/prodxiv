@@ -33,6 +33,7 @@ export interface PublicationResult {
 
 export interface PreparePublicationOptions extends AuthResolutionOptions {
   fetch?: ApiFetch;
+  product_id?: string;
 }
 
 export interface PublicationPreparationResult {
@@ -48,6 +49,7 @@ export class PreparedPublication {
   readonly site_url: string | undefined;
   readonly source_sha256: string;
   readonly idempotency_key: string;
+  readonly product_id: string | undefined;
   readonly #sourceMarkdown: string;
   readonly #client: ProdxivApiClient;
 
@@ -56,6 +58,7 @@ export class PreparedPublication {
     title: string,
     sourceMarkdown: string,
     auth: ResolvedAuth,
+    productId?: string,
     fetchImplementation?: ApiFetch,
   ) {
     this.input_path = inputPath;
@@ -66,7 +69,12 @@ export class PreparedPublication {
     this.source_sha256 = new Bun.CryptoHasher("sha256")
       .update(sourceMarkdown)
       .digest("hex");
-    this.idempotency_key = `paperbot.v1.${this.source_sha256}`;
+    const requestHasher = new Bun.CryptoHasher("sha256");
+    requestHasher.update(sourceMarkdown);
+    requestHasher.update(new Uint8Array([0]));
+    requestHasher.update(productId ?? "");
+    this.idempotency_key = `paperbot.v1.${requestHasher.digest("hex")}`;
+    this.product_id = productId;
     this.#sourceMarkdown = sourceMarkdown;
     this.#client = new ProdxivApiClient({
       api_url: auth.api_url,
@@ -81,6 +89,7 @@ export class PreparedPublication {
     const result = await this.#client.publishPaper({
       source_markdown: this.#sourceMarkdown,
       idempotency_key: this.idempotency_key,
+      ...(this.product_id === undefined ? {} : { product_id: this.product_id }),
     });
     return publicationResult(
       result,
@@ -126,6 +135,7 @@ export async function preparePublication(
       paper.metadata.title || basename(absoluteInputPath),
       sourceMarkdown,
       auth,
+      options.product_id,
       options.fetch,
     ),
   };

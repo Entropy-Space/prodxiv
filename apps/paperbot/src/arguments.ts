@@ -30,6 +30,7 @@ export interface PublishArguments {
   input_path: string;
   format: OutputFormat;
   yes: boolean;
+  product_id?: string;
 }
 
 export interface SkillsArguments {
@@ -151,6 +152,7 @@ function parsePublishArguments(
   let input_path: string | undefined;
   let format: OutputFormat = "text";
   let yes = false;
+  let product_id: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -162,6 +164,22 @@ function parsePublishArguments(
     }
     if (argument === "--yes") {
       yes = true;
+      continue;
+    }
+    if (argument === "--product-id") {
+      const value = args[index + 1];
+      if (value === undefined || value.length === 0) {
+        throw usageError("missing value for --product-id");
+      }
+      product_id = value;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--product-id=")) {
+      product_id = argument.slice("--product-id=".length);
+      if (product_id.length === 0) {
+        throw usageError("missing value for --product-id");
+      }
       continue;
     }
     if (argument === "--format") {
@@ -194,6 +212,7 @@ function parsePublishArguments(
     input_path,
     format,
     yes,
+    ...(product_id === undefined ? {} : { product_id }),
   };
 }
 

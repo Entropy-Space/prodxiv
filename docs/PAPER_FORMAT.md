@@ -9,6 +9,33 @@ The canonical metadata contract is generated at `schemas/paper.schema.json`.
 The canonical section and publication rules are generated at
 `schemas/validation-policy.json`.
 
+## Product and scope metadata
+
+Every submitted paper identifies its durable product and the scope of the
+paper:
+
+```yaml
+product_name: Example
+scope:
+  kind: product
+```
+
+Use `kind: feature` with a required `name` for a focused capability. Use
+`kind: release` with a required `product_version` for a product release:
+
+```yaml
+product_name: Example
+scope:
+  kind: release
+  name: Summer release
+  product_version: "2.0"
+```
+
+The publishing API creates a product identity for the first paper. Later
+papers attach to it through the publication request's `product_id`. The YAML
+`version` field is the immutable paper revision number assigned by the service;
+it is not the product release version.
+
 ## Sections
 
 Required level-one sections appear once and in this order:

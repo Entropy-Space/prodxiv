@@ -15,7 +15,9 @@
       "paper_id",
       "published_at",
       "version",
-      "license"
+      "license",
+      "product_name",
+      "scope"
     ],
     "submission_forbidden_metadata": [
       "paper_id",
@@ -23,7 +25,9 @@
       "version"
     ],
     "submission_required_metadata": [
-      "license"
+      "license",
+      "product_name",
+      "scope"
     ]
   }
 }

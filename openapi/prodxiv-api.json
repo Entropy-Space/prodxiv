@@ -57,7 +57,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Latest published paper versions",
+            "description": "Latest published paper revisions",
             "content": {
               "application/json": {
                 "schema": {
@@ -201,10 +201,10 @@
         ]
       }
     },
-    "/v1/papers/{paper_id}/versions/{version}": {
+    "/v1/papers/{paper_id}/revisions/{revision}": {
       "get": {
         "tags": [],
-        "operationId": "get_paper_version",
+        "operationId": "get_paper_revision",
         "parameters": [
           {
             "name": "paper_id",
@@ -216,7 +216,7 @@
             }
           },
           {
-            "name": "version",
+            "name": "revision",
             "in": "path",
             "required": true,
             "schema": {
@@ -228,7 +228,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Exact immutable paper version",
+            "description": "Exact immutable paper revision",
             "content": {
               "application/json": {
                 "schema": {
@@ -238,7 +238,7 @@
             }
           },
           "400": {
-            "description": "Paper identifier or version is invalid",
+            "description": "Paper identifier or revision is invalid",
             "content": {
               "application/json": {
                 "schema": {
@@ -248,7 +248,7 @@
             }
           },
           "404": {
-            "description": "Paper version does not exist",
+            "description": "Paper revision does not exist",
             "content": {
               "application/json": {
                 "schema": {
@@ -427,6 +427,12 @@
             ],
             "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
           },
+          "product_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "product_url": {
             "type": [
               "string",
@@ -454,6 +460,16 @@
           "schema_version": {
             "type": "string"
           },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PaperScope"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/ProductStatus"
           },
@@ -479,6 +495,38 @@
           }
         },
         "additionalProperties": false
+      },
+      "PaperScope": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PaperScopeKind"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "product_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PaperScopeKind": {
+        "type": "string",
+        "enum": [
+          "product",
+          "feature",
+          "release"
+        ]
       },
       "ProductRelationship": {
         "type": "object",
@@ -513,6 +561,12 @@
           "source_markdown"
         ],
         "properties": {
+          "product_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "source_markdown": {
             "type": "string"
           }
@@ -524,6 +578,7 @@
         "required": [
           "schema_version",
           "paper_id",
+          "product_id",
           "version",
           "published_at",
           "metadata",
@@ -534,6 +589,9 @@
             "$ref": "#/components/schemas/PaperMetadata"
           },
           "paper_id": {
+            "type": "string"
+          },
+          "product_id": {
             "type": "string"
           },
           "published_at": {
@@ -558,6 +616,7 @@
         "required": [
           "schema_version",
           "paper_id",
+          "product_id",
           "version",
           "published_at",
           "metadata"
@@ -567,6 +626,9 @@
             "$ref": "#/components/schemas/PaperMetadata"
           },
           "paper_id": {
+            "type": "string"
+          },
+          "product_id": {
             "type": "string"
           },
           "published_at": {

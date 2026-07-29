@@ -6,6 +6,7 @@ use utoipa::ToSchema;
 pub const SUPPORTED_SCHEMA_VERSION: &str = "1";
 pub const PAPER_ID_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 pub const PAPER_ID_SUFFIX_LENGTH: usize = 6;
+pub const PRODUCT_ID_PREFIX: &str = "prodxiv-product:";
 
 pub const REQUIRED_SECTIONS: [&str; 8] = [
     "Summary",
@@ -78,7 +79,13 @@ pub struct PaperMetadata {
     pub published_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1))]
-    pub version: Option<u32>,
+    #[serde(rename = "version")]
+    pub revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1))]
+    pub product_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<PaperScope>,
     pub status: ProductStatus,
     #[schemars(length(min = 1), inner(regex(pattern = r"^[a-z0-9]+(?:_[a-z0-9]+)*$")))]
     pub topics: Vec<String>,
@@ -115,6 +122,34 @@ pub enum ProductStatus {
     PublicBeta,
     Launched,
     Discontinued,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PaperScope {
+    pub kind: PaperScopeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product_version: Option<String>,
+}
+
+impl Default for PaperScope {
+    fn default() -> Self {
+        Self {
+            kind: PaperScopeKind::Product,
+            name: None,
+            product_version: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaperScopeKind {
+    Product,
+    Feature,
+    Release,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -160,6 +195,22 @@ pub fn canonicalize_paper_id(value: &str) -> Option<String> {
     }
 
     Some(format!("prodxiv:{date}.{suffix}"))
+}
+
+#[must_use]
+pub fn product_id_from_paper_id(paper_id: &str) -> Option<String> {
+    canonicalize_paper_id(paper_id).map(|paper_id| {
+        format!(
+            "{PRODUCT_ID_PREFIX}{}",
+            paper_id.trim_start_matches("prodxiv:")
+        )
+    })
+}
+
+#[must_use]
+pub fn canonicalize_product_id(value: &str) -> Option<String> {
+    let paper_id = format!("prodxiv:{}", value.strip_prefix(PRODUCT_ID_PREFIX)?);
+    product_id_from_paper_id(&paper_id)
 }
 
 #[must_use]

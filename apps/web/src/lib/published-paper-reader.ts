@@ -32,7 +32,7 @@ export type PaperReaderResult =
 
 export interface PaperReaderOptions {
   paper_id: string;
-  version: string;
+  revision: string;
   api_url?: string;
   fetch?: ApiFetch;
 }
@@ -43,12 +43,12 @@ export async function readPublishedPaper(
   if (paperSlugFromCanonicalId(options.paper_id) === undefined) {
     return invalidPaperIdentifier();
   }
-  if (!/^[1-9]\d*$/.test(options.version)) {
-    return invalidVersion();
+  if (!/^[1-9]\d*$/.test(options.revision)) {
+    return invalidRevision();
   }
-  const version = Number(options.version);
-  if (!Number.isSafeInteger(version) || version > 4_294_967_295) {
-    return invalidVersion();
+  const revision = Number(options.revision);
+  if (!Number.isSafeInteger(revision) || revision > 4_294_967_295) {
+    return invalidRevision();
   }
   const apiUrl = configuredApiUrl(options.api_url);
   if (apiUrl === undefined) {
@@ -67,7 +67,7 @@ export async function readPublishedPaper(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const paper = await client.getPaperVersion(options.paper_id, version);
+    const paper = await client.getPaperRevision(options.paper_id, revision);
     return {
       ok: true,
       paper,
@@ -92,13 +92,13 @@ function invalidPaperIdentifier(): PaperReaderResult {
   };
 }
 
-function invalidVersion(): PaperReaderResult {
+function invalidRevision(): PaperReaderResult {
   return {
     ok: false,
     error: {
       status: 400,
-      title: "Invalid paper version",
-      message: "Paper versions must be positive integers.",
+      title: "Invalid paper revision",
+      message: "Paper revisions must be positive integers.",
     },
   };
 }
@@ -108,15 +108,15 @@ function publicError(error: unknown): PaperReaderError {
     if (error.status === 404) {
       return {
         status: 404,
-        title: "Paper version not found",
-        message: "The requested immutable paper version does not exist.",
+        title: "Paper revision not found",
+        message: "The requested immutable paper revision does not exist.",
       };
     }
     if (error.status === 400) {
       return {
         status: 400,
         title: "Invalid paper identifier",
-        message: "The requested paper identifier or version is invalid.",
+        message: "The requested paper identifier or revision is invalid.",
       };
     }
     return {

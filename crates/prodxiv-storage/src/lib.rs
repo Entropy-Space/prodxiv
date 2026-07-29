@@ -2,7 +2,8 @@
 
 use prodxiv_domain::{
     PaperDocument, PaperMetadata, PublicationIdentity, PublicationPreparationError, PublishedPaper,
-    PublishedPaperSummary, encode_paper_id_suffix, prepare_publication,
+    PublishedPaperSummary, canonicalize_product_id, encode_paper_id_suffix, prepare_publication,
+    product_id_from_paper_id,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -76,7 +77,7 @@ impl PostgresStorage {
         Ok(())
     }
 
-    /// Publishes the first immutable version of a new paper.
+    /// Publishes the first immutable revision of a new paper.
     ///
     /// Identifier allocation, publication preparation, persistence, and audit
     /// logging happen in one transaction.
@@ -93,6 +94,7 @@ impl PostgresStorage {
         submitted_markdown: &str,
         actor: &str,
         idempotency_key: &str,
+        requested_product_id: Option<&str>,
     ) -> Result<PublishOutcome, StorageError> {
         if actor.trim().is_empty() {
             return Err(StorageError::InvalidActor);
@@ -100,9 +102,24 @@ impl PostgresStorage {
         if !is_valid_idempotency_key(idempotency_key) {
             return Err(StorageError::InvalidIdempotencyKey);
         }
+        let requested_product_id = requested_product_id
+            .map(|product_id| {
+                canonicalize_product_id(product_id).ok_or(StorageError::InvalidProductId)
+            })
+            .transpose()?;
+        let creates_product = requested_product_id.is_none();
 
         let mut transaction = self.pool.begin().await?;
-        let request_sha256 = format!("{:x}", Sha256::digest(submitted_markdown.as_bytes()));
+        let mut request_hasher = Sha256::new();
+        request_hasher.update(submitted_markdown.as_bytes());
+        request_hasher.update([0]);
+        request_hasher.update(
+            requested_product_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        let request_sha256 = format!("{:x}", request_hasher.finalize());
         let lock_key = format!("{}:{actor}{idempotency_key}", actor.len());
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(lock_key)
@@ -113,13 +130,15 @@ impl PostgresStorage {
             r#"
             SELECT
               publication_requests.request_sha256,
-              paper_versions.paper_id,
-              paper_versions.version,
-              paper_versions.published_at::text AS published_at,
-              paper_versions.metadata,
-              paper_versions.source_markdown
+              papers.product_id,
+              paper_revisions.paper_id,
+              paper_revisions.revision,
+              paper_revisions.published_at::text AS published_at,
+              paper_revisions.metadata,
+              paper_revisions.source_markdown
             FROM publication_requests
-            JOIN paper_versions USING (paper_id, version)
+            JOIN paper_revisions USING (paper_id, revision)
+            JOIN papers USING (paper_id)
             WHERE publication_requests.actor = $1
               AND publication_requests.idempotency_key = $2
             "#,
@@ -134,12 +153,13 @@ impl PostgresStorage {
                 return Err(StorageError::IdempotencyConflict);
             }
             let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
-            let version: i32 = row.try_get("version")?;
+            let revision: i32 = row.try_get("revision")?;
             let paper = PublishedPaper {
                 schema_version: metadata.schema_version.clone(),
                 paper_id: row.try_get("paper_id")?,
-                version: u32::try_from(version)
-                    .map_err(|_| StorageError::CorruptVersion(version))?,
+                product_id: row.try_get("product_id")?,
+                revision: u32::try_from(revision)
+                    .map_err(|_| StorageError::CorruptRevision(revision))?,
                 published_at: row.try_get("published_at")?,
                 metadata: metadata.0,
                 source_markdown: row.try_get("source_markdown")?,
@@ -183,26 +203,56 @@ impl PostgresStorage {
                 period: period.clone(),
             })?;
         let paper_id = format!("prodxiv:{period}.{encoded}");
+        let product_id = if let Some(product_id) = requested_product_id.as_ref() {
+            let exists = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM products WHERE product_id = $1)",
+            )
+            .bind(product_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if !exists {
+                return Err(StorageError::UnknownProduct(product_id.clone()));
+            }
+            product_id.clone()
+        } else {
+            product_id_from_paper_id(&paper_id).expect("allocated paper identifiers are canonical")
+        };
 
         let published = prepare_publication(
             paper,
             PublicationIdentity {
                 paper_id: paper_id.clone(),
-                version: 1,
+                revision: 1,
                 published_at,
             },
+            product_id.clone(),
         )?;
 
-        sqlx::query("INSERT INTO papers (paper_id) VALUES ($1)")
+        if creates_product {
+            sqlx::query("INSERT INTO products (product_id, initial_name) VALUES ($1, $2)")
+                .bind(&product_id)
+                .bind(
+                    published
+                        .metadata
+                        .product_name
+                        .as_deref()
+                        .expect("publication validation requires a product name"),
+                )
+                .execute(&mut *transaction)
+                .await?;
+        }
+
+        sqlx::query("INSERT INTO papers (paper_id, product_id) VALUES ($1, $2)")
             .bind(&paper_id)
+            .bind(&product_id)
             .execute(&mut *transaction)
             .await?;
 
         sqlx::query(
             r#"
-            INSERT INTO paper_versions (
+            INSERT INTO paper_revisions (
               paper_id,
-              version,
+              revision,
               published_at,
               published_by,
               metadata,
@@ -213,7 +263,7 @@ impl PostgresStorage {
             "#,
         )
         .bind(&published.paper_id)
-        .bind(i32::try_from(published.version).expect("version one fits in i32"))
+        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
         .bind(&published.published_at)
         .bind(actor)
         .bind(Json(published.metadata.clone()))
@@ -224,13 +274,13 @@ impl PostgresStorage {
 
         sqlx::query(
             r#"
-            INSERT INTO audit_log (action, actor, paper_id, version, details)
+            INSERT INTO audit_log (action, actor, paper_id, revision, details)
             VALUES ('paper.published', $1, $2, $3, $4)
             "#,
         )
         .bind(actor)
         .bind(&published.paper_id)
-        .bind(i32::try_from(published.version).expect("version one fits in i32"))
+        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
         .bind(Json(json!({
           "schema_version": published.schema_version,
         })))
@@ -244,7 +294,7 @@ impl PostgresStorage {
               idempotency_key,
               request_sha256,
               paper_id,
-              version
+              revision
             )
             VALUES ($1, $2, $3, $4, $5)
             "#,
@@ -253,9 +303,37 @@ impl PostgresStorage {
         .bind(idempotency_key)
         .bind(request_sha256)
         .bind(&published.paper_id)
-        .bind(i32::try_from(published.version).expect("version one fits in i32"))
+        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
         .execute(&mut *transaction)
         .await?;
+
+        for (kind, url) in [
+            ("homepage", published.metadata.product_url.as_deref()),
+            ("repository", published.metadata.repository_url.as_deref()),
+        ] {
+            if let Some(url) = url {
+                sqlx::query(
+                    r#"
+                    INSERT INTO product_resources (
+                      product_id,
+                      kind,
+                      canonical_url,
+                      discovered_from_paper_id,
+                      discovered_from_revision
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (product_id, kind, canonical_url) DO NOTHING
+                    "#,
+                )
+                .bind(&product_id)
+                .bind(kind)
+                .bind(url)
+                .bind(&published.paper_id)
+                .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
 
         transaction.commit().await?;
         Ok(PublishOutcome {
@@ -264,45 +342,48 @@ impl PostgresStorage {
         })
     }
 
-    /// Finds one exact immutable paper version.
+    /// Finds one exact immutable paper revision.
     ///
     /// # Errors
     ///
     /// Returns a database or decoding error when the stored record cannot be
     /// read.
-    pub async fn find_version(
+    pub async fn find_revision(
         &self,
         paper_id: &str,
-        version: u32,
+        revision: u32,
     ) -> Result<Option<PublishedPaper>, StorageError> {
-        let Ok(version) = i32::try_from(version) else {
+        let Ok(revision) = i32::try_from(revision) else {
             return Ok(None);
         };
         let row = sqlx::query(
             r#"
             SELECT
               paper_id,
-              version,
+              papers.product_id,
+              revision,
               published_at::text AS published_at,
               metadata,
               source_markdown
-            FROM paper_versions
-            WHERE paper_id = $1 AND version = $2
+            FROM paper_revisions
+            JOIN papers USING (paper_id)
+            WHERE paper_id = $1 AND revision = $2
             "#,
         )
         .bind(paper_id)
-        .bind(version)
+        .bind(revision)
         .fetch_optional(&self.pool)
         .await?;
 
         row.map(|row| {
             let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
-            let version: i32 = row.try_get("version")?;
+            let revision: i32 = row.try_get("revision")?;
             Ok(PublishedPaper {
                 schema_version: metadata.schema_version.clone(),
                 paper_id: row.try_get("paper_id")?,
-                version: u32::try_from(version)
-                    .map_err(|_| StorageError::CorruptVersion(version))?,
+                product_id: row.try_get("product_id")?,
+                revision: u32::try_from(revision)
+                    .map_err(|_| StorageError::CorruptRevision(revision))?,
                 published_at: row.try_get("published_at")?,
                 metadata: metadata.0,
                 source_markdown: row.try_get("source_markdown")?,
@@ -311,7 +392,7 @@ impl PostgresStorage {
         .transpose()
     }
 
-    /// Lists the latest immutable version of each paper in reverse publication
+    /// Lists the latest immutable revision of each paper in reverse publication
     /// order.
     ///
     /// # Errors
@@ -327,29 +408,35 @@ impl PostgresStorage {
         let cursor_paper_id = cursor.map(|value| value.paper_id.as_str());
         let rows = sqlx::query(
             r#"
-            WITH latest_versions AS (
+            WITH latest_revisions AS (
               SELECT DISTINCT ON (paper_id)
                 paper_id,
-                version,
+                revision,
                 published_at,
                 metadata,
                 created_at
-              FROM paper_versions
-              ORDER BY paper_id, version DESC
+              FROM paper_revisions
+              ORDER BY paper_id, revision DESC
             )
             SELECT
               paper_id,
-              version,
+              papers.product_id,
+              revision,
               published_at::text AS published_at,
               metadata,
-              (extract(epoch FROM created_at) * 1000000)::bigint AS created_at_micros
-            FROM latest_versions
+              (
+                extract(epoch FROM latest_revisions.created_at) * 1000000
+              )::bigint AS created_at_micros
+            FROM latest_revisions
+            JOIN papers USING (paper_id)
             WHERE $1::bigint IS NULL
               OR (
-                (extract(epoch FROM created_at) * 1000000)::bigint,
+                (
+                  extract(epoch FROM latest_revisions.created_at) * 1000000
+                )::bigint,
                 paper_id
               ) < ($1, $2)
-            ORDER BY created_at DESC, paper_id DESC
+            ORDER BY latest_revisions.created_at DESC, paper_id DESC
             LIMIT $3
             "#,
         )
@@ -365,13 +452,14 @@ impl PostgresStorage {
             .take(usize::try_from(limit).unwrap_or(usize::MAX))
             .map(|row| {
                 let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
-                let version: i32 = row.try_get("version")?;
+                let revision: i32 = row.try_get("revision")?;
                 let paper_id: String = row.try_get("paper_id")?;
                 let summary = PublishedPaperSummary {
                     schema_version: metadata.schema_version.clone(),
                     paper_id: paper_id.clone(),
-                    version: u32::try_from(version)
-                        .map_err(|_| StorageError::CorruptVersion(version))?,
+                    product_id: row.try_get("product_id")?,
+                    revision: u32::try_from(revision)
+                        .map_err(|_| StorageError::CorruptRevision(revision))?,
                     published_at: row.try_get("published_at")?,
                     metadata: metadata.0,
                 };
@@ -417,6 +505,10 @@ pub enum StorageError {
     IdempotencyConflict,
     #[error("paper identifier space for period {period} is exhausted")]
     IdentifierSpaceExhausted { period: String },
-    #[error("stored paper version {0} is invalid")]
-    CorruptVersion(i32),
+    #[error("stored paper revision {0} is invalid")]
+    CorruptRevision(i32),
+    #[error("product identifier is invalid")]
+    InvalidProductId,
+    #[error("product {0} does not exist")]
+    UnknownProduct(String),
 }

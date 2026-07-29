@@ -2,10 +2,16 @@ use serde::Serialize;
 
 use crate::{REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION};
 
-pub const PUBLICATION_REQUIRED_METADATA: [&str; 4] =
-    ["paper_id", "published_at", "version", "license"];
+pub const PUBLICATION_REQUIRED_METADATA: [&str; 6] = [
+    "paper_id",
+    "published_at",
+    "version",
+    "license",
+    "product_name",
+    "scope",
+];
 pub const SUBMISSION_FORBIDDEN_METADATA: [&str; 3] = ["paper_id", "published_at", "version"];
-pub const SUBMISSION_REQUIRED_METADATA: [&str; 1] = ["license"];
+pub const SUBMISSION_REQUIRED_METADATA: [&str; 3] = ["license", "product_name", "scope"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ValidationPolicy {

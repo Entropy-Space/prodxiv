@@ -1,6 +1,9 @@
 ---
 schema_version: "1"
 title: "Valid fixture product"
+product_name: "Valid fixture product"
+scope:
+  kind: product
 summary: "A complete draft fixture for Paperbot validation."
 authors:
   - name: "Fixture author"

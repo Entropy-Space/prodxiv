@@ -1,9 +1,10 @@
 use std::{fs, path::Path};
 
 use prodxiv_domain::{
-    PaperDocument, PaperMetadata, PaperParseError, ProductStatus, PublicationIdentity,
-    ValidationProfile, ValidationReport, canonicalize_paper_id, encode_paper_id_suffix,
-    prepare_publication, validate_paper, validation_policy,
+    PaperDocument, PaperMetadata, PaperParseError, PaperScope, PaperScopeKind, ProductStatus,
+    PublicationIdentity, ValidationProfile, ValidationReport, canonicalize_paper_id,
+    canonicalize_product_id, encode_paper_id_suffix, prepare_publication, validate_paper,
+    validation_policy,
 };
 use schemars::schema_for;
 
@@ -75,7 +76,9 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
             }],
             organization: None,
             published_at: None,
-            version: None,
+            revision: None,
+            product_name: Some("Draft product".to_owned()),
+            scope: Some(PaperScope::default()),
             status: ProductStatus::Concept,
             topics: vec!["developer_tools".to_owned()],
             license: None,
@@ -95,13 +98,13 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
 
     paper.metadata.paper_id = Some("not-an-id".to_owned());
     paper.metadata.published_at = Some("2026-02-30".to_owned());
-    paper.metadata.version = Some(0);
+    paper.metadata.revision = Some(0);
     paper.metadata.license = Some(String::new());
     let report = validate_paper(&paper, ValidationProfile::Draft);
     let codes = diagnostic_codes(&report);
     assert!(codes.contains(&"value.invalid_paper_id"));
     assert!(codes.contains(&"publication.invalid_date"));
-    assert!(codes.contains(&"publication.invalid_version"));
+    assert!(codes.contains(&"publication.invalid_revision"));
     assert!(codes.contains(&"publication.invalid_license"));
 }
 
@@ -119,7 +122,7 @@ fn submission_requires_license_and_forbids_server_owned_metadata() {
 
     paper.metadata.paper_id = None;
     paper.metadata.published_at = None;
-    paper.metadata.version = None;
+    paper.metadata.revision = None;
     assert!(validate_paper(&paper, ValidationProfile::Submission).valid);
 
     paper.metadata.license = None;
@@ -136,16 +139,17 @@ fn publication_preparation_assigns_identity_and_preserves_body() {
     let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
     paper.metadata.paper_id = None;
     paper.metadata.published_at = None;
-    paper.metadata.version = None;
+    paper.metadata.revision = None;
     let original_body = paper.markdown.clone();
 
     let published = prepare_publication(
         paper,
         PublicationIdentity {
             paper_id: "prodxiv:2607.00001A".to_owned(),
-            version: 1,
+            revision: 1,
             published_at: "2026-07-27".to_owned(),
         },
+        "prodxiv-product:2607.00001A".to_owned(),
     )
     .expect("complete submission should publish");
 
@@ -173,6 +177,51 @@ fn paper_identifiers_use_canonical_crockford_base32() {
     assert!(canonicalize_paper_id("prodxiv:2607.00000I").is_none());
     assert!(canonicalize_paper_id("prodxiv:2607.00000O").is_none());
     assert!(canonicalize_paper_id("prodxiv:2607.00000U").is_none());
+    assert_eq!(
+        canonicalize_product_id("prodxiv-product:2607.abc123").as_deref(),
+        Some("prodxiv-product:2607.ABC123")
+    );
+}
+
+#[test]
+fn paper_scope_distinguishes_features_and_product_releases() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+
+    let scope = paper
+        .metadata
+        .scope
+        .as_mut()
+        .expect("exemplary paper should declare a scope");
+    scope.kind = PaperScopeKind::Feature;
+    let feature_report = validate_paper(&paper, ValidationProfile::Publication);
+    assert!(diagnostic_codes(&feature_report).contains(&"scope.feature_name_required"));
+
+    paper
+        .metadata
+        .scope
+        .as_mut()
+        .expect("scope should remain present")
+        .name = Some("Paperbot skills".to_owned());
+    assert!(validate_paper(&paper, ValidationProfile::Publication).valid);
+
+    paper
+        .metadata
+        .scope
+        .as_mut()
+        .expect("scope should remain present")
+        .kind = PaperScopeKind::Release;
+    let release_report = validate_paper(&paper, ValidationProfile::Publication);
+    assert!(diagnostic_codes(&release_report).contains(&"scope.product_version_required"));
+
+    paper
+        .metadata
+        .scope
+        .as_mut()
+        .expect("scope should remain present")
+        .product_version = Some("1.0".to_owned());
+    assert!(validate_paper(&paper, ValidationProfile::Publication).valid);
 }
 
 #[test]
@@ -207,7 +256,7 @@ fn malformed_front_matter_is_rejected() {
 fn parser_preserves_the_markdown_body() {
     let body = "# Summary\r\n\r\nPreserve me.  \r\n";
     let source = format!(
-        "---\r\nschema_version: \"1\"\r\ntitle: Test\r\nsummary: Test\r\nauthors:\r\n  - name: Test\r\nstatus: concept\r\ntopics:\r\n  - test\r\n---\r\n{body}"
+        "---\r\nschema_version: \"1\"\r\ntitle: Test\r\nproduct_name: Test\r\nscope:\r\n  kind: product\r\nsummary: Test\r\nauthors:\r\n  - name: Test\r\nstatus: concept\r\ntopics:\r\n  - test\r\n---\r\n{body}"
     );
 
     let paper = PaperDocument::from_markdown(&source).expect("paper should parse");

@@ -34,6 +34,7 @@ impl PublicationStore for FakeStore {
         submitted_markdown: &str,
         _actor: &str,
         idempotency_key: &str,
+        product_id: Option<&str>,
     ) -> Result<PublishOutcome, StoreError> {
         if let Some((existing_source, published)) = self
             .requests
@@ -53,9 +54,12 @@ impl PublicationStore for FakeStore {
             paper,
             PublicationIdentity {
                 paper_id: "prodxiv:2607.000001".to_owned(),
-                version: 1,
+                revision: 1,
                 published_at: "2026-07-27".to_owned(),
             },
+            product_id
+                .unwrap_or("prodxiv-product:2607.000001")
+                .to_owned(),
         )
         .expect("valid test submission should publish");
         self.publications
@@ -75,17 +79,17 @@ impl PublicationStore for FakeStore {
         })
     }
 
-    async fn find_version(
+    async fn find_revision(
         &self,
         paper_id: &str,
-        version: u32,
+        revision: u32,
     ) -> Result<Option<PublishedPaper>, StoreError> {
         Ok(self
             .publications
             .lock()
             .expect("fake store should lock")
             .iter()
-            .find(|paper| paper.paper_id == paper_id && paper.version == version)
+            .find(|paper| paper.paper_id == paper_id && paper.revision == revision)
             .cloned())
     }
 
@@ -149,7 +153,7 @@ fn submission_markdown() -> String {
     let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
     paper.metadata.paper_id = None;
     paper.metadata.published_at = None;
-    paper.metadata.version = None;
+    paper.metadata.revision = None;
     let metadata =
         serde_yaml::to_string(&paper.metadata).expect("submission metadata should serialize");
     format!("---\n{metadata}---\n{}", paper.markdown)
@@ -193,7 +197,7 @@ async fn publishing_requires_authorization() {
 }
 
 #[tokio::test]
-async fn publishes_and_reads_one_exact_version() {
+async fn publishes_and_reads_one_exact_revision() {
     let store = Arc::new(FakeStore::default());
     let application = app(store);
     let response = application
@@ -204,7 +208,11 @@ async fn publishes_and_reads_one_exact_version() {
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
                 .header("idempotency-key", "paperbot.test.publish")
                 .body(Body::from(
-                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                    json!({
+                      "source_markdown": submission_markdown(),
+                      "product_id": "prodxiv-product:2607.00000A"
+                    })
+                    .to_string(),
                 ))
                 .expect("request should build"),
         )
@@ -214,15 +222,20 @@ async fn publishes_and_reads_one_exact_version() {
     assert_eq!(response.status(), StatusCode::CREATED);
     assert_eq!(
         response.headers().get(header::LOCATION),
-        Some(&"/v1/papers/prodxiv:2607.000001/versions/1".parse().unwrap())
+        Some(
+            &"/v1/papers/prodxiv:2607.000001/revisions/1"
+                .parse()
+                .unwrap()
+        )
     );
     let body = json_body(response).await;
     assert_eq!(body["paper_id"], "prodxiv:2607.000001");
+    assert_eq!(body["product_id"], "prodxiv-product:2607.00000A");
     assert_eq!(body["version"], 1);
 
     let response = application
         .oneshot(
-            Request::get("/v1/papers/prodxiv:2607.000001/versions/1")
+            Request::get("/v1/papers/prodxiv:2607.000001/revisions/1")
                 .body(Body::empty())
                 .expect("request should build"),
         )

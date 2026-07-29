@@ -36,14 +36,14 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/papers/{paper_id}/versions/{version}": {
+  "/v1/papers/{paper_id}/revisions/{revision}": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    get: operations["get_paper_version"];
+    get: operations["get_paper_revision"];
     put?: never;
     post?: never;
     delete?: never;
@@ -89,11 +89,13 @@ export interface components {
       license?: string | null;
       organization?: string | null;
       paper_id?: string | null;
+      product_name?: string | null;
       product_url?: string | null;
       published_at?: string | null;
       relationships?: components["schemas"]["ProductRelationship"][];
       repository_url?: string | null;
       schema_version: string;
+      scope?: null | components["schemas"]["PaperScope"];
       status: components["schemas"]["ProductStatus"];
       summary: string;
       title: string;
@@ -101,6 +103,13 @@ export interface components {
       /** Format: int32 */
       version?: number | null;
     };
+    PaperScope: {
+      kind: components["schemas"]["PaperScopeKind"];
+      name?: string | null;
+      product_version?: string | null;
+    };
+    /** @enum {string} */
+    PaperScopeKind: "product" | "feature" | "release";
     ProductRelationship: {
       kind: components["schemas"]["RelationshipKind"];
       paper_id: string;
@@ -109,11 +118,13 @@ export interface components {
     ProductStatus:
       "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
     PublishPaperRequest: {
+      product_id?: string | null;
       source_markdown: string;
     };
     PublishedPaper: {
       metadata: components["schemas"]["PaperMetadata"];
       paper_id: string;
+      product_id: string;
       published_at: string;
       schema_version: string;
       source_markdown: string;
@@ -123,6 +134,7 @@ export interface components {
     PublishedPaperSummary: {
       metadata: components["schemas"]["PaperMetadata"];
       paper_id: string;
+      product_id: string;
       published_at: string;
       schema_version: string;
       /** Format: int32 */
@@ -174,7 +186,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Latest published paper versions */
+      /** @description Latest published paper revisions */
       200: {
         headers: {
           [name: string]: unknown;
@@ -293,20 +305,20 @@ export interface operations {
       };
     };
   };
-  get_paper_version: {
+  get_paper_revision: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         /** @description Canonical prodxiv paper identifier */
         paper_id: string;
-        version: number;
+        revision: number;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Exact immutable paper version */
+      /** @description Exact immutable paper revision */
       200: {
         headers: {
           [name: string]: unknown;
@@ -315,7 +327,7 @@ export interface operations {
           "application/json": components["schemas"]["PublishedPaper"];
         };
       };
-      /** @description Paper identifier or version is invalid */
+      /** @description Paper identifier or revision is invalid */
       400: {
         headers: {
           [name: string]: unknown;
@@ -324,7 +336,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Paper version does not exist */
+      /** @description Paper revision does not exist */
       404: {
         headers: {
           [name: string]: unknown;

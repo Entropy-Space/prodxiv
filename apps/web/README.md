@@ -4,10 +4,10 @@ The Astro website renders two kinds of paper pages:
 
 - checked-in example papers are prerendered at `/papers/<content-id>`;
 - published database records are rendered on demand at
-  `/papers/<paper-id>/versions/<version>`.
+  `/papers/<paper-id>/v<revision>`.
 
 The on-demand route uses Astro's Vercel adapter and fetches the exact immutable
-version from the public Axum API. Markdown is rendered on the server and
+revision from the public Axum API. Markdown is rendered on the server and
 sanitized before it is included in the page.
 
 Published Markdown may contain inline SVG figures for workflows, architecture,
@@ -20,7 +20,7 @@ their source data and method in the caption or surrounding prose.
 See `docs/PAPER_FORMAT.md` for the supported paper Markdown and SVG subset.
 
 The homepage is also rendered on demand. It requests cursor-paginated latest
-versions from the public API and links each result to its exact immutable
+revisions from the public API and links each result to its exact immutable
 reader route. Checked-in reference papers remain visible if the API cannot be
 reached.
 

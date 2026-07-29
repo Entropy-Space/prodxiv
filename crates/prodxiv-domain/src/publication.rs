@@ -11,7 +11,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicationIdentity {
     pub paper_id: String,
-    pub version: u32,
+    pub revision: u32,
     pub published_at: String,
 }
 
@@ -20,7 +20,9 @@ pub struct PublicationIdentity {
 pub struct PublishedPaper {
     pub schema_version: String,
     pub paper_id: String,
-    pub version: u32,
+    pub product_id: String,
+    #[serde(rename = "version")]
+    pub revision: u32,
     pub published_at: String,
     pub metadata: PaperMetadata,
     pub source_markdown: String,
@@ -31,7 +33,9 @@ pub struct PublishedPaper {
 pub struct PublishedPaperSummary {
     pub schema_version: String,
     pub paper_id: String,
-    pub version: u32,
+    pub product_id: String,
+    #[serde(rename = "version")]
+    pub revision: u32,
     pub published_at: String,
     pub metadata: PaperMetadata,
 }
@@ -41,7 +45,8 @@ impl From<&PublishedPaper> for PublishedPaperSummary {
         Self {
             schema_version: paper.schema_version.clone(),
             paper_id: paper.paper_id.clone(),
-            version: paper.version,
+            product_id: paper.product_id.clone(),
+            revision: paper.revision,
             published_at: paper.published_at.clone(),
             metadata: paper.metadata.clone(),
         }
@@ -65,11 +70,12 @@ pub enum PublicationPreparationError {
 pub fn prepare_publication(
     mut paper: PaperDocument,
     identity: PublicationIdentity,
+    product_id: String,
 ) -> Result<PublishedPaper, PublicationPreparationError> {
     let paper_id =
         canonicalize_paper_id(&identity.paper_id).unwrap_or_else(|| identity.paper_id.clone());
     paper.metadata.paper_id = Some(paper_id.clone());
-    paper.metadata.version = Some(identity.version);
+    paper.metadata.revision = Some(identity.revision);
     paper.metadata.published_at = Some(identity.published_at.clone());
     for relationship in &mut paper.metadata.relationships {
         if let Some(canonical) = canonicalize_paper_id(&relationship.paper_id) {
@@ -88,7 +94,8 @@ pub fn prepare_publication(
     Ok(PublishedPaper {
         schema_version: paper.metadata.schema_version.clone(),
         paper_id,
-        version: identity.version,
+        product_id,
+        revision: identity.revision,
         published_at: identity.published_at,
         metadata: paper.metadata,
         source_markdown,

@@ -77,6 +77,7 @@ export function validatePaperRules(
   validateTopics(metadata, diagnostics);
   validatePublicationValues(metadata, diagnostics);
   validateUrls(metadata, diagnostics);
+  validateScope(metadata.scope, diagnostics);
 
   if (profile === "submission") {
     for (const field of validation_policy.paper.submission_forbidden_metadata) {
@@ -112,7 +113,7 @@ function submissionForbiddenDiagnostic(field: string): Diagnostic {
     ],
     version: [
       "submission.version_forbidden",
-      "paper versions are assigned by the publishing service",
+      "paper revisions are assigned by the publishing service",
     ],
   };
   const [code, message] = values[field] ?? [
@@ -126,10 +127,20 @@ function submissionRequiredDiagnostic(field: string): Diagnostic {
   const [code, message] =
     field === "license"
       ? ["submission.license_required", "submitted papers require a license"]
-      : [
-          "submission.metadata_required",
-          "submitted paper metadata is required",
-        ];
+      : field === "product_name"
+        ? [
+            "submission.product_name_required",
+            "submitted papers must identify their product",
+          ]
+        : field === "scope"
+          ? [
+              "submission.scope_required",
+              "submitted papers must identify their scope",
+            ]
+          : [
+              "submission.metadata_required",
+              "submitted paper metadata is required",
+            ];
   return diagnostic(code, `metadata.${field}`, message);
 }
 
@@ -137,7 +148,7 @@ function validateRequiredText(
   metadata: Record<string, unknown>,
   diagnostics: Diagnostic[],
 ): void {
-  for (const field of ["title", "summary"] as const) {
+  for (const field of ["title", "summary", "product_name"] as const) {
     const value = metadata[field];
     if (typeof value === "string" && value.trim().length === 0) {
       diagnostics.push(
@@ -148,6 +159,47 @@ function validateRequiredText(
         ),
       );
     }
+  }
+}
+
+function validateScope(value: unknown, diagnostics: Diagnostic[]): void {
+  if (!isRecord(value)) {
+    return;
+  }
+  if (
+    value.kind === "product" &&
+    (value.name !== undefined || value.product_version !== undefined)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "scope.product_has_detail",
+        "metadata.scope",
+        "product scope must not specify a feature name or product version",
+      ),
+    );
+  } else if (
+    value.kind === "feature" &&
+    (typeof value.name !== "string" || value.name.trim().length === 0)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "scope.feature_name_required",
+        "metadata.scope.name",
+        "feature scope requires a name",
+      ),
+    );
+  } else if (
+    value.kind === "release" &&
+    (typeof value.product_version !== "string" ||
+      value.product_version.trim().length === 0)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "scope.product_version_required",
+        "metadata.scope.product_version",
+        "release scope requires a product version",
+      ),
+    );
   }
 }
 
@@ -312,12 +364,20 @@ function publicationRequiredDiagnostic(field: string): Diagnostic {
       "published papers require a publication date",
     ],
     version: [
-      "publication.version_required",
-      "published papers require a positive version",
+      "publication.revision_required",
+      "published papers require a positive revision",
     ],
     license: [
       "publication.license_required",
       "published papers require a license",
+    ],
+    product_name: [
+      "publication.product_name_required",
+      "published papers must identify their product",
+    ],
+    scope: [
+      "publication.scope_required",
+      "published papers must identify their scope",
     ],
   };
   const [code, message] = values[field] ?? [
