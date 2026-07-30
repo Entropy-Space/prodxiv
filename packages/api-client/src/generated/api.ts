@@ -36,6 +36,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/github/trending/snapshots": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["ingest_github_trending_snapshot"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/papers": {
     parameters: {
       query?: never;
@@ -108,6 +124,12 @@ export interface components {
       /** Format: int64 */
       stars_in_period?: number | null;
     };
+    GitHubTrendingIngestionResponse: {
+      entry_count: number;
+      inserted: boolean;
+      /** Format: int64 */
+      snapshot_id: number;
+    };
     GitHubTrendingResponse: {
       available_languages: string[];
       next_date?: string | null;
@@ -127,6 +149,29 @@ export interface components {
     };
     HealthResponse: {
       status: string;
+    };
+    IngestGitHubTrendingEntry: {
+      description?: string | null;
+      /** Format: int64 */
+      forks?: number | null;
+      primary_language?: string | null;
+      repository_full_name: string;
+      repository_node_id?: string | null;
+      /** Format: int64 */
+      stars?: number | null;
+      /** Format: int64 */
+      stars_in_period?: number | null;
+    };
+    IngestGitHubTrendingRequest: {
+      captured_at?: string | null;
+      entries: components["schemas"]["IngestGitHubTrendingEntry"][];
+      language?: string | null;
+      period: string;
+      snapshot_date: string;
+      source_kind: string;
+      source_revision: string;
+      source_url: string;
+      spoken_language?: string | null;
     };
     PaperListResponse: {
       next_cursor?: string | null;
@@ -258,6 +303,96 @@ export interface operations {
       };
       /** @description Reading failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  ingest_github_trending_snapshot: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for safely retrying one exact snapshot */
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IngestGitHubTrendingRequest"];
+      };
+    };
+    responses: {
+      /** @description Original snapshot returned for an idempotent retry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitHubTrendingIngestionResponse"];
+        };
+      };
+      /** @description Snapshot was ingested */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitHubTrendingIngestionResponse"];
+        };
+      };
+      /** @description JSON or idempotency key is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bearer token is absent or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Idempotency key was reused for different content */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Snapshot is invalid */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Ingestion failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Snapshot ingestion is not configured */
+      503: {
         headers: {
           [name: string]: unknown;
         };

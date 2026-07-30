@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodxiv_domain::{
@@ -20,8 +20,9 @@ use prodxiv_domain::{
     ValidationReport, canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
-    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, PostgresStorage,
-    PublicationCursor, PublicationPage, PublishOutcome, StorageError, is_valid_idempotency_key,
+    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, NewGitHubTrendingEntry,
+    NewGitHubTrendingSnapshot, PostgresStorage, PublicationCursor, PublicationPage, PublishOutcome,
+    StorageError, TrendingImportOutcome, is_valid_idempotency_key,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -37,6 +38,8 @@ pub struct AppState {
     store: Arc<dyn PublicationStore>,
     publish_token: Arc<str>,
     publish_actor: Arc<str>,
+    trending_ingest_token: Option<Arc<str>>,
+    trending_ingest_actor: Arc<str>,
 }
 
 impl AppState {
@@ -50,7 +53,20 @@ impl AppState {
             store,
             publish_token: publish_token.into(),
             publish_actor: publish_actor.into(),
+            trending_ingest_token: None,
+            trending_ingest_actor: Arc::from("github_trending_collector"),
         }
+    }
+
+    #[must_use]
+    pub fn with_trending_ingestion(
+        mut self,
+        token: Option<String>,
+        actor: impl Into<Arc<str>>,
+    ) -> Self {
+        self.trending_ingest_token = token.map(Arc::from);
+        self.trending_ingest_actor = actor.into();
+        self
     }
 }
 
@@ -61,6 +77,8 @@ pub struct ApiConfig {
     pub migration_database_url: String,
     pub publish_token: String,
     pub publish_actor: String,
+    pub trending_ingest_token: Option<String>,
+    pub trending_ingest_actor: String,
 }
 
 impl ApiConfig {
@@ -84,6 +102,23 @@ impl ApiConfig {
         if publish_actor.trim().is_empty() {
             return Err(ConfigError::EmptyPublishActor);
         }
+        let trending_ingest_token = env::var("PRODXIV_TRENDING_INGEST_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty());
+        if trending_ingest_token
+            .as_ref()
+            .is_some_and(|token| token.len() < 32)
+        {
+            return Err(ConfigError::WeakTrendingIngestToken);
+        }
+        if trending_ingest_token.as_deref() == Some(publish_token.as_str()) {
+            return Err(ConfigError::ReusedTrendingIngestToken);
+        }
+        let trending_ingest_actor = env::var("PRODXIV_TRENDING_INGEST_ACTOR")
+            .unwrap_or_else(|_| "github_trending_collector".to_owned());
+        if trending_ingest_actor.trim().is_empty() {
+            return Err(ConfigError::EmptyTrendingIngestActor);
+        }
         let bind_address = resolve_bind_address(
             env::var("PRODXIV_BIND_ADDRESS").ok().as_deref(),
             env::var("PORT").ok().as_deref(),
@@ -95,6 +130,8 @@ impl ApiConfig {
             migration_database_url,
             publish_token,
             publish_actor,
+            trending_ingest_token,
+            trending_ingest_actor,
         })
     }
 }
@@ -123,6 +160,12 @@ pub enum ConfigError {
     WeakPublishToken,
     #[error("PRODXIV_PUBLISH_ACTOR must not be empty")]
     EmptyPublishActor,
+    #[error("PRODXIV_TRENDING_INGEST_TOKEN must contain at least 32 characters")]
+    WeakTrendingIngestToken,
+    #[error("PRODXIV_TRENDING_INGEST_TOKEN must differ from PRODXIV_PUBLISH_TOKEN")]
+    ReusedTrendingIngestToken,
+    #[error("PRODXIV_TRENDING_INGEST_ACTOR must not be empty")]
+    EmptyTrendingIngestActor,
     #[error("PRODXIV_BIND_ADDRESS is invalid: {0}")]
     InvalidBindAddress(#[from] AddrParseError),
 }
@@ -180,6 +223,13 @@ pub trait PublicationStore: Send + Sync {
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<GitHubTrendingView, StoreError>;
+
+    async fn ingest_github_trending_snapshot(
+        &self,
+        snapshot: NewGitHubTrendingSnapshot,
+        actor: &str,
+        idempotency_key: &str,
+    ) -> Result<TrendingImportOutcome, StoreError>;
 }
 
 #[async_trait]
@@ -241,6 +291,17 @@ impl PublicationStore for PostgresStorage {
         .await
         .map_err(StoreError::from)
     }
+
+    async fn ingest_github_trending_snapshot(
+        &self,
+        snapshot: NewGitHubTrendingSnapshot,
+        actor: &str,
+        idempotency_key: &str,
+    ) -> Result<TrendingImportOutcome, StoreError> {
+        PostgresStorage::ingest_github_trending_snapshot(self, &snapshot, actor, idempotency_key)
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -253,6 +314,8 @@ pub enum StoreError {
     IdempotencyConflict,
     #[error("product identifier is invalid or does not exist")]
     InvalidProduct,
+    #[error("GitHub Trending snapshot is invalid: {0}")]
+    InvalidTrendingSnapshot(&'static str),
     #[error("storage operation failed")]
     Internal,
 }
@@ -273,13 +336,16 @@ impl From<StorageError> for StoreError {
             | StorageError::InvalidActor
             | StorageError::InvalidIdempotencyKey
             | StorageError::CorruptRevision(_)
-            | StorageError::InvalidTrendingSnapshot(_)
+            | StorageError::TrendingSerialization(_)
             | StorageError::CorruptTrendingRank(_) => {
                 tracing::error!(error = %error, "publication storage operation failed");
                 Self::Internal
             }
             StorageError::InvalidProductId | StorageError::UnknownProduct(_) => {
                 Self::InvalidProduct
+            }
+            StorageError::InvalidTrendingSnapshot(message) => {
+                Self::InvalidTrendingSnapshot(message)
             }
         }
     }
@@ -291,6 +357,78 @@ pub struct PublishPaperRequest {
     pub source_markdown: String,
     #[serde(default)]
     pub product_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IngestGitHubTrendingRequest {
+    pub snapshot_date: String,
+    #[serde(default)]
+    pub captured_at: Option<String>,
+    pub period: String,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub spoken_language: Option<String>,
+    pub source_kind: String,
+    pub source_url: String,
+    pub source_revision: String,
+    pub entries: Vec<IngestGitHubTrendingEntry>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IngestGitHubTrendingEntry {
+    pub repository_full_name: String,
+    #[serde(default)]
+    pub repository_node_id: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub primary_language: Option<String>,
+    #[serde(default)]
+    pub stars: Option<i64>,
+    #[serde(default)]
+    pub forks: Option<i64>,
+    #[serde(default)]
+    pub stars_in_period: Option<i64>,
+}
+
+impl From<IngestGitHubTrendingRequest> for NewGitHubTrendingSnapshot {
+    fn from(snapshot: IngestGitHubTrendingRequest) -> Self {
+        Self {
+            snapshot_date: snapshot.snapshot_date,
+            captured_at: snapshot.captured_at,
+            period: snapshot.period,
+            language: snapshot.language,
+            spoken_language: snapshot.spoken_language,
+            source_kind: snapshot.source_kind,
+            source_url: snapshot.source_url,
+            source_revision: snapshot.source_revision,
+            entries: snapshot.entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<IngestGitHubTrendingEntry> for NewGitHubTrendingEntry {
+    fn from(entry: IngestGitHubTrendingEntry) -> Self {
+        Self {
+            repository_full_name: entry.repository_full_name,
+            repository_node_id: entry.repository_node_id,
+            description: entry.description,
+            primary_language: entry.primary_language,
+            stars: entry.stars,
+            forks: entry.forks,
+            stars_in_period: entry.stars_in_period,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GitHubTrendingIngestionResponse {
+    pub snapshot_id: i64,
+    pub entry_count: usize,
+    pub inserted: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -453,8 +591,80 @@ pub fn router(state: AppState) -> Router {
             get(get_paper_revision),
         )
         .route("/v1/github/trending", get(get_github_trending))
+        .route(
+            "/v1/github/trending/snapshots",
+            post(ingest_github_trending_snapshot),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/github/trending/snapshots",
+    security(("bearer_token" = [])),
+    params(
+      (
+        "Idempotency-Key" = String,
+        Header,
+        description = "Stable key for safely retrying one exact snapshot"
+      )
+    ),
+    request_body = IngestGitHubTrendingRequest,
+    responses(
+      (status = 201, description = "Snapshot was ingested", body = GitHubTrendingIngestionResponse),
+      (status = 200, description = "Original snapshot returned for an idempotent retry", body = GitHubTrendingIngestionResponse),
+      (status = 400, description = "JSON or idempotency key is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 409, description = "Idempotency key was reused for different content", body = ErrorResponse),
+      (status = 422, description = "Snapshot is invalid", body = ErrorResponse),
+      (status = 500, description = "Ingestion failed", body = ErrorResponse),
+      (status = 503, description = "Snapshot ingestion is not configured", body = ErrorResponse)
+    )
+)]
+async fn ingest_github_trending_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<IngestGitHubTrendingRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, ApiError> {
+    let token = state.trending_ingest_token.as_deref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "trending.ingestion_unavailable",
+            "GitHub Trending ingestion is not configured",
+        )
+    })?;
+    authorize(&headers, token)?;
+    let idempotency_key = idempotency_key(&headers)?;
+    let Json(payload) = payload.map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_json",
+            error.body_text(),
+        )
+    })?;
+    let outcome = state
+        .store
+        .ingest_github_trending_snapshot(
+            payload.into(),
+            &state.trending_ingest_actor,
+            idempotency_key,
+        )
+        .await
+        .map_err(trending_store_error)?;
+    let status = if outcome.inserted {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(GitHubTrendingIngestionResponse {
+            snapshot_id: outcome.snapshot_id,
+            entry_count: outcome.entry_count,
+            inserted: outcome.inserted,
+        }),
+    ))
 }
 
 #[utoipa::path(
@@ -807,11 +1017,44 @@ fn store_error(error: StoreError) -> ApiError {
             "product.invalid",
             "product_id must identify an existing prodxiv product",
         ),
+        StoreError::InvalidTrendingSnapshot(message) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "trending.invalid_snapshot",
+            format!("GitHub Trending snapshot is invalid: {message}"),
+        ),
         StoreError::Internal => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "storage.internal",
             "publication storage failed",
         ),
+    }
+}
+
+fn trending_store_error(error: StoreError) -> ApiError {
+    match error {
+        StoreError::IdempotencyConflict => ApiError::new(
+            StatusCode::CONFLICT,
+            "trending.idempotency_conflict",
+            "idempotency key was reused for different snapshot content",
+        ),
+        StoreError::InvalidTrendingSnapshot(message) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "trending.invalid_snapshot",
+            format!("GitHub Trending snapshot is invalid: {message}"),
+        ),
+        StoreError::Internal => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage.internal",
+            "GitHub Trending snapshot ingestion failed",
+        ),
+        other => {
+            tracing::error!(error = %other, "unexpected Trending ingestion error");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage.internal",
+                "GitHub Trending snapshot ingestion failed",
+            )
+        }
     }
 }
 
@@ -827,10 +1070,14 @@ fn store_error(error: StoreError) -> ApiError {
         list_papers,
         publish_paper,
         get_paper_revision,
-        get_github_trending
+        get_github_trending,
+        ingest_github_trending_snapshot
     ),
     components(schemas(
         PublishPaperRequest,
+        IngestGitHubTrendingRequest,
+        IngestGitHubTrendingEntry,
+        GitHubTrendingIngestionResponse,
         PublishedPaper,
         PublishedPaperSummary,
         PaperListResponse,

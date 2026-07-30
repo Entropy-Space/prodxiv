@@ -1,20 +1,22 @@
 # Publishing API
 
 The Axum service is the authoritative boundary for immutable publication. The
-MVP exposes public paper routes plus a read-only external-observation route:
+MVP exposes public paper routes plus external-observation routes:
 
 - `GET /health`
 - `POST /v1/papers`
 - `GET /v1/papers/{paper_id}/revisions/{revision}`
 - `GET /v1/github/trending`
+- `POST /v1/github/trending/snapshots`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`.
 
 ## Local environment
 
-Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` with a random
-value containing at least 32 characters. Then start PostgreSQL, the API, and
-the static website with Podman:
+Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` and
+`PRODXIV_TRENDING_INGEST_TOKEN` with different random values containing at
+least 32 characters. Then start PostgreSQL, the API, and the static website
+with Podman:
 
 ```sh
 podman compose up --build
@@ -65,28 +67,35 @@ scope and a failed collection attempt.
 ## Collect GitHub Trending daily
 
 The `Collect GitHub Trending` GitHub Actions workflow runs every day at
-02:17 UTC and can also be started manually. Add a repository Actions secret
-named `DATABASE_URL_UNPOOLED` containing Neon's direct connection URL. Do not
-use the pooled application URL for this migration and ingestion job.
+02:17 UTC and can also be started manually. Configure:
+
+- the repository Actions variable `PRODXIV_API_URL` with the public API URL;
+- the repository Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the same
+  dedicated token configured on the API.
 
 The Bun collector fetches the all-language page and the configured language
-scopes, validates GitHub's current Trending HTML, and writes snapshots using
-the same JSON contract as the local fixture importer. It then invokes the Rust
-importer once for every successful scope, keeping HTTP and mutable HTML parsing
-outside the persistence layer. A structurally valid page with no repositories
-becomes an empty snapshot. HTTP failures, challenge pages, and malformed
-repository metrics do not create snapshots, make the workflow fail, and remain
-visible in its job summary. Each source revision is a SHA-256 digest of the
-normalized ranked entries rather than GitHub's dynamic page markup.
-Successfully imported scopes remain durable when another scope fails, so a
-manual rerun can recover the missing observations.
+scopes, validates GitHub's current Trending HTML, and creates snapshots using
+the same JSON contract as the local fixture importer. It sends each successful
+scope to the authenticated API independently. The API validates it again,
+records the ingestion actor and idempotency key, and stores the observation in
+one transaction. The workflow never receives a database credential or
+migration authority.
+
+A structurally valid page with no repositories becomes an empty snapshot.
+HTTP failures, challenge pages, malformed repository metrics, and rejected API
+requests do not create snapshots, make the workflow fail, and remain visible
+in its job summary. Each source revision is a SHA-256 digest of the normalized
+ranked entries rather than GitHub's dynamic page markup. Successfully ingested
+scopes remain durable when another scope fails, so a manual rerun can recover
+the missing observations.
 
 To run the same collector locally:
 
 ```sh
 captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 snapshot_date="${captured_at%%T*}"
-DATABASE_URL_UNPOOLED=postgres://prodxiv:prodxiv@127.0.0.1:54329/prodxiv \
+PRODXIV_API_URL=http://127.0.0.1:3000 \
+PRODXIV_TRENDING_INGEST_TOKEN=replace_with_another_32_random_characters \
   bun run collect:github-trending \
     --snapshot-date "${snapshot_date}" \
     --captured-at "${captured_at}"
@@ -199,6 +208,11 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
+- `PRODXIV_TRENDING_INGEST_TOKEN` to a different secret with at least 32
+  characters. When absent, reading remains available and ingestion returns
+  `503`.
+- `PRODXIV_TRENDING_INGEST_ACTOR` to the audit actor represented by the
+  ingestion token.
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
 

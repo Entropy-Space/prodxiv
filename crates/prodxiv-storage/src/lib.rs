@@ -41,7 +41,7 @@ pub struct PublicationPage {
     pub next_cursor: Option<PublicationCursor>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewGitHubTrendingSnapshot {
     pub snapshot_date: String,
@@ -58,7 +58,7 @@ pub struct NewGitHubTrendingSnapshot {
     pub entries: Vec<NewGitHubTrendingEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewGitHubTrendingEntry {
     pub repository_full_name: String,
@@ -571,9 +571,71 @@ impl PostgresStorage {
         &self,
         snapshot: &NewGitHubTrendingSnapshot,
     ) -> Result<TrendingImportOutcome, StorageError> {
+        let request_sha256 = trending_request_sha256(snapshot)?;
+        let idempotency_key = format!(
+            "github-trending-import:{}",
+            request_sha256.trim_start_matches("sha256:")
+        );
+        self.ingest_github_trending_snapshot(snapshot, "standalone_importer", &idempotency_key)
+            .await
+    }
+
+    /// Ingests one immutable GitHub Trending snapshot for an authenticated
+    /// actor and idempotency key.
+    ///
+    /// Reusing a key for the same semantic snapshot returns the original
+    /// snapshot even when only its capture timestamp changes. Reusing it for
+    /// different content is rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the actor, key, or snapshot is invalid; a key was
+    /// reused for different content; or PostgreSQL rejects the transaction.
+    pub async fn ingest_github_trending_snapshot(
+        &self,
+        snapshot: &NewGitHubTrendingSnapshot,
+        actor: &str,
+        idempotency_key: &str,
+    ) -> Result<TrendingImportOutcome, StorageError> {
+        if actor.trim().is_empty() {
+            return Err(StorageError::InvalidActor);
+        }
+        if !is_valid_idempotency_key(idempotency_key) {
+            return Err(StorageError::InvalidIdempotencyKey);
+        }
         validate_trending_snapshot(snapshot)?;
+        let request_sha256 = trending_request_sha256(snapshot)?;
 
         let mut transaction = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(idempotency_key)
+            .execute(&mut *transaction)
+            .await?;
+
+        let previous_request = sqlx::query(
+            r#"
+            SELECT request_sha256, snapshot_id
+            FROM github_trending_ingestion_requests
+            WHERE idempotency_key = $1
+            "#,
+        )
+        .bind(idempotency_key)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(row) = previous_request {
+            let previous_sha256: String = row.try_get("request_sha256")?;
+            if previous_sha256 != request_sha256 {
+                return Err(StorageError::IdempotencyConflict);
+            }
+            let snapshot_id = row.try_get("snapshot_id")?;
+            transaction.commit().await?;
+            return Ok(TrendingImportOutcome {
+                snapshot_id,
+                entry_count: snapshot.entries.len(),
+                inserted: false,
+            });
+        }
+
         let inserted = sqlx::query(
             r#"
             INSERT INTO github_trending_snapshots (
@@ -584,9 +646,10 @@ impl PostgresStorage {
               spoken_language,
               source_kind,
               source_url,
-              source_revision
+              source_revision,
+              ingested_by
             )
-            VALUES ($1::date, $2::timestamptz, $3, $4, $5, $6, $7, $8)
+            VALUES ($1::date, $2::timestamptz, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (
               snapshot_date,
               captured_at,
@@ -608,6 +671,7 @@ impl PostgresStorage {
         .bind(&snapshot.source_kind)
         .bind(&snapshot.source_url)
         .bind(&snapshot.source_revision)
+        .bind(actor)
         .fetch_optional(&mut *transaction)
         .await?;
 
@@ -674,6 +738,24 @@ impl PostgresStorage {
                 .await?;
             }
         }
+
+        sqlx::query(
+            r#"
+            INSERT INTO github_trending_ingestion_requests (
+              idempotency_key,
+              request_sha256,
+              snapshot_id,
+              actor
+            )
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(idempotency_key)
+        .bind(&request_sha256)
+        .bind(snapshot_id)
+        .bind(actor)
+        .execute(&mut *transaction)
+        .await?;
 
         transaction.commit().await?;
         Ok(TrendingImportOutcome {
@@ -875,6 +957,13 @@ impl PostgresStorage {
     }
 }
 
+fn trending_request_sha256(snapshot: &NewGitHubTrendingSnapshot) -> Result<String, StorageError> {
+    let mut semantic_snapshot = snapshot.clone();
+    semantic_snapshot.captured_at = None;
+    let serialized = serde_json::to_vec(&semantic_snapshot)?;
+    Ok(format!("sha256:{:x}", Sha256::digest(serialized)))
+}
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("database operation failed: {0}")]
@@ -883,11 +972,11 @@ pub enum StorageError {
     Migration(#[from] MigrateError),
     #[error("publication preparation failed: {0}")]
     Publication(#[from] PublicationPreparationError),
-    #[error("publication actor must not be empty")]
+    #[error("operation actor must not be empty")]
     InvalidActor,
-    #[error("publication idempotency key is invalid")]
+    #[error("idempotency key is invalid")]
     InvalidIdempotencyKey,
-    #[error("publication idempotency key was already used for different content")]
+    #[error("idempotency key was already used for different content")]
     IdempotencyConflict,
     #[error("paper identifier space for period {period} is exhausted")]
     IdentifierSpaceExhausted { period: String },
@@ -899,11 +988,27 @@ pub enum StorageError {
     UnknownProduct(String),
     #[error("GitHub Trending snapshot is invalid: {0}")]
     InvalidTrendingSnapshot(&'static str),
+    #[error("GitHub Trending snapshot could not be serialized: {0}")]
+    TrendingSerialization(#[from] serde_json::Error),
     #[error("stored GitHub Trending rank {0} is invalid")]
     CorruptTrendingRank(i32),
 }
 
 fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<(), StorageError> {
+    if !is_iso_date(&snapshot.snapshot_date) {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "snapshot_date must be a real YYYY-MM-DD date",
+        ));
+    }
+    if snapshot
+        .captured_at
+        .as_deref()
+        .is_some_and(|value| !is_utc_second(value))
+    {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "captured_at must use YYYY-MM-DDTHH:MM:SSZ in UTC",
+        ));
+    }
     if !matches!(snapshot.period.as_str(), "daily" | "weekly" | "monthly") {
         return Err(StorageError::InvalidTrendingSnapshot(
             "period must be daily, weekly, or monthly",
@@ -921,6 +1026,60 @@ fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<()
         return Err(StorageError::InvalidTrendingSnapshot(
             "source_url and source_revision are required",
         ));
+    }
+    if snapshot
+        .language
+        .as_deref()
+        .is_some_and(|scope| scope.trim().is_empty() || scope.chars().any(char::is_whitespace))
+        || snapshot
+            .spoken_language
+            .as_deref()
+            .is_some_and(|scope| scope.trim().is_empty() || scope.chars().any(char::is_whitespace))
+    {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "language scopes must not be empty or contain whitespace",
+        ));
+    }
+    if snapshot.entries.len() > 100 {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "a snapshot must not contain more than 100 entries",
+        ));
+    }
+    if snapshot.source_kind == "direct_fetch" {
+        let captured_at =
+            snapshot
+                .captured_at
+                .as_deref()
+                .ok_or(StorageError::InvalidTrendingSnapshot(
+                    "direct fetches require captured_at",
+                ))?;
+        if !captured_at.starts_with(&snapshot.snapshot_date) {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "direct fetch snapshot_date must match captured_at",
+            ));
+        }
+        if !snapshot
+            .source_url
+            .starts_with("https://github.com/trending")
+        {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "direct fetch source_url must identify GitHub Trending",
+            ));
+        }
+        let entries = serde_json::to_vec(&snapshot.entries)?;
+        let expected_revision = format!("sha256:{:x}", Sha256::digest(entries));
+        if snapshot.source_revision != expected_revision {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "direct fetch source_revision must hash the normalized entries",
+            ));
+        }
+        if snapshot.entries.iter().any(|entry| {
+            entry.stars.is_none() || entry.forks.is_none() || entry.stars_in_period.is_none()
+        }) {
+            return Err(StorageError::InvalidTrendingSnapshot(
+                "direct fetch entries require stars, forks, and period stars",
+            ));
+        }
     }
     let mut repository_names = std::collections::HashSet::new();
     for entry in &snapshot.entries {
@@ -953,4 +1112,51 @@ fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<()
         }
     }
     Ok(())
+}
+
+fn is_iso_date(value: &str) -> bool {
+    if value.len() != 10 {
+        return false;
+    }
+    let parts = value
+        .split('-')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>();
+    let Ok(parts) = parts else {
+        return false;
+    };
+    if parts.len() != 3 {
+        return false;
+    }
+    let (year, month, day) = (parts[0], parts[1], parts[2]);
+    if year == 0 {
+        return false;
+    }
+    let leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=max_day).contains(&day)
+}
+
+fn is_utc_second(value: &str) -> bool {
+    if !value.is_ascii()
+        || value.len() != 20
+        || value.as_bytes().get(10) != Some(&b'T')
+        || !value.ends_with('Z')
+        || value.as_bytes().get(13) != Some(&b':')
+        || value.as_bytes().get(16) != Some(&b':')
+        || !is_iso_date(&value[..10])
+    {
+        return false;
+    }
+    let hour = value[11..13].parse::<u8>();
+    let minute = value[14..16].parse::<u8>();
+    let second = value[17..19].parse::<u8>();
+    matches!((hour, minute, second), (Ok(0..=23), Ok(0..=59), Ok(0..=59)))
 }

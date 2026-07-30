@@ -1,6 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   collectTrendingSnapshots,
@@ -8,6 +7,11 @@ import {
   snapshotFileName,
   type TrendingSnapshot,
 } from "./collector.ts";
+import {
+  publishTrendingSnapshots,
+  readIngestionConfig,
+  type IngestionConfig,
+} from "./publisher.ts";
 
 interface Arguments {
   snapshot_date: string;
@@ -16,56 +20,29 @@ interface Arguments {
   output_dir: string | null;
 }
 
-export async function runCollector(arguments_: Arguments): Promise<void> {
-  const temporary = arguments_.output_dir === null;
-  const output_dir =
-    arguments_.output_dir ??
-    (await mkdtemp(join(tmpdir(), "prodxiv-github-trending-")));
+export async function runCollector(
+  arguments_: Arguments,
+  ingestion_config: IngestionConfig,
+): Promise<void> {
+  const collected = await collectTrendingSnapshots(arguments_);
+  if (arguments_.output_dir !== null) {
+    await writeSnapshots(arguments_.output_dir, collected.snapshots);
+  }
+  if (collected.snapshots.length === 0) {
+    throw new Error("no valid GitHub Trending snapshots were collected");
+  }
 
-  try {
-    await mkdir(output_dir, { recursive: true });
-    const result = await collectTrendingSnapshots(arguments_);
-    const paths = await writeSnapshots(output_dir, result.snapshots);
-    if (paths.length === 0) {
-      throw new Error("no valid GitHub Trending snapshots were collected");
-    }
-
-    const importer = Bun.spawn(
-      [
-        "cargo",
-        "run",
-        "--quiet",
-        "--locked",
-        "-p",
-        "prodxiv-storage",
-        "--bin",
-        "prodxiv-import-github-trending",
-        "--",
-        ...paths,
-      ],
-      {
-        cwd: resolve(import.meta.dir, "../.."),
-        env: process.env,
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-      },
+  const ingested = await publishTrendingSnapshots(
+    collected.snapshots,
+    ingestion_config,
+  );
+  const failures = [...collected.failures, ...ingested.failures];
+  if (failures.length > 0) {
+    throw new Error(
+      `failed to process ${failures.length} scope(s): ${failures
+        .map(({ language }) => language ?? "all")
+        .join(", ")}`,
     );
-    const exit_code = await importer.exited;
-    if (exit_code !== 0) {
-      throw new Error(`snapshot importer exited with code ${exit_code}`);
-    }
-    if (result.failures.length > 0) {
-      throw new Error(
-        `failed to collect ${result.failures.length} scope(s): ${result.failures
-          .map(({ language }) => language ?? "all")
-          .join(", ")}`,
-      );
-    }
-  } finally {
-    if (temporary) {
-      await rm(output_dir, { recursive: true, force: true });
-    }
   }
 }
 
@@ -159,14 +136,12 @@ function isCapturedAt(value: string): boolean {
 async function writeSnapshots(
   output_dir: string,
   snapshots: TrendingSnapshot[],
-): Promise<string[]> {
-  const paths: string[] = [];
+): Promise<void> {
+  await mkdir(output_dir, { recursive: true });
   for (const snapshot of snapshots) {
     const path = join(output_dir, snapshotFileName(snapshot.language));
     await writeFile(path, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-    paths.push(path);
   }
-  return paths;
 }
 
 function usage(): string {
@@ -181,7 +156,10 @@ function usage(): string {
 
 if (import.meta.main) {
   try {
-    await runCollector(parseArguments(Bun.argv.slice(2)));
+    await runCollector(
+      parseArguments(Bun.argv.slice(2)),
+      readIngestionConfig(),
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

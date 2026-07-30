@@ -15,18 +15,20 @@ use prodxiv_domain::{
     PaperDocument, PublicationIdentity, PublishedPaper, PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
-    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, PublicationCursor,
-    PublicationPage, PublishOutcome,
+    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, NewGitHubTrendingSnapshot,
+    PublicationCursor, PublicationPage, PublishOutcome, TrendingImportOutcome,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 const TOKEN: &str = "test_token_with_at_least_32_characters";
+const INGEST_TOKEN: &str = "trending_ingest_token_with_32_characters";
 
 #[derive(Default)]
 struct FakeStore {
     publications: Mutex<Vec<PublishedPaper>>,
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
+    trending_requests: Mutex<HashMap<String, String>>,
     github_trending: Mutex<Option<GitHubTrendingSnapshot>>,
 }
 
@@ -169,6 +171,46 @@ impl PublicationStore for FakeStore {
             available_languages: vec!["rust".to_owned(), "typescript".to_owned()],
         })
     }
+
+    async fn ingest_github_trending_snapshot(
+        &self,
+        snapshot: NewGitHubTrendingSnapshot,
+        _actor: &str,
+        idempotency_key: &str,
+    ) -> Result<TrendingImportOutcome, StoreError> {
+        if snapshot
+            .entries
+            .iter()
+            .flat_map(|entry| [entry.stars, entry.forks, entry.stars_in_period])
+            .flatten()
+            .any(|value| value < 0)
+        {
+            return Err(StoreError::InvalidTrendingSnapshot(
+                "repository counts must not be negative",
+            ));
+        }
+        let serialized = serde_json::to_string(&snapshot).expect("fake snapshot should serialize");
+        let mut requests = self
+            .trending_requests
+            .lock()
+            .expect("fake Trending requests should lock");
+        if let Some(previous) = requests.get(idempotency_key) {
+            if previous != &serialized {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            return Ok(TrendingImportOutcome {
+                snapshot_id: 42,
+                entry_count: snapshot.entries.len(),
+                inserted: false,
+            });
+        }
+        requests.insert(idempotency_key.to_owned(), serialized);
+        Ok(TrendingImportOutcome {
+            snapshot_id: 42,
+            entry_count: snapshot.entries.len(),
+            inserted: true,
+        })
+    }
 }
 
 fn repository_root() -> &'static Path {
@@ -191,7 +233,10 @@ fn submission_markdown() -> String {
 }
 
 fn app(store: Arc<FakeStore>) -> axum::Router {
-    router(AppState::new(store, TOKEN, "api_test"))
+    router(
+        AppState::new(store, TOKEN, "api_test")
+            .with_trending_ingestion(Some(INGEST_TOKEN.to_owned()), "trending_test"),
+    )
 }
 
 async fn json_body(response: axum::response::Response) -> Value {
@@ -244,6 +289,158 @@ async fn reads_the_latest_github_trending_snapshot() {
         body["snapshot"]["entries"][0]["repository_url"],
         "https://github.com/pascalorg/editor"
     );
+}
+
+#[tokio::test]
+async fn ingests_a_trending_snapshot_idempotently() {
+    let store = Arc::new(FakeStore::default());
+    let application = app(store.clone());
+    let request = || {
+        Request::post("/v1/github/trending/snapshots")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+            .header("idempotency-key", "github-trending.test.rust")
+            .body(Body::from(trending_snapshot_json().to_string()))
+            .expect("request should build")
+    };
+
+    let first = application
+        .clone()
+        .oneshot(request())
+        .await
+        .expect("first ingestion should complete");
+    let replay = application
+        .oneshot(request())
+        .await
+        .expect("replayed ingestion should complete");
+
+    assert_eq!(first.status(), StatusCode::CREATED);
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json_body(first).await["inserted"], true);
+    assert_eq!(json_body(replay).await["inserted"], false);
+    assert_eq!(
+        store
+            .trending_requests
+            .lock()
+            .expect("fake Trending requests should lock")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn protects_trending_ingestion_with_a_dedicated_token() {
+    let response = app(Arc::new(FakeStore::default()))
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "github-trending.test.unauthorized")
+                .body(Body::from(trending_snapshot_json().to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn keeps_reading_available_when_trending_ingestion_is_not_configured() {
+    let application = router(AppState::new(
+        Arc::new(FakeStore::default()),
+        TOKEN,
+        "api_test",
+    ));
+    let ingestion = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+                .header("idempotency-key", "github-trending.test.unconfigured")
+                .body(Body::from(trending_snapshot_json().to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+    assert_eq!(ingestion.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let reading = application
+        .oneshot(
+            Request::get("/v1/github/trending?period=daily")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("read request should complete");
+    assert_eq!(reading.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rejects_invalid_trending_snapshots_and_idempotency_conflicts() {
+    let application = app(Arc::new(FakeStore::default()));
+    let request = |body: Value| {
+        Request::post("/v1/github/trending/snapshots")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+            .header("idempotency-key", "github-trending.test.conflict")
+            .body(Body::from(body.to_string()))
+            .expect("request should build")
+    };
+
+    let first = application
+        .clone()
+        .oneshot(request(trending_snapshot_json()))
+        .await
+        .expect("first request should complete");
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let mut conflict = trending_snapshot_json();
+    conflict["source_revision"] = json!("sha256:different");
+    let conflict = application
+        .clone()
+        .oneshot(request(conflict))
+        .await
+        .expect("conflicting request should complete");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    let mut invalid = trending_snapshot_json();
+    invalid["entries"][0]["stars"] = json!(-1);
+    let invalid = application
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+                .header("idempotency-key", "github-trending.test.invalid")
+                .body(Body::from(invalid.to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("invalid request should complete");
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+fn trending_snapshot_json() -> Value {
+    json!({
+      "snapshot_date": "2026-07-31",
+      "captured_at": "2026-07-31T02:17:00Z",
+      "period": "daily",
+      "language": "rust",
+      "spoken_language": null,
+      "source_kind": "direct_fetch",
+      "source_url": "https://github.com/trending/rust?since=daily",
+      "source_revision": "sha256:example",
+      "entries": [{
+        "repository_full_name": "acme/rust",
+        "repository_node_id": null,
+        "description": "A useful tool",
+        "primary_language": "Rust",
+        "stars": 100,
+        "forks": 10,
+        "stars_in_period": 5
+      }]
+    })
 }
 
 #[tokio::test]

@@ -30,24 +30,24 @@ jobs:
       - name: Install Bun dependencies
         run: bun ci
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Validate database configuration
+      - name: Validate ingestion configuration
         env:
-          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
-          if [ -z "${DATABASE_URL_UNPOOLED}" ]; then
-            echo "::error::Add the DATABASE_URL_UNPOOLED repository secret with the Neon direct connection URL."
+          if [ -z "${PRODXIV_API_URL}" ]; then
+            echo "::error::Add the PRODXIV_API_URL repository variable with the public API URL."
+            exit 1
+          fi
+          if [ -z "${PRODXIV_TRENDING_INGEST_TOKEN}" ]; then
+            echo "::error::Add the PRODXIV_TRENDING_INGEST_TOKEN repository secret."
             exit 1
           fi
 
-      - name: Fetch and import daily snapshots
+      - name: Fetch and ingest daily snapshots
         env:
-          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
           set -o pipefail
           captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"

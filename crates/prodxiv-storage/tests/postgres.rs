@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use prodxiv_domain::PaperDocument;
-use prodxiv_storage::{NewGitHubTrendingSnapshot, PostgresStorage};
+use prodxiv_storage::{NewGitHubTrendingSnapshot, PostgresStorage, StorageError};
 use sqlx::PgPool;
 
 fn repository_root() -> &'static Path {
@@ -351,6 +351,49 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
     assert!(!replay.inserted);
     assert_eq!(replay.snapshot_id, first.snapshot_id);
     assert_eq!(first.entry_count, 13);
+
+    let api_replay = storage
+        .ingest_github_trending_snapshot(
+            &snapshot,
+            "github_actions",
+            "github-trending.test.snapshot",
+        )
+        .await
+        .expect("API ingestion should reuse the exact snapshot");
+    assert!(!api_replay.inserted);
+    assert_eq!(api_replay.snapshot_id, first.snapshot_id);
+    let actor: String = sqlx::query_scalar(
+        "SELECT actor FROM github_trending_ingestion_requests WHERE idempotency_key = $1",
+    )
+    .bind("github-trending.test.snapshot")
+    .fetch_one(&pool)
+    .await
+    .expect("ingestion actor should be audited");
+    assert_eq!(actor, "github_actions");
+
+    let mut later_capture = snapshot.clone();
+    later_capture.captured_at = Some("2026-07-29T23:59:00Z".to_owned());
+    let semantic_replay = storage
+        .ingest_github_trending_snapshot(
+            &later_capture,
+            "github_actions",
+            "github-trending.test.snapshot",
+        )
+        .await
+        .expect("capture time alone must not conflict with an idempotent retry");
+    assert!(!semantic_replay.inserted);
+    assert_eq!(semantic_replay.snapshot_id, first.snapshot_id);
+
+    let mut conflicting = snapshot.clone();
+    conflicting.source_revision = "conflicting".to_owned();
+    let conflict = storage
+        .ingest_github_trending_snapshot(
+            &conflicting,
+            "github_actions",
+            "github-trending.test.snapshot",
+        )
+        .await;
+    assert!(matches!(conflict, Err(StorageError::IdempotencyConflict)));
 
     let stored = storage
         .latest_github_trending("daily", None, None)
