@@ -62,6 +62,41 @@ It accepts multiple JSON paths in one invocation and records successful
 zero-entry snapshots, preserving the distinction between an empty Trending
 scope and a failed collection attempt.
 
+## Collect GitHub Trending daily
+
+The `Collect GitHub Trending` GitHub Actions workflow runs every day at
+02:17 UTC and can also be started manually. Add a repository Actions secret
+named `DATABASE_URL_UNPOOLED` containing Neon's direct connection URL. Do not
+use the pooled application URL for this migration and ingestion job.
+
+The Bun collector fetches the all-language page and the configured language
+scopes, validates GitHub's current Trending HTML, and writes snapshots using
+the same JSON contract as the local fixture importer. It then invokes the Rust
+importer once for every successful scope, keeping HTTP and mutable HTML parsing
+outside the persistence layer. A structurally valid page with no repositories
+becomes an empty snapshot. HTTP failures, challenge pages, and malformed
+repository metrics do not create snapshots, make the workflow fail, and remain
+visible in its job summary. Each source revision is a SHA-256 digest of the
+normalized ranked entries rather than GitHub's dynamic page markup.
+Successfully imported scopes remain durable when another scope fails, so a
+manual rerun can recover the missing observations.
+
+To run the same collector locally:
+
+```sh
+captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+snapshot_date="${captured_at%%T*}"
+DATABASE_URL_UNPOOLED=postgres://prodxiv:prodxiv@127.0.0.1:54329/prodxiv \
+  bun run collect:github-trending \
+    --snapshot-date "${snapshot_date}" \
+    --captured-at "${captured_at}"
+```
+
+The default scopes are All, C#, C++, Dart, Elixir, Go, Java, JavaScript, Julia,
+Kotlin, Markdown, PHP, Python, Raku, Rust, Scala, Shell, Swift, TypeScript, Vue,
+and Zig. Pass one or more `--language` options to collect only selected scopes;
+use `--language all` for the all-language page.
+
 With the API and website running, open `http://127.0.0.1:4321/trending`. The
 page reads the latest exact match for `period`, `language`, and
 `spoken_language`. A missing scope returns an empty result rather than silently

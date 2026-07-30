@@ -1,0 +1,73 @@
+name: Collect GitHub Trending
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collect-github-trending
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: collect daily snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install Bun dependencies
+        run: bun ci
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate database configuration
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          if [ -z "${DATABASE_URL_UNPOOLED}" ]; then
+            echo "::error::Add the DATABASE_URL_UNPOOLED repository secret with the Neon direct connection URL."
+            exit 1
+          fi
+
+      - name: Fetch and import daily snapshots
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          set -o pipefail
+          captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          snapshot_date="${captured_at%%T*}"
+          bun run collect:github-trending -- \
+            --snapshot-date "${snapshot_date}" \
+            --captured-at "${captured_at}" \
+            2>&1 | tee collector-output.txt
+
+      - name: Publish collection summary
+        if: always()
+        run: |
+          {
+            echo "## GitHub Trending collection"
+            echo
+            echo '```text'
+            if [ -f collector-output.txt ]; then
+              cat collector-output.txt
+            else
+              echo "Collector did not start."
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
