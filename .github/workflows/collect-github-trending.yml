@@ -4,12 +4,21 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment environment that receives the snapshots.
+        required: false
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
 
 permissions:
   contents: read
 
 concurrency:
-  group: collect-github-trending
+  group: collect-github-trending-${{ inputs.target || 'production' }}
   cancel-in-progress: false
 
 jobs:
@@ -17,6 +26,7 @@ jobs:
     name: collect daily snapshots
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: ${{ inputs.target || 'production' }}
 
     steps:
       - name: Check out repository
@@ -33,7 +43,7 @@ jobs:
       - name: Validate ingestion configuration
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR || 'github_actions:daily_trending' }}
           PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
           if [ -z "${PRODXIV_API_URL}" ]; then
@@ -44,15 +54,11 @@ jobs:
             echo "::error::Add the PRODXIV_TRENDING_INGEST_TOKEN repository secret."
             exit 1
           fi
-          if [ -z "${PRODXIV_TRENDING_INGEST_ACTOR}" ]; then
-            echo "::error::Add the PRODXIV_TRENDING_INGEST_ACTOR repository variable."
-            exit 1
-          fi
 
       - name: Fetch and ingest daily snapshots
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR || 'github_actions:daily_trending' }}
           PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
           set -o pipefail

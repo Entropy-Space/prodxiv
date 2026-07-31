@@ -67,13 +67,21 @@ scope and a failed collection attempt.
 ## Collect GitHub Trending daily
 
 The `Collect GitHub Trending` GitHub Actions workflow runs every day at
-02:17 UTC and can also be started manually. Configure:
+02:17 UTC against the `production` GitHub Environment. It can also be started
+manually, selecting either `production` or `staging`. Configure these values
+as GitHub Environment variables and secrets for each target:
 
-- the repository Actions variable `PRODXIV_API_URL` with the public API URL;
-- the repository Actions variable `PRODXIV_TRENDING_INGEST_ACTOR` with the
-  workflow's audit identity, such as `github_actions:daily_trending`;
-- the repository Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the same
-  dedicated token configured on the API.
+- the Actions variable `PRODXIV_API_URL` with that environment's public API
+  URL;
+- the Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the dedicated token
+  configured on that API.
+
+`PRODXIV_TRENDING_INGEST_ACTOR` is optional. When it is unset, the workflow
+uses `github_actions:daily_trending`; set an environment variable when a
+different audit identity is needed. Do not point `staging` at a per-PR Vercel
+preview. Preview URLs and their backing databases are ephemeral, whereas
+trending snapshots are durable observations. Use a stable staging API and
+database for manual non-production ingestion.
 
 The Bun collector fetches the all-language page and the configured language
 scopes, validates GitHub's current Trending HTML, and creates snapshots using
