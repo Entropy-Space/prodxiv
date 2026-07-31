@@ -38,6 +38,14 @@ function trendingUrl(options: { date?: string; language?: string }): string {
   return `/trending?${search.toString()}`;
 }
 
+function csvUrl(snapshotDate: string): string {
+  const search = new URLSearchParams({
+    date: snapshotDate,
+    period,
+  });
+  return `/trending.csv?${search.toString()}`;
+}
+
 Astro.response.headers.set(
   "Cache-Control",
   "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
@@ -152,11 +160,21 @@ Astro.response.headers.set(
     {snapshot && (
       <>
         <header class="snapshot-header">
-          <div>
+          <div class="snapshot-heading">
             <p class="snapshot-label">
               {date === undefined ? "Latest matching snapshot" : "Snapshot"}
             </p>
             <h2>{snapshot.snapshot_date}</h2>
+            <a
+              class="csv-download"
+              href={csvUrl(snapshot.snapshot_date)}
+              download
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 1v9m0 0 3.5-3.5M8 10 4.5 6.5M2 12.5V15h12v-2.5" />
+              </svg>
+              Download all scopes · CSV
+            </a>
           </div>
           <dl>
             <div>
@@ -401,6 +419,35 @@ Astro.response.headers.set(
     font-family: var(--serif);
     font-size: 2.3rem;
     font-weight: 400;
+  }
+
+  .csv-download {
+    display: inline-flex;
+    gap: 0.45rem;
+    align-items: center;
+    margin-top: 1rem;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .csv-download:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+  }
+
+  .csv-download svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.35;
   }
 
   .snapshot-header dl {
