@@ -1,6 +1,7 @@
 import {
   ProdxivApiClient,
   type ApiFetch,
+  type GitHubTrendingSnapshot,
   type GitHubTrendingView,
 } from "@prodxiv/api-client";
 
@@ -10,6 +11,16 @@ export type GitHubTrendingResult =
   | {
       ok: true;
       view: GitHubTrendingView;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+export type GitHubTrendingDayResult =
+  | {
+      ok: true;
+      snapshots: GitHubTrendingSnapshot[];
     }
   | {
       ok: false;
@@ -53,6 +64,57 @@ export async function readGitHubTrending(
       ok: true,
       view,
     };
+  } catch {
+    return {
+      ok: false,
+      message: "GitHub Trending observations could not be loaded.",
+    };
+  }
+}
+
+export async function readGitHubTrendingDay(
+  options: Omit<ReadGitHubTrendingOptions, "language"> & { date: string },
+): Promise<GitHubTrendingDayResult> {
+  const apiUrl = configuredApiUrl(options.api_url);
+  if (apiUrl === undefined) {
+    return {
+      ok: false,
+      message: "GitHub Trending observations are temporarily unavailable.",
+    };
+  }
+
+  try {
+    const client = new ProdxivApiClient({
+      api_url: apiUrl,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+    const baseView = await client.getGitHubTrending({
+      date: options.date,
+      ...(options.period === undefined ? {} : { period: options.period }),
+      ...(options.spoken_language === undefined
+        ? {}
+        : { spoken_language: options.spoken_language }),
+    });
+    const languageViews = await Promise.all(
+      baseView.available_languages.map((language) =>
+        client.getGitHubTrending({
+          date: options.date,
+          ...(options.period === undefined ? {} : { period: options.period }),
+          language,
+          ...(options.spoken_language === undefined
+            ? {}
+            : { spoken_language: options.spoken_language }),
+        }),
+      ),
+    );
+    if (languageViews.some((view) => view.snapshot === undefined)) {
+      throw new Error("an advertised Trending scope was not returned");
+    }
+    const snapshots = [baseView, ...languageViews].flatMap((view) =>
+      view.snapshot === undefined ? [] : [view.snapshot],
+    );
+
+    return { ok: true, snapshots };
   } catch {
     return {
       ok: false,
