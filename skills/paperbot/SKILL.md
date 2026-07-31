@@ -24,6 +24,59 @@ selected command rather than typing that label literally.
 Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
+## Use the optional Pi agent
+
+Use `PAPERBOT_CMD agent` only when the user explicitly authorizes remote model
+analysis. It is a private drafting workflow, never a publication workflow.
+
+For a public GitHub repository, require the author to provide their paper
+identity and a product status rather than inferring either from contributors or
+marketing copy:
+
+```sh
+PAPERBOT_CMD agent run https://github.com/owner/repository \
+  --output ./paperbot-runs/repository \
+  --author "Paper author" \
+  --status public_beta \
+  --allow-remote-model
+```
+
+`--allow-remote-model` is explicit consent to send the bounded selected source
+bundle to the configured model. The agent accepts a local Git worktree or an
+anonymous canonical public GitHub URL. For GitHub it resolves an exact source
+revision without cloning or executing repository code. It has no shell,
+filesystem, browser, credential, or publish tools.
+
+The run ends with private artifacts including `draft.md`, `evidence.jsonl`,
+`questions.md`, `review.json`, and `validation.json`. It always stops at
+author review. Do not use `publish` unless the author separately and explicitly
+approves the exact reviewed paper.
+
+Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
+--allow-remote-model` to create a numbered proposal from author answers. It
+preserves `draft.md`; the author decides whether to incorporate the proposal.
+
+For multiple public repositories, use a private versioned JSON manifest and
+the batch command:
+
+```sh
+PAPERBOT_CMD agent batch ./projects.json \
+  --output ./paperbot-runs/trending \
+  --author "Paper research team" \
+  --status public_beta \
+  --allow-remote-model \
+  --concurrency 2
+```
+
+Each manifest project must provide an anonymous canonical
+`https://github.com/<owner>/<repo>` URL. It may override `authors`, `status`,
+title, product metadata, revision, and reference-only `external_sources`.
+Command-level authors and status are defaults, never inferred values. Paperbot
+writes a private child run for each project and `batch.json`; one failed
+project does not stop the remainder, but a failed or invalid draft makes the
+batch exit nonzero. Do not place API keys, signed URLs, or source contents in
+the manifest.
+
 ## Load guidance progressively
 
 Run `PAPERBOT_CMD skills` to discover artifact scopes. Load the relevant

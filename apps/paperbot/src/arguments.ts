@@ -2,6 +2,8 @@ import { ExitCode, PaperbotError } from "./errors.ts";
 
 export type OutputFormat = "text" | "json";
 export type ValidationProfile = "draft" | "submission" | "publication";
+export type AgentPaperStatus =
+  "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
 
 export interface ScanArguments {
   command: "scan";
@@ -40,6 +42,49 @@ export interface SkillsArguments {
   format: OutputFormat;
 }
 
+export interface AgentRunArguments {
+  command: "agent";
+  action: "run";
+  repository: string;
+  output_path: string;
+  allow_remote_model: boolean;
+  metadata: {
+    title: string;
+    product_name: string;
+    authors: string[];
+    status: AgentPaperStatus;
+    product_url?: string;
+    repository_url?: string;
+  };
+  external_sources: string[];
+  ref?: string;
+  model?: string;
+  format: OutputFormat;
+}
+
+export interface AgentResumeArguments {
+  command: "agent";
+  action: "resume";
+  run_path: string;
+  answers_path: string;
+  allow_remote_model: boolean;
+  model?: string;
+  format: OutputFormat;
+}
+
+export interface AgentBatchArguments {
+  command: "agent";
+  action: "batch";
+  input_path: string;
+  output_path: string;
+  allow_remote_model: boolean;
+  authors?: string[];
+  status?: AgentPaperStatus;
+  model?: string;
+  concurrency?: number;
+  format: OutputFormat;
+}
+
 export type AuthArguments =
   | {
       command: "auth";
@@ -63,6 +108,9 @@ export type ParsedArguments =
   | DraftArguments
   | PublishArguments
   | SkillsArguments
+  | AgentRunArguments
+  | AgentResumeArguments
+  | AgentBatchArguments
   | AuthArguments
   | {
       command: "help";
@@ -96,7 +144,359 @@ export function parseArguments(args: string[]): ParsedArguments {
   if (args[0] === "auth") {
     return parseAuthArguments(args.slice(1));
   }
+  if (args[0] === "agent") {
+    return parseAgentArguments(args.slice(1));
+  }
   throw usageError(`unknown command: ${args[0]}`);
+}
+
+function parseAgentArguments(
+  args: string[],
+):
+  | AgentRunArguments
+  | AgentResumeArguments
+  | AgentBatchArguments
+  | { command: "help" } {
+  const action = args[0];
+  if (action === "--help" || action === "-h") {
+    return { command: "help" };
+  }
+  if (action === "run") {
+    return parseAgentRunArguments(args.slice(1));
+  }
+  if (action === "resume") {
+    return parseAgentResumeArguments(args.slice(1));
+  }
+  if (action === "batch") {
+    return parseAgentBatchArguments(args.slice(1));
+  }
+  throw usageError("agent requires one of: run, resume, batch");
+}
+
+function parseAgentRunArguments(
+  args: string[],
+): AgentRunArguments | { command: "help" } {
+  let repository: string | undefined;
+  let output_path: string | undefined;
+  let title: string | undefined;
+  let product_name: string | undefined;
+  let product_url: string | undefined;
+  let repository_url: string | undefined;
+  let status: AgentPaperStatus | undefined;
+  let ref: string | undefined;
+  let model: string | undefined;
+  let format: OutputFormat = "text";
+  let allow_remote_model = false;
+  const authors: string[] = [];
+  const external_sources: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--allow-remote-model") {
+      allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--format") {
+      const value = requiredFollowingValue(args, index, "--format");
+      format = parseFormat(value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--status") {
+      status = parseAgentStatus(
+        requiredFollowingValue(args, index, "--status"),
+      );
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--status=")) {
+      status = parseAgentStatus(requiredInlineValue(argument, "--status"));
+      continue;
+    }
+
+    const option = parseAgentStringOption(argument);
+    if (option !== undefined) {
+      const value =
+        option.inline_value ?? requiredFollowingValue(args, index, option.name);
+      if (option.inline_value === undefined) {
+        index += 1;
+      }
+      if (option.name === "--output") {
+        output_path = value;
+      } else if (option.name === "--title") {
+        title = value;
+      } else if (option.name === "--product-name") {
+        product_name = value;
+      } else if (option.name === "--product-url") {
+        product_url = value;
+      } else if (option.name === "--repository-url") {
+        repository_url = value;
+      } else if (option.name === "--author") {
+        authors.push(value);
+      } else if (option.name === "--source") {
+        external_sources.push(value);
+      } else if (option.name === "--ref") {
+        ref = value;
+      } else {
+        model = value;
+      }
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    if (repository !== undefined) {
+      throw usageError("agent run accepts only one repository path or URL");
+    }
+    repository = argument;
+  }
+
+  if (repository === undefined) {
+    throw usageError("agent run requires a repository path or URL");
+  }
+  if (output_path === undefined) {
+    throw usageError("agent run requires --output");
+  }
+  if (authors.length === 0) {
+    throw usageError("agent run requires at least one --author");
+  }
+  if (status === undefined) {
+    throw usageError("agent run requires --status");
+  }
+  if (!allow_remote_model) {
+    throw usageError(
+      "agent run requires --allow-remote-model before source content is sent to a model",
+    );
+  }
+
+  const defaultProductName = defaultAgentProductName(repository);
+  return {
+    command: "agent",
+    action: "run",
+    repository,
+    output_path,
+    allow_remote_model,
+    metadata: {
+      title: title ?? `${defaultProductName} research draft`,
+      product_name: product_name ?? defaultProductName,
+      authors,
+      status,
+      ...(product_url === undefined ? {} : { product_url }),
+      ...(repository_url === undefined ? {} : { repository_url }),
+    },
+    external_sources,
+    ...(ref === undefined ? {} : { ref }),
+    ...(model === undefined ? {} : { model }),
+    format,
+  };
+}
+
+function parseAgentResumeArguments(
+  args: string[],
+): AgentResumeArguments | { command: "help" } {
+  let run_path: string | undefined;
+  let answers_path: string | undefined;
+  let model: string | undefined;
+  let format: OutputFormat = "text";
+  let allow_remote_model = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--allow-remote-model") {
+      allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--answers") {
+      answers_path = requiredFollowingValue(args, index, "--answers");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--answers=")) {
+      answers_path = requiredInlineValue(argument, "--answers");
+      continue;
+    }
+    if (argument === "--model") {
+      model = requiredFollowingValue(args, index, "--model");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--model=")) {
+      model = requiredInlineValue(argument, "--model");
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    if (run_path !== undefined) {
+      throw usageError("agent resume accepts only one run directory");
+    }
+    run_path = argument;
+  }
+
+  if (run_path === undefined) {
+    throw usageError("agent resume requires a run directory");
+  }
+  if (answers_path === undefined) {
+    throw usageError("agent resume requires --answers");
+  }
+  if (!allow_remote_model) {
+    throw usageError(
+      "agent resume requires --allow-remote-model before source content is sent to a model",
+    );
+  }
+  return {
+    command: "agent",
+    action: "resume",
+    run_path,
+    answers_path,
+    allow_remote_model,
+    ...(model === undefined ? {} : { model }),
+    format,
+  };
+}
+
+function parseAgentBatchArguments(
+  args: string[],
+): AgentBatchArguments | { command: "help" } {
+  let input_path: string | undefined;
+  let output_path: string | undefined;
+  let status: AgentPaperStatus | undefined;
+  let model: string | undefined;
+  let concurrency: number | undefined;
+  let format: OutputFormat = "text";
+  let allow_remote_model = false;
+  const authors: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--allow-remote-model") {
+      allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--status") {
+      status = parseAgentStatus(
+        requiredFollowingValue(args, index, "--status"),
+      );
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--status=")) {
+      status = parseAgentStatus(requiredInlineValue(argument, "--status"));
+      continue;
+    }
+    if (argument === "--output") {
+      output_path = requiredFollowingValue(args, index, "--output");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--output=")) {
+      output_path = requiredInlineValue(argument, "--output");
+      continue;
+    }
+    if (argument === "--author") {
+      authors.push(requiredFollowingValue(args, index, "--author"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--author=")) {
+      authors.push(requiredInlineValue(argument, "--author"));
+      continue;
+    }
+    if (argument === "--model") {
+      model = requiredFollowingValue(args, index, "--model");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--model=")) {
+      model = requiredInlineValue(argument, "--model");
+      continue;
+    }
+    if (argument === "--concurrency") {
+      concurrency = parseAgentConcurrency(
+        requiredFollowingValue(args, index, "--concurrency"),
+      );
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--concurrency=")) {
+      concurrency = parseAgentConcurrency(
+        requiredInlineValue(argument, "--concurrency"),
+      );
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    if (input_path !== undefined) {
+      throw usageError("agent batch accepts only one manifest path");
+    }
+    input_path = argument;
+  }
+
+  if (input_path === undefined) {
+    throw usageError("agent batch requires a manifest path");
+  }
+  if (output_path === undefined) {
+    throw usageError("agent batch requires --output");
+  }
+  if (!allow_remote_model) {
+    throw usageError(
+      "agent batch requires --allow-remote-model before source content is sent to a model",
+    );
+  }
+
+  return {
+    command: "agent",
+    action: "batch",
+    input_path,
+    output_path,
+    allow_remote_model,
+    ...(authors.length === 0 ? {} : { authors }),
+    ...(status === undefined ? {} : { status }),
+    ...(model === undefined ? {} : { model }),
+    ...(concurrency === undefined ? {} : { concurrency }),
+    format,
+  };
 }
 
 function parseSkillsArguments(
@@ -488,6 +888,71 @@ function parseValidateArguments(
   };
 }
 
+const AGENT_STRING_OPTIONS = [
+  "--output",
+  "--title",
+  "--product-name",
+  "--product-url",
+  "--repository-url",
+  "--author",
+  "--source",
+  "--ref",
+  "--model",
+] as const;
+
+type AgentStringOptionName = (typeof AGENT_STRING_OPTIONS)[number];
+
+interface ParsedAgentStringOption {
+  name: AgentStringOptionName;
+  inline_value?: string;
+}
+
+function parseAgentStringOption(
+  argument: string,
+): ParsedAgentStringOption | undefined {
+  for (const option of AGENT_STRING_OPTIONS) {
+    if (argument === option) {
+      return { name: option };
+    }
+    if (argument.startsWith(`${option}=`)) {
+      return {
+        name: option,
+        inline_value: requiredInlineValue(argument, option),
+      };
+    }
+  }
+  return undefined;
+}
+
+function requiredFollowingValue(
+  args: string[],
+  index: number,
+  option: string,
+): string {
+  const value = args[index + 1];
+  if (value === undefined || value.length === 0) {
+    throw usageError(`missing value for ${option}`);
+  }
+  return value;
+}
+
+function defaultAgentProductName(repository: string): string {
+  const withoutSuffix = repository
+    .trim()
+    .replace(/[\\/]+$/, "")
+    .replace(/\.git$/i, "");
+  const candidate = withoutSuffix.split(/[\\/]/).at(-1);
+  if (
+    candidate === undefined ||
+    candidate.length === 0 ||
+    candidate === "." ||
+    candidate === ".."
+  ) {
+    return "Repository";
+  }
+  return candidate;
+}
+
 function parseFormat(value: string): OutputFormat {
   if (value === "text" || value === "json") {
     return value;
@@ -500,6 +965,30 @@ function parseProfile(value: string): ValidationProfile {
     return value;
   }
   throw usageError(`unsupported validation profile: ${value}`);
+}
+
+function parseAgentStatus(value: string): AgentPaperStatus {
+  if (
+    value === "concept" ||
+    value === "private_beta" ||
+    value === "public_beta" ||
+    value === "launched" ||
+    value === "discontinued"
+  ) {
+    return value;
+  }
+  throw usageError(`unsupported product status: ${value}`);
+}
+
+function parseAgentConcurrency(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw usageError("agent batch --concurrency must be a positive integer");
+  }
+  const concurrency = Number(value);
+  if (!Number.isSafeInteger(concurrency)) {
+    throw usageError("agent batch --concurrency must be a safe integer");
+  }
+  return concurrency;
 }
 
 function requiredInlineValue(argument: string, option: string): string {
