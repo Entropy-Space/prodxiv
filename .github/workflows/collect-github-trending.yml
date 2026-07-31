@@ -1,0 +1,85 @@
+name: Collect GitHub Trending
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment environment that receives the snapshots.
+        required: false
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collect-github-trending-${{ inputs.target || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: collect daily snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.target || 'production' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install Bun dependencies
+        run: bun ci
+
+      - name: Validate ingestion configuration
+        env:
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR || 'github_actions:daily_trending' }}
+          PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
+        run: |
+          if [ -z "${PRODXIV_API_URL}" ]; then
+            echo "::error::Add the PRODXIV_API_URL repository variable with the public API URL."
+            exit 1
+          fi
+          if [ -z "${PRODXIV_TRENDING_INGEST_TOKEN}" ]; then
+            echo "::error::Add the PRODXIV_TRENDING_INGEST_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Fetch and ingest daily snapshots
+        env:
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR || 'github_actions:daily_trending' }}
+          PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
+        run: |
+          set -o pipefail
+          captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          snapshot_date="${captured_at%%T*}"
+          bun run collect:github-trending -- \
+            --snapshot-date "${snapshot_date}" \
+            --captured-at "${captured_at}" \
+            2>&1 | tee collector-output.txt
+
+      - name: Publish collection summary
+        if: always()
+        run: |
+          {
+            echo "## GitHub Trending collection"
+            echo
+            echo '```text'
+            if [ -f collector-output.txt ]; then
+              cat collector-output.txt
+            else
+              echo "Collector did not start."
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

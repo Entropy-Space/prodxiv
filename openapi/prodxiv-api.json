@@ -104,6 +104,129 @@
         }
       }
     },
+    "/v1/github/trending/snapshots": {
+      "post": {
+        "tags": [],
+        "operationId": "ingest_github_trending_snapshot",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Stable key for safely retrying one exact snapshot",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Prodxiv-Actor",
+            "in": "header",
+            "description": "Authenticated client's audit actor",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestGitHubTrendingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Original snapshot returned for an idempotent retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubTrendingIngestionResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Snapshot was ingested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubTrendingIngestionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON or idempotency key is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key was reused for different content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Snapshot is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Ingestion failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Snapshot ingestion is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/v1/papers": {
       "get": {
         "tags": [],
@@ -496,6 +619,27 @@
           }
         }
       },
+      "GitHubTrendingIngestionResponse": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "entry_count",
+          "inserted"
+        ],
+        "properties": {
+          "entry_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inserted": {
+            "type": "boolean"
+          },
+          "snapshot_id": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "GitHubTrendingResponse": {
         "type": "object",
         "required": [
@@ -594,6 +738,110 @@
             "type": "string"
           }
         }
+      },
+      "IngestGitHubTrendingEntry": {
+        "type": "object",
+        "required": [
+          "repository_full_name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "forks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "primary_language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repository_full_name": {
+            "type": "string"
+          },
+          "repository_node_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "stars_in_period": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestGitHubTrendingRequest": {
+        "type": "object",
+        "required": [
+          "snapshot_date",
+          "period",
+          "source_kind",
+          "source_url",
+          "source_revision",
+          "entries"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestGitHubTrendingEntry"
+            }
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "type": "string"
+          },
+          "snapshot_date": {
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "spoken_language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "PaperListResponse": {
         "type": "object",

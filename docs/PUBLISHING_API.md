@@ -1,20 +1,22 @@
 # Publishing API
 
 The Axum service is the authoritative boundary for immutable publication. The
-MVP exposes public paper routes plus a read-only external-observation route:
+MVP exposes public paper routes plus external-observation routes:
 
 - `GET /health`
 - `POST /v1/papers`
 - `GET /v1/papers/{paper_id}/revisions/{revision}`
 - `GET /v1/github/trending`
+- `POST /v1/github/trending/snapshots`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`.
 
 ## Local environment
 
-Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` with a random
-value containing at least 32 characters. Then start PostgreSQL, the API, and
-the static website with Podman:
+Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` and
+`PRODXIV_TRENDING_INGEST_TOKEN` with different random values containing at
+least 32 characters. Then start PostgreSQL, the API, and the static website
+with Podman:
 
 ```sh
 podman compose up --build
@@ -61,6 +63,60 @@ revision. It does not fetch GitHub or alter a previously imported observation.
 It accepts multiple JSON paths in one invocation and records successful
 zero-entry snapshots, preserving the distinction between an empty Trending
 scope and a failed collection attempt.
+
+## Collect GitHub Trending daily
+
+The `Collect GitHub Trending` GitHub Actions workflow runs every day at
+02:17 UTC against the `production` GitHub Environment. It can also be started
+manually, selecting either `production` or `staging`. Configure these values
+as GitHub Environment variables and secrets for each target:
+
+- the Actions variable `PRODXIV_API_URL` with that environment's public API
+  URL;
+- the Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the dedicated token
+  configured on that API.
+
+`PRODXIV_TRENDING_INGEST_ACTOR` is optional. When it is unset, the workflow
+uses `github_actions:daily_trending`; set an environment variable when a
+different audit identity is needed. Do not point `staging` at a per-PR Vercel
+preview. Preview URLs and their backing databases are ephemeral, whereas
+trending snapshots are durable observations. Use a stable staging API and
+database for manual non-production ingestion.
+
+The Bun collector fetches the all-language page and the configured language
+scopes, validates GitHub's current Trending HTML, and creates snapshots using
+the same JSON contract as the local fixture importer. It sends each successful
+scope to the authenticated API independently. The API validates it again,
+records the ingestion actor and idempotency key, and stores the observation in
+one transaction. The workflow never receives a database credential or
+migration authority. The actor travels in the authenticated request so other
+collectors can use their own audit identities.
+
+A structurally valid page with no repositories becomes an empty snapshot.
+HTTP failures, challenge pages, malformed repository metrics, and rejected API
+requests do not create snapshots, make the workflow fail, and remain visible
+in its job summary. Each source revision is a SHA-256 digest of the normalized
+ranked entries rather than GitHub's dynamic page markup. Successfully ingested
+scopes remain durable when another scope fails, so a manual rerun can recover
+the missing observations.
+
+To run the same collector locally:
+
+```sh
+captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+snapshot_date="${captured_at%%T*}"
+PRODXIV_API_URL=http://127.0.0.1:3000 \
+PRODXIV_TRENDING_INGEST_TOKEN=replace_with_another_32_random_characters \
+PRODXIV_TRENDING_INGEST_ACTOR=local_trending_collector \
+  bun run collect:github-trending \
+    --snapshot-date "${snapshot_date}" \
+    --captured-at "${captured_at}"
+```
+
+The default scopes are All, C#, C++, Dart, Elixir, Go, Java, JavaScript, Julia,
+Kotlin, Markdown, PHP, Python, Raku, Rust, Scala, Shell, Swift, TypeScript, Vue,
+and Zig. Pass one or more `--language` options to collect only selected scopes;
+use `--language all` for the all-language page.
 
 With the API and website running, open `http://127.0.0.1:4321/trending`. The
 page reads the latest exact match for `period`, `language`, and
@@ -164,6 +220,9 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
+- `PRODXIV_TRENDING_INGEST_TOKEN` to a different secret with at least 32
+  characters. When absent, reading remains available and ingestion returns
+  `503`.
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
 
