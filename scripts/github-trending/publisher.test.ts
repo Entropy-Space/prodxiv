@@ -35,15 +35,18 @@ describe("GitHub Trending publisher", () => {
       readIngestionConfig({
         PRODXIV_API_URL: "https://api.prodxiv.com/",
         PRODXIV_TRENDING_INGEST_TOKEN: "x".repeat(32),
+        PRODXIV_TRENDING_INGEST_ACTOR: "github_actions:daily_trending",
       }),
     ).toEqual({
       api_url: "https://api.prodxiv.com",
       ingest_token: "x".repeat(32),
+      ingest_actor: "github_actions:daily_trending",
     });
     expect(() =>
       readIngestionConfig({
         PRODXIV_API_URL: "http://api.prodxiv.com",
         PRODXIV_TRENDING_INGEST_TOKEN: "x".repeat(32),
+        PRODXIV_TRENDING_INGEST_ACTOR: "github_actions:daily_trending",
       }),
     ).toThrow("must use HTTPS");
   });
@@ -68,6 +71,7 @@ describe("GitHub Trending publisher", () => {
       {
         api_url: "https://api.prodxiv.com",
         ingest_token: "x".repeat(32),
+        ingest_actor: "github_actions:daily_trending",
       },
       fetcher,
     );
@@ -81,6 +85,9 @@ describe("GitHub Trending publisher", () => {
     );
     expect(request?.headers.get("idempotency-key")).toBe(
       snapshotIdempotencyKey(snapshot),
+    );
+    expect(request?.headers.get("x-prodxiv-actor")).toBe(
+      "github_actions:daily_trending",
     );
     expect(await request?.json()).toEqual(snapshot);
   });
@@ -99,6 +106,7 @@ describe("GitHub Trending publisher", () => {
       {
         api_url: "https://api.prodxiv.com",
         ingest_token: "x".repeat(32),
+        ingest_actor: "github_actions:daily_trending",
       },
       fetcher,
     );

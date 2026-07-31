@@ -318,6 +318,8 @@ export interface operations {
       header: {
         /** @description Stable key for safely retrying one exact snapshot */
         "Idempotency-Key": string;
+        /** @description Authenticated client's audit actor */
+        "X-Prodxiv-Actor": string;
       };
       path?: never;
       cookie?: never;

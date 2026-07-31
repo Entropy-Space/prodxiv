@@ -39,7 +39,6 @@ pub struct AppState {
     publish_token: Arc<str>,
     publish_actor: Arc<str>,
     trending_ingest_token: Option<Arc<str>>,
-    trending_ingest_actor: Arc<str>,
 }
 
 impl AppState {
@@ -54,18 +53,12 @@ impl AppState {
             publish_token: publish_token.into(),
             publish_actor: publish_actor.into(),
             trending_ingest_token: None,
-            trending_ingest_actor: Arc::from("github_trending_collector"),
         }
     }
 
     #[must_use]
-    pub fn with_trending_ingestion(
-        mut self,
-        token: Option<String>,
-        actor: impl Into<Arc<str>>,
-    ) -> Self {
+    pub fn with_trending_ingestion(mut self, token: Option<String>) -> Self {
         self.trending_ingest_token = token.map(Arc::from);
-        self.trending_ingest_actor = actor.into();
         self
     }
 }
@@ -78,7 +71,6 @@ pub struct ApiConfig {
     pub publish_token: String,
     pub publish_actor: String,
     pub trending_ingest_token: Option<String>,
-    pub trending_ingest_actor: String,
 }
 
 impl ApiConfig {
@@ -114,11 +106,6 @@ impl ApiConfig {
         if trending_ingest_token.as_deref() == Some(publish_token.as_str()) {
             return Err(ConfigError::ReusedTrendingIngestToken);
         }
-        let trending_ingest_actor = env::var("PRODXIV_TRENDING_INGEST_ACTOR")
-            .unwrap_or_else(|_| "github_trending_collector".to_owned());
-        if trending_ingest_actor.trim().is_empty() {
-            return Err(ConfigError::EmptyTrendingIngestActor);
-        }
         let bind_address = resolve_bind_address(
             env::var("PRODXIV_BIND_ADDRESS").ok().as_deref(),
             env::var("PORT").ok().as_deref(),
@@ -131,7 +118,6 @@ impl ApiConfig {
             publish_token,
             publish_actor,
             trending_ingest_token,
-            trending_ingest_actor,
         })
     }
 }
@@ -164,8 +150,6 @@ pub enum ConfigError {
     WeakTrendingIngestToken,
     #[error("PRODXIV_TRENDING_INGEST_TOKEN must differ from PRODXIV_PUBLISH_TOKEN")]
     ReusedTrendingIngestToken,
-    #[error("PRODXIV_TRENDING_INGEST_ACTOR must not be empty")]
-    EmptyTrendingIngestActor,
     #[error("PRODXIV_BIND_ADDRESS is invalid: {0}")]
     InvalidBindAddress(#[from] AddrParseError),
 }
@@ -608,6 +592,11 @@ pub fn router(state: AppState) -> Router {
         "Idempotency-Key" = String,
         Header,
         description = "Stable key for safely retrying one exact snapshot"
+      ),
+      (
+        "X-Prodxiv-Actor" = String,
+        Header,
+        description = "Authenticated client's audit actor"
       )
     ),
     request_body = IngestGitHubTrendingRequest,
@@ -636,6 +625,7 @@ async fn ingest_github_trending_snapshot(
     })?;
     authorize(&headers, token)?;
     let idempotency_key = idempotency_key(&headers)?;
+    let actor = ingestion_actor(&headers)?;
     let Json(payload) = payload.map_err(|error| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -645,11 +635,7 @@ async fn ingest_github_trending_snapshot(
     })?;
     let outcome = state
         .store
-        .ingest_github_trending_snapshot(
-            payload.into(),
-            &state.trending_ingest_actor,
-            idempotency_key,
-        )
+        .ingest_github_trending_snapshot(payload.into(), actor, idempotency_key)
         .await
         .map_err(trending_store_error)?;
     let status = if outcome.inserted {
@@ -895,6 +881,29 @@ fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
             "Idempotency-Key must contain 8 to 128 letters, digits, '.', '_', '-', or ':'",
         ))
     }
+}
+
+fn ingestion_actor(headers: &HeaderMap) -> Result<&str, ApiError> {
+    let actor = headers
+        .get("x-prodxiv-actor")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@' | b'/')
+                })
+        })
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "request.invalid_ingestion_actor",
+                "X-Prodxiv-Actor must contain 1 to 128 safe identifier characters",
+            )
+        })?;
+    Ok(actor)
 }
 
 #[utoipa::path(

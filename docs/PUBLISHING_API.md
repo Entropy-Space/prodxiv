@@ -70,6 +70,8 @@ The `Collect GitHub Trending` GitHub Actions workflow runs every day at
 02:17 UTC and can also be started manually. Configure:
 
 - the repository Actions variable `PRODXIV_API_URL` with the public API URL;
+- the repository Actions variable `PRODXIV_TRENDING_INGEST_ACTOR` with the
+  workflow's audit identity, such as `github_actions:daily_trending`;
 - the repository Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the same
   dedicated token configured on the API.
 
@@ -79,7 +81,8 @@ the same JSON contract as the local fixture importer. It sends each successful
 scope to the authenticated API independently. The API validates it again,
 records the ingestion actor and idempotency key, and stores the observation in
 one transaction. The workflow never receives a database credential or
-migration authority.
+migration authority. The actor travels in the authenticated request so other
+collectors can use their own audit identities.
 
 A structurally valid page with no repositories becomes an empty snapshot.
 HTTP failures, challenge pages, malformed repository metrics, and rejected API
@@ -96,6 +99,7 @@ captured_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 snapshot_date="${captured_at%%T*}"
 PRODXIV_API_URL=http://127.0.0.1:3000 \
 PRODXIV_TRENDING_INGEST_TOKEN=replace_with_another_32_random_characters \
+PRODXIV_TRENDING_INGEST_ACTOR=local_trending_collector \
   bun run collect:github-trending \
     --snapshot-date "${snapshot_date}" \
     --captured-at "${captured_at}"
@@ -211,8 +215,6 @@ Set:
 - `PRODXIV_TRENDING_INGEST_TOKEN` to a different secret with at least 32
   characters. When absent, reading remains available and ingestion returns
   `503`.
-- `PRODXIV_TRENDING_INGEST_ACTOR` to the audit actor represented by the
-  ingestion token.
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
 

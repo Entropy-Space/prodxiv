@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.publish_token,
         config.publish_actor,
     )
-    .with_trending_ingestion(config.trending_ingest_token, config.trending_ingest_actor);
+    .with_trending_ingestion(config.trending_ingest_token);
     let listener = TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "prodxiv API listening");
 

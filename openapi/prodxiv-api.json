@@ -117,6 +117,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Prodxiv-Actor",
+            "in": "header",
+            "description": "Authenticated client's audit actor",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {

@@ -33,6 +33,7 @@ jobs:
       - name: Validate ingestion configuration
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR }}
           PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
           if [ -z "${PRODXIV_API_URL}" ]; then
@@ -43,10 +44,15 @@ jobs:
             echo "::error::Add the PRODXIV_TRENDING_INGEST_TOKEN repository secret."
             exit 1
           fi
+          if [ -z "${PRODXIV_TRENDING_INGEST_ACTOR}" ]; then
+            echo "::error::Add the PRODXIV_TRENDING_INGEST_ACTOR repository variable."
+            exit 1
+          fi
 
       - name: Fetch and ingest daily snapshots
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_TRENDING_INGEST_ACTOR: ${{ vars.PRODXIV_TRENDING_INGEST_ACTOR }}
           PRODXIV_TRENDING_INGEST_TOKEN: ${{ secrets.PRODXIV_TRENDING_INGEST_TOKEN }}
         run: |
           set -o pipefail

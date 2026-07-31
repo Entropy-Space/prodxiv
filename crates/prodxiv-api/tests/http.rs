@@ -29,6 +29,7 @@ struct FakeStore {
     publications: Mutex<Vec<PublishedPaper>>,
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
     trending_requests: Mutex<HashMap<String, String>>,
+    trending_actors: Mutex<Vec<String>>,
     github_trending: Mutex<Option<GitHubTrendingSnapshot>>,
 }
 
@@ -175,9 +176,13 @@ impl PublicationStore for FakeStore {
     async fn ingest_github_trending_snapshot(
         &self,
         snapshot: NewGitHubTrendingSnapshot,
-        _actor: &str,
+        actor: &str,
         idempotency_key: &str,
     ) -> Result<TrendingImportOutcome, StoreError> {
+        self.trending_actors
+            .lock()
+            .expect("fake Trending actors should lock")
+            .push(actor.to_owned());
         if snapshot
             .entries
             .iter()
@@ -235,7 +240,7 @@ fn submission_markdown() -> String {
 fn app(store: Arc<FakeStore>) -> axum::Router {
     router(
         AppState::new(store, TOKEN, "api_test")
-            .with_trending_ingestion(Some(INGEST_TOKEN.to_owned()), "trending_test"),
+            .with_trending_ingestion(Some(INGEST_TOKEN.to_owned())),
     )
 }
 
@@ -300,6 +305,7 @@ async fn ingests_a_trending_snapshot_idempotently() {
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
             .header("idempotency-key", "github-trending.test.rust")
+            .header("x-prodxiv-actor", "github_actions:daily_trending")
             .body(Body::from(trending_snapshot_json().to_string()))
             .expect("request should build")
     };
@@ -326,6 +332,17 @@ async fn ingests_a_trending_snapshot_idempotently() {
             .len(),
         1
     );
+    assert_eq!(
+        store
+            .trending_actors
+            .lock()
+            .expect("fake Trending actors should lock")
+            .as_slice(),
+        [
+            "github_actions:daily_trending",
+            "github_actions:daily_trending"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -336,6 +353,7 @@ async fn protects_trending_ingestion_with_a_dedicated_token() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
                 .header("idempotency-key", "github-trending.test.unauthorized")
+                .header("x-prodxiv-actor", "github_actions:daily_trending")
                 .body(Body::from(trending_snapshot_json().to_string()))
                 .expect("request should build"),
         )
@@ -343,6 +361,27 @@ async fn protects_trending_ingestion_with_a_dedicated_token() {
         .expect("request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn requires_a_trending_ingestion_actor() {
+    let response = app(Arc::new(FakeStore::default()))
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+                .header("idempotency-key", "github-trending.test.actor")
+                .body(Body::from(trending_snapshot_json().to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        json_body(response).await["error"]["code"],
+        "request.invalid_ingestion_actor"
+    );
 }
 
 #[tokio::test]
@@ -359,6 +398,7 @@ async fn keeps_reading_available_when_trending_ingestion_is_not_configured() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
                 .header("idempotency-key", "github-trending.test.unconfigured")
+                .header("x-prodxiv-actor", "github_actions:daily_trending")
                 .body(Body::from(trending_snapshot_json().to_string()))
                 .expect("request should build"),
         )
@@ -385,6 +425,7 @@ async fn rejects_invalid_trending_snapshots_and_idempotency_conflicts() {
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
             .header("idempotency-key", "github-trending.test.conflict")
+            .header("x-prodxiv-actor", "github_actions:daily_trending")
             .body(Body::from(body.to_string()))
             .expect("request should build")
     };
@@ -413,6 +454,7 @@ async fn rejects_invalid_trending_snapshots_and_idempotency_conflicts() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
                 .header("idempotency-key", "github-trending.test.invalid")
+                .header("x-prodxiv-actor", "github_actions:daily_trending")
                 .body(Body::from(invalid.to_string()))
                 .expect("request should build"),
         )

@@ -3,6 +3,7 @@ import type { TrendingSnapshot } from "./collector.ts";
 export interface IngestionConfig {
   api_url: string;
   ingest_token: string;
+  ingest_actor: string;
 }
 
 export interface IngestionFailure {
@@ -50,7 +51,18 @@ export function readIngestionConfig(
       "PRODXIV_TRENDING_INGEST_TOKEN must contain at least 32 characters",
     );
   }
-  return { api_url, ingest_token };
+  const ingest_actor = environment.PRODXIV_TRENDING_INGEST_ACTOR;
+  if (
+    ingest_actor === undefined ||
+    ingest_actor.length === 0 ||
+    ingest_actor.length > 128 ||
+    !/^[A-Za-z0-9._:@/-]+$/.test(ingest_actor)
+  ) {
+    throw new Error(
+      "PRODXIV_TRENDING_INGEST_ACTOR must contain 1 to 128 safe identifier characters",
+    );
+  }
+  return { api_url, ingest_token, ingest_actor };
 }
 
 export async function publishTrendingSnapshots(
@@ -107,6 +119,7 @@ async function publishSnapshot(
           "content-type": "application/json",
           "idempotency-key": snapshotIdempotencyKey(snapshot),
           "user-agent": "prodxiv-trending-collector/0.1 (+https://prodxiv.com)",
+          "x-prodxiv-actor": config.ingest_actor,
         },
         body: JSON.stringify(snapshot),
         signal: AbortSignal.timeout(30_000),
