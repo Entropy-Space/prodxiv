@@ -98,10 +98,29 @@ the Pi SDK with `deepseek-v4-flash` by default, but it is deliberately separate
 from deterministic commands such as `scan`, `draft`, `validate`, and `publish`.
 Those commands do not require a model key or start Pi.
 
-Set `DEEPSEEK_API_KEY` in the environment through the user's normal secret
-management mechanism. Never place it in a command argument, batch manifest,
-paper, or run artifact. Then create a private draft from a local Git worktree
-or an anonymous canonical public GitHub repository URL:
+Configure one of the following model connections before starting an agent run:
+
+- **Local model router:** set
+  `PAPERBOT_MODEL_BASE_URL=http://127.0.0.1:4141/v1`. When the router requires
+  client authentication, set either `PAPERBOT_MODEL_API_KEY` or `TOKN_API_KEY`
+  through the user's normal secret-management mechanism. When loopback client
+  authentication is disabled, no Paperbot API key is required; do not invent a
+  placeholder secret. Keep any upstream-provider credential in the router, not
+  in a Paperbot command, manifest, paper, or run artifact. Paperbot accepts
+  only anonymous loopback HTTP(S) URLs for this setting.
+- **Direct DeepSeek:** set `DEEPSEEK_API_KEY` through the user's normal
+  secret-management mechanism. This remains supported when no local router is
+  configured. Never place that key in a command argument, batch manifest,
+  paper, or run artifact.
+
+For example, a router without client authentication needs only:
+
+```sh
+export PAPERBOT_MODEL_BASE_URL=http://127.0.0.1:4141/v1
+```
+
+Then create a private draft from a local Git worktree or an anonymous canonical
+public GitHub repository URL:
 
 ```sh
 bun run paperbot agent run https://github.com/different-ai/openwork \
@@ -117,10 +136,10 @@ will not infer authorship from GitHub. `--status` is also deliberate author
 metadata: code and a repository URL do not reliably establish a product's
 release status.
 
-`--allow-remote-model` is required even for a public source. It confirms that
-the bounded selected source bundle may be sent to the configured model. The
-agent never reads Paperbot publishing credentials and has no publication
-capability.
+`--allow-remote-model` is required even for a public source and a loopback
+model router. It confirms that the bounded selected source bundle may be sent
+to the configured model or routed onward by that gateway. The agent never
+reads Paperbot publishing credentials and has no publication capability.
 
 For a remote source, Paperbot accepts only
 `https://github.com/<owner>/<repo>` (optionally ending in `.git`). It resolves

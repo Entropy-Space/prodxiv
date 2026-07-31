@@ -23,6 +23,7 @@ import {
   normalizeAnonymousHttpUrl,
   normalizeExternalSources,
 } from "./input.ts";
+import { redactModelSecrets } from "./model-config.ts";
 import { PiAuthoringRuntime } from "./pi.ts";
 import {
   createDraftPrompt,
@@ -761,10 +762,7 @@ function relativeArtifact(runPath: string, artifact: string): string {
 
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  return apiKey === undefined || apiKey.length === 0
-    ? message
-    : message.replaceAll(apiKey, "[redacted]");
+  return redactModelSecrets(message);
 }
 
 async function resolveExistingRun(runPath: string): Promise<string> {

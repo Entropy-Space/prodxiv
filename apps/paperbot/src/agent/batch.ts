@@ -18,6 +18,7 @@ import {
   type AgentPaperStatus,
 } from "./input.ts";
 import { initializeRunDirectory, writeJsonArtifact } from "./artifacts.ts";
+import { redactModelSecrets } from "./model-config.ts";
 import { runAgent, type AgentRunOptions } from "./runner.ts";
 import type { AgentPaperMetadata, AgentRunResult } from "./types.ts";
 
@@ -667,10 +668,7 @@ function now(dependencies: AgentBatchDependencies): Date {
 
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  return apiKey === undefined || apiKey.length === 0
-    ? message
-    : message.replaceAll(apiKey, "[redacted]");
+  return redactModelSecrets(message);
 }
 
 function usageError(message: string): PaperbotError {

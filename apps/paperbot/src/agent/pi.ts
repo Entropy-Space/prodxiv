@@ -13,6 +13,11 @@ import {
 } from "@earendil-works/pi-ai";
 
 import { ExitCode, PaperbotError } from "../errors.ts";
+import {
+  normalizeLoopbackBaseUrl,
+  redactModelSecrets,
+  resolvePiConnection,
+} from "./model-config.ts";
 import { PAPERBOT_SYSTEM_PROMPT } from "./prompts.ts";
 import type { AuthoringRuntime, ModelCompletion } from "./types.ts";
 
@@ -22,10 +27,12 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 export interface PiAuthoringRuntimeOptions {
   model?: string;
   api_key?: string;
+  base_url?: string;
 }
 
 export interface IsolatedPiSessionOptions {
   api_key: string;
+  base_url?: string;
   model: string;
   run_path: string;
 }
@@ -39,27 +46,29 @@ export class PiAuthoringRuntime implements AuthoringRuntime {
   readonly provider = "pi";
   readonly model: string;
   private readonly apiKey?: string;
+  private readonly baseUrl?: string;
 
   constructor(options: PiAuthoringRuntimeOptions = {}) {
     this.model = options.model ?? DEFAULT_MODEL;
-    this.apiKey = options.api_key ?? process.env.DEEPSEEK_API_KEY;
+    this.apiKey = options.api_key;
+    this.baseUrl = options.base_url;
   }
 
   async complete(input: {
     prompt: string;
     run_path: string;
   }): Promise<ModelCompletion> {
-    const apiKey = this.apiKey;
-    if (apiKey === undefined || apiKey.trim().length === 0) {
-      throw new PaperbotError(
-        "DEEPSEEK_API_KEY is required for the Pi agent runtime",
-        ExitCode.auth,
-      );
-    }
+    const connection = resolvePiConnection({
+      ...(this.apiKey === undefined ? {} : { api_key: this.apiKey }),
+      ...(this.baseUrl === undefined ? {} : { base_url: this.baseUrl }),
+    });
 
     try {
       const session = await createIsolatedPiSession({
-        api_key: apiKey,
+        api_key: connection.api_key,
+        ...(connection.base_url === undefined
+          ? {}
+          : { base_url: connection.base_url }),
         model: this.model,
         run_path: input.run_path,
       });
@@ -106,7 +115,7 @@ export class PiAuthoringRuntime implements AuthoringRuntime {
       }
       const message = redactApiKey(
         error instanceof Error ? error.message : String(error),
-        apiKey,
+        connection.api_key,
       );
       throw new PaperbotError(`Pi agent failed: ${message}`, ExitCode.remote);
     }
@@ -125,6 +134,11 @@ export async function createIsolatedPiSession(
     modelsPath: null,
     allowModelNetwork: false,
   });
+  if (options.base_url !== undefined) {
+    runtime.registerProvider(DEEPSEEK_PROVIDER, {
+      baseUrl: normalizeLoopbackBaseUrl(options.base_url),
+    });
+  }
   await runtime.setRuntimeApiKey(DEEPSEEK_PROVIDER, options.api_key, {
     allowNetwork: false,
   });
@@ -198,5 +212,5 @@ function assistantText(message: AssistantMessage): string {
 }
 
 function redactApiKey(message: string, apiKey: string): string {
-  return message.replaceAll(apiKey, "[redacted]");
+  return redactModelSecrets(message, [apiKey]);
 }
