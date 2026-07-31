@@ -91,6 +91,159 @@ Benchmarks section. It does not make performance claims.
 
 Paperbot should never turn missing context into polished but unsupported prose.
 
+## Pi agent workflow
+
+`paperbot agent` is an optional, local-orchestrated drafting workflow. It uses
+the Pi SDK with `deepseek-v4-flash` by default, but it is deliberately separate
+from deterministic commands such as `scan`, `draft`, `validate`, and `publish`.
+Those commands do not require a model key or start Pi.
+
+Configure one of the following model connections before starting an agent run:
+
+- **Local model router:** set
+  `PAPERBOT_MODEL_BASE_URL=http://127.0.0.1:4141/v1`. When the router requires
+  client authentication, set either `PAPERBOT_MODEL_API_KEY` or `TOKN_API_KEY`
+  through the user's normal secret-management mechanism. When loopback client
+  authentication is disabled, no Paperbot API key is required; do not invent a
+  placeholder secret. Keep any upstream-provider credential in the router, not
+  in a Paperbot command, manifest, paper, or run artifact. Paperbot accepts
+  only anonymous loopback HTTP(S) URLs for this setting.
+- **Direct DeepSeek:** set `DEEPSEEK_API_KEY` through the user's normal
+  secret-management mechanism. This remains supported when no local router is
+  configured. Never place that key in a command argument, batch manifest,
+  paper, or run artifact.
+
+For example, a router without client authentication needs only:
+
+```sh
+export PAPERBOT_MODEL_BASE_URL=http://127.0.0.1:4141/v1
+```
+
+Then create a private draft from a local Git worktree or an anonymous canonical
+public GitHub repository URL:
+
+```sh
+bun run paperbot agent run https://github.com/different-ai/openwork \
+  --output ./paperbot-runs/openwork \
+  --author "prodxiv research" \
+  --status public_beta \
+  --allow-remote-model \
+  --model deepseek-v4-flash
+```
+
+`--author` identifies the paper author, not a repository contributor. Paperbot
+will not infer authorship from GitHub. `--status` is also deliberate author
+metadata: code and a repository URL do not reliably establish a product's
+release status.
+
+`--allow-remote-model` is required even for a public source and a loopback
+model router. It confirms that the bounded selected source bundle may be sent
+to the configured model or routed onward by that gateway. The agent never
+reads Paperbot publishing credentials and has no publication capability.
+
+For a remote source, Paperbot accepts only
+`https://github.com/<owner>/<repo>` (optionally ending in `.git`). It resolves
+the requested or default ref to an exact commit SHA through GitHub, rejects
+private repositories, symlinks, submodules, unsafe paths, truncated trees, and
+oversized content, then verifies each raw file against its Git blob SHA before
+reading a small SHA-pinned UTF-8 source bundle. It does not clone the
+repository, run its code, install dependencies, or fetch
+arbitrary URLs.
+
+Pi runs with an in-memory credential store and session, with built-in tools,
+extensions, skills, prompt templates, themes, and repository context-file
+discovery disabled. The model receives a host-built source bundle; it cannot
+use a shell, read arbitrary files, browse the web, access environment
+variables, or call `publish`.
+
+The agent writes a new private run directory with:
+
+- `run.json` — state, requested model, source revision, artifact paths, and
+  draft SHA-256;
+- `source.json`, `scan.json`, and `source/` — the bounded private source
+  snapshot and original scan inventory;
+- `evidence.jsonl` — claim-level repository, author, or inference
+  provenance; supplied external URLs remain reference-only until their
+  contents are explicitly snapshotted;
+- `draft.md`, `questions.md`, `review.json`, and `validation.json` — the draft,
+  unresolved author questions, independent review, and deterministic report.
+
+The model first drafts, then a fresh Pi session reviews the draft, and Paperbot
+allows one repair pass for structural or evidence-review errors. The workflow
+ends in `needs_author_review` even when draft validation passes. It never
+submits or publishes.
+
+The initial agent has no general web-search or page-fetch capability. Use
+`--source <public-url>` only to provide a citeable URL; it is not fetched and
+cannot establish factual claims by itself. It must be an anonymous,
+query-free HTTP(S) URL, and Paperbot permits it only as a Markdown reference
+link—not as evidence in the claim ledger. When related work needs external
+research, Paperbot records focused author questions rather than fabricating
+comparisons. The agent also omits `# Benchmarks` unless a future explicit
+reproducible benchmark input is added.
+
+### Batch public repositories
+
+To prepare several independent research drafts, create a private JSON manifest
+with one anonymous canonical GitHub repository per project:
+
+```json
+{
+  "schema_version": "1",
+  "projects": [
+    {
+      "repository_url": "https://github.com/different-ai/openwork",
+      "ref": "main",
+      "external_sources": ["https://github.com/different-ai/openwork"]
+    },
+    {
+      "repository_url": "https://github.com/huggingface/speech-to-speech",
+      "title": "Speech-to-Speech research draft",
+      "product_name": "Speech-to-Speech",
+      "authors": ["prodxiv research"],
+      "status": "public_beta"
+    }
+  ]
+}
+```
+
+Run it with explicit batch defaults when each project does not set its own
+paper author or product status:
+
+```sh
+bun run paperbot agent batch ./projects.json \
+  --output ./paperbot-runs/trending \
+  --author "prodxiv research" \
+  --status public_beta \
+  --allow-remote-model \
+  --model deepseek-v4-flash \
+  --concurrency 2
+```
+
+Project-level `authors` and `status` override command defaults; Paperbot
+never fills either in from GitHub. A batch supports up to 100 repositories and
+one to four concurrent runs. It creates one isolated child directory per
+repository plus an incrementally updated `batch.json` report. One project
+failure does not stop other projects, but the command exits nonzero if any
+project fails or its generated draft does not pass validation. The batch
+workflow never submits or publishes.
+
+To incorporate author answers, create a proposal rather than overwriting the
+reviewed draft:
+
+```sh
+bun run paperbot agent resume ./paperbot-runs/openwork \
+  --answers ./answers.md \
+  --allow-remote-model
+```
+
+This leaves `draft.md` intact and writes the next `proposal-<n>.md` with its
+own validation report. The author compares it with their draft and decides
+what to adopt. Before sending any revision prompt, Paperbot treats the saved
+run as untrusted input again: it rejects changed digests, symlinks,
+non-UTF-8 files, sensitive paths or markers, and source snapshots outside
+the original bounded limits.
+
 ## Skill catalog
 
 Paperbot exposes its agent guidance through artifact-oriented scopes rather

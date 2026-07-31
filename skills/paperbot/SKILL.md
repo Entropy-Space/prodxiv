@@ -24,6 +24,75 @@ selected command rather than typing that label literally.
 Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
+## Use the optional Pi agent
+
+Use `PAPERBOT_CMD agent` only when the user explicitly authorizes remote model
+analysis. It is a private drafting workflow, never a publication workflow.
+
+Prefer the configured local model router when available:
+
+```sh
+export PAPERBOT_MODEL_BASE_URL=http://127.0.0.1:4141/v1
+```
+
+If that gateway enables client authentication, set one of
+`PAPERBOT_MODEL_API_KEY` or `TOKN_API_KEY` through the user's normal secret
+management mechanism. If it does not, use no Paperbot API key and do not
+invent a placeholder secret. The router owns any upstream-provider credential.
+Paperbot accepts only anonymous loopback HTTP(S) values for this endpoint.
+Alternatively, direct DeepSeek remains supported with `DEEPSEEK_API_KEY` when
+no local router is configured. Never put any key in a command argument,
+manifest, paper, or run artifact.
+
+For a public GitHub repository, require the author to provide their paper
+identity and a product status rather than inferring either from contributors or
+marketing copy:
+
+```sh
+PAPERBOT_CMD agent run https://github.com/owner/repository \
+  --output ./paperbot-runs/repository \
+  --author "Paper author" \
+  --status public_beta \
+  --allow-remote-model
+```
+
+`--allow-remote-model` is explicit consent to send the bounded selected source
+bundle to the configured model, including through a loopback router that may
+route it onward. The agent accepts a local Git worktree or an anonymous
+canonical public GitHub URL. For GitHub it resolves an exact source revision
+without cloning or executing repository code. It has no shell, filesystem,
+browser, credential, or publish tools.
+
+The run ends with private artifacts including `draft.md`, `evidence.jsonl`,
+`questions.md`, `review.json`, and `validation.json`. It always stops at
+author review. Do not use `publish` unless the author separately and explicitly
+approves the exact reviewed paper.
+
+Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
+--allow-remote-model` to create a numbered proposal from author answers. It
+preserves `draft.md`; the author decides whether to incorporate the proposal.
+
+For multiple public repositories, use a private versioned JSON manifest and
+the batch command:
+
+```sh
+PAPERBOT_CMD agent batch ./projects.json \
+  --output ./paperbot-runs/trending \
+  --author "Paper research team" \
+  --status public_beta \
+  --allow-remote-model \
+  --concurrency 2
+```
+
+Each manifest project must provide an anonymous canonical
+`https://github.com/<owner>/<repo>` URL. It may override `authors`, `status`,
+title, product metadata, revision, and reference-only `external_sources`.
+Command-level authors and status are defaults, never inferred values. Paperbot
+writes a private child run for each project and `batch.json`; one failed
+project does not stop the remainder, but a failed or invalid draft makes the
+batch exit nonzero. Do not place API keys, signed URLs, or source contents in
+the manifest.
+
 ## Load guidance progressively
 
 Run `PAPERBOT_CMD skills` to discover artifact scopes. Load the relevant

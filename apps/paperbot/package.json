@@ -11,6 +11,8 @@
     "test": "bun test tests/*.test.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.83.0",
+    "@earendil-works/pi-coding-agent": "0.83.0",
     "@prodxiv/api-client": "workspace:*",
     "@prodxiv/contracts": "workspace:*",
     "ajv": "8.20.0",

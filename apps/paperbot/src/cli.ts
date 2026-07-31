@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
 import { parseArguments } from "./arguments.ts";
+import type { AgentBatchOptions, AgentBatchResult } from "./agent/batch.ts";
+import type { AgentResumeOptions, AgentRunOptions } from "./agent/runner.ts";
+import type { AgentRunResult } from "./agent/types.ts";
 import {
   defaultAuthPath,
   initializeAuth,
@@ -33,6 +36,9 @@ Usage:
   paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
   paperbot skills [scope] [component] [--format text|json]
+  paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
+  paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
+  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
@@ -46,6 +52,7 @@ Commands:
   draft     Create a Markdown paper scaffold from a scan manifest
   validate  Validate a product paper
   skills    Discover focused agent guidance by artifact scope and component
+  agent     Create or revise a private, evidence-backed paper draft with Pi
   auth      Configure local publishing authentication
   publish   Validate and explicitly publish a product paper
 
@@ -56,6 +63,13 @@ Options:
   --output <path>      Write a new draft without overwriting existing work
   --title <title>      Set the initial draft title
   --profile <profile>  Validation profile: draft (default), submission, or publication
+  --author <name>      Declare a paper author; repeatable for agent runs
+  --status <status>    Product status for an agent run or batch default
+  --source <url>       Supply a citeable public URL; Paperbot does not fetch it
+  --ref <ref>          Request a GitHub revision for an agent run
+  --model <model>      Pi model for an agent run, resume, or batch
+  --concurrency <1-4>  Concurrent projects for an agent batch (default: 1)
+  --allow-remote-model Explicitly allow the bounded source bundle to leave this machine
   --api-url <url>      Publishing API base URL
   --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin
@@ -73,6 +87,12 @@ export interface CliIo {
   confirm?: (prompt: string) => Promise<boolean>;
 }
 
+export interface CliDependencies {
+  run_agent?: (options: AgentRunOptions) => Promise<AgentRunResult>;
+  resume_agent?: (options: AgentResumeOptions) => Promise<AgentRunResult>;
+  run_agent_batch?: (options: AgentBatchOptions) => Promise<AgentBatchResult>;
+}
+
 const defaultIo: Required<CliIo> = {
   stdout: (message) => console.log(message),
   stderr: (message) => console.error(message),
@@ -84,6 +104,7 @@ const defaultIo: Required<CliIo> = {
 export async function run(
   args: string[],
   io: CliIo = defaultIo,
+  dependencies: CliDependencies = {},
 ): Promise<number> {
   try {
     const parsed = parseArguments(args);
@@ -227,6 +248,54 @@ export async function run(
       return ExitCode.success;
     }
 
+    if (parsed.command === "agent") {
+      if (parsed.action === "run") {
+        const execute =
+          dependencies.run_agent ?? (await loadAgentRunner()).runAgent;
+        const result = await execute({
+          repository: parsed.repository,
+          output_path: parsed.output_path,
+          allow_remote_model: parsed.allow_remote_model,
+          metadata: parsed.metadata,
+          external_sources: parsed.external_sources,
+          ...(parsed.ref === undefined ? {} : { ref: parsed.ref }),
+          ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        });
+        writeAgentResult(io, parsed.format, parsed.action, result);
+        return result.validation.valid ? ExitCode.success : ExitCode.validation;
+      }
+      if (parsed.action === "resume") {
+        const execute =
+          dependencies.resume_agent ?? (await loadAgentRunner()).resumeAgent;
+        const result = await execute({
+          run_path: parsed.run_path,
+          answers_path: parsed.answers_path,
+          allow_remote_model: parsed.allow_remote_model,
+          ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        });
+        writeAgentResult(io, parsed.format, parsed.action, result);
+        return result.validation.valid ? ExitCode.success : ExitCode.validation;
+      }
+
+      const execute =
+        dependencies.run_agent_batch ?? (await loadAgentBatch()).runAgentBatch;
+      const result = await execute({
+        input_path: parsed.input_path,
+        output_path: parsed.output_path,
+        allow_remote_model: parsed.allow_remote_model,
+        ...(parsed.authors === undefined ? {} : { authors: parsed.authors }),
+        ...(parsed.status === undefined ? {} : { status: parsed.status }),
+        ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        ...(parsed.concurrency === undefined
+          ? {}
+          : { concurrency: parsed.concurrency }),
+      });
+      writeAgentBatchResult(io, parsed.format, result);
+      return result.report.summary.failed === 0
+        ? ExitCode.success
+        : ExitCode.remote;
+    }
+
     if (parsed.command === "validate") {
       const result = await validatePaperFile(parsed.input_path, parsed.profile);
       if (parsed.format === "json") {
@@ -323,19 +392,23 @@ export async function run(
       return ExitCode.success;
     }
 
-    const result = await scanRepository(parsed.repository_path, {
-      exclusions: parsed.exclusions,
-      inclusions: parsed.inclusions,
-    });
-    if (parsed.format === "json") {
-      io.stdout(JSON.stringify(result.manifest, null, 2));
-      io.stderr(
-        `paperbot: selected ${result.manifest.files.length} files from ${result.discovered_file_count} discovered files`,
-      );
-    } else {
-      io.stdout(formatScanResult(result));
+    if (parsed.command === "scan") {
+      const result = await scanRepository(parsed.repository_path, {
+        exclusions: parsed.exclusions,
+        inclusions: parsed.inclusions,
+      });
+      if (parsed.format === "json") {
+        io.stdout(JSON.stringify(result.manifest, null, 2));
+        io.stderr(
+          `paperbot: selected ${result.manifest.files.length} files from ${result.discovered_file_count} discovered files`,
+        );
+      } else {
+        io.stdout(formatScanResult(result));
+      }
+      return ExitCode.success;
     }
-    return ExitCode.success;
+
+    throw new PaperbotError("unsupported command", ExitCode.usage);
   } catch (error) {
     if (error instanceof ProdxivApiError) {
       io.stderr(`paperbot: ${error.code}: ${error.message}`);
@@ -354,6 +427,69 @@ export async function run(
     io.stderr(`paperbot: unexpected failure: ${message}`);
     return ExitCode.scan;
   }
+}
+
+async function loadAgentRunner(): Promise<typeof import("./agent/runner.ts")> {
+  return import("./agent/runner.ts");
+}
+
+async function loadAgentBatch(): Promise<typeof import("./agent/batch.ts")> {
+  return import("./agent/batch.ts");
+}
+
+function writeAgentResult(
+  io: CliIo,
+  format: "text" | "json",
+  action: "run" | "resume",
+  result: AgentRunResult,
+): void {
+  if (format === "json") {
+    io.stdout(JSON.stringify(result, null, 2));
+    io.stderr(
+      `paperbot: agent ${action} completed with ${result.validation.diagnostics} validation diagnostics`,
+    );
+    return;
+  }
+
+  io.stdout(
+    [
+      action === "run"
+        ? "Paperbot agent draft prepared"
+        : "Paperbot agent revision proposal prepared",
+      `Run: ${result.run_path}`,
+      `State: ${result.state}`,
+      `Validation: ${result.validation.valid ? "passed" : "needs author attention"} (${result.validation.diagnostics} diagnostics)`,
+      `Source revision: ${result.source.resolved_revision}`,
+      `Selected files: ${result.source.selected_file_count}`,
+      "Publication: not attempted. Review the draft, evidence, and author questions before any submission.",
+    ].join("\n"),
+  );
+}
+
+function writeAgentBatchResult(
+  io: CliIo,
+  format: "text" | "json",
+  result: AgentBatchResult,
+): void {
+  if (format === "json") {
+    io.stdout(JSON.stringify(result, null, 2));
+    io.stderr(
+      `paperbot: agent batch completed with ${result.report.summary.succeeded} succeeded and ${result.report.summary.failed} failed projects`,
+    );
+    return;
+  }
+
+  io.stdout(
+    [
+      "Paperbot agent batch completed",
+      `Runs: ${result.output_path}`,
+      `Projects: ${result.report.summary.total}`,
+      `Succeeded: ${result.report.summary.succeeded}`,
+      `Failed: ${result.report.summary.failed}`,
+      `Report: ${result.output_path}/batch.json`,
+      "Publication: not attempted. Review every private draft, evidence ledger, question list, and validation report before any submission.",
+    ].join("\n"),
+  );
 }
 
 async function readSecret(prompt: string): Promise<string> {
