@@ -47,6 +47,13 @@ const SECRET_MARKERS = [
   "-----begin ec private key-----",
   "-----begin openssh private key-----",
 ];
+const AGENT_INSTRUCTION_FILENAMES = new Set([
+  "agents.md",
+  "claude.md",
+  "readme_ai.md",
+  "rules.md",
+  "skill.md",
+]);
 
 export async function acquireLocalSource(
   repositoryPath: string,
@@ -84,6 +91,7 @@ export function sourceFromGitHubResult(
 ): AgentSource {
   const files = result.files
     .filter((file) => !isSensitivePath(file.path))
+    .filter((file) => !isAgentInstructionPath(file.path))
     .filter((file) => !includesSensitiveMarker(file.content))
     .map((file) => ({
       ...file,
@@ -281,7 +289,10 @@ async function selectLocalFiles(
   let totalBytes = 0;
 
   for (const candidate of prioritizeCandidates(candidates)) {
-    if (isSensitivePath(candidate.path)) {
+    if (
+      isSensitivePath(candidate.path) ||
+      isAgentInstructionPath(candidate.path)
+    ) {
       continue;
     }
     if (
@@ -360,6 +371,15 @@ function prioritizeCandidates(
 
 export function isSensitivePath(path: string): boolean {
   return NON_OVERRIDABLE_SENSITIVE_PATHS.some((pattern) => pattern.test(path));
+}
+
+export function isAgentInstructionPath(path: string): boolean {
+  const filename = path.split("/").at(-1)?.toLowerCase();
+  return (
+    filename !== undefined &&
+    (AGENT_INSTRUCTION_FILENAMES.has(filename) ||
+      /^(?:rules|skill)[_-][a-z0-9-]+\.md$/.test(filename))
+  );
 }
 
 export function includesSensitiveMarker(content: string): boolean {
@@ -564,6 +584,7 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
     if (
       !isSafeRelativePath(file.path) ||
       isSensitivePath(file.path) ||
+      isAgentInstructionPath(file.path) ||
       file.source_id !== `repository:${file.path}` ||
       paths.has(file.path) ||
       file.byte_count > MAX_AGENT_FILE_BYTES ||

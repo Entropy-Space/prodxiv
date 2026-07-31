@@ -140,7 +140,7 @@ export async function runAgent(
     });
     const allowedSourceIds = availableEvidenceSourceIds(source);
     validateEvidenceSourceIds(draft.evidence, allowedSourceIds);
-    validateDraftLinks(
+    const initialDraftLinkDiagnostics = draftLinkDiagnostics(
       draft.markdown,
       allowedMarkdownUrls(metadata, externalSources),
     );
@@ -154,11 +154,13 @@ export async function runAgent(
 
     record.state = "drafted";
     record.updated_at = now(dependencies).toISOString();
-    await writeDraftArtifacts(runPath, draft, paper);
-    record.artifacts.evidence = "evidence.jsonl";
-    record.artifacts.draft = "draft.md";
-    record.artifacts.questions = "questions.md";
-    record.draft_sha256 = sha256(paper);
+    if (initialDraftLinkDiagnostics.length === 0) {
+      await writeDraftArtifacts(runPath, draft, paper);
+      record.artifacts.evidence = "evidence.jsonl";
+      record.artifacts.draft = "draft.md";
+      record.artifacts.questions = "questions.md";
+      record.draft_sha256 = sha256(paper);
+    }
     await persistRunRecord(runPath, record);
 
     const review = await generateReview(runtime, {
@@ -175,7 +177,8 @@ export async function runAgent(
     if (
       review.issues.some((issue) => issue.severity === "error") ||
       !validation.report.valid ||
-      initialDraftFieldDiagnostics.length > 0
+      initialDraftFieldDiagnostics.length > 0 ||
+      initialDraftLinkDiagnostics.length > 0
     ) {
       const repaired = await generateRepair(runtime, {
         source,
@@ -188,7 +191,7 @@ export async function runAgent(
             (diagnostic) =>
               `${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
           )
-          .concat(initialDraftFieldDiagnostics),
+          .concat(initialDraftFieldDiagnostics, initialDraftLinkDiagnostics),
         run_path: runPath,
       });
       validateEvidenceSourceIds(repaired.evidence, allowedSourceIds);
@@ -204,6 +207,9 @@ export async function runAgent(
         "draft",
       );
       await writeDraftArtifacts(runPath, repaired, paper, review.questions);
+      record.artifacts.evidence = "evidence.jsonl";
+      record.artifacts.draft = "draft.md";
+      record.artifacts.questions = "questions.md";
       record.draft_sha256 = sha256(paper);
     }
 
@@ -599,6 +605,21 @@ function validateDraftLinks(
       validateMarkdownUrl(token.href, allowedUrls);
     }
   });
+}
+
+function draftLinkDiagnostics(
+  markdown: string,
+  allowedUrls: ReadonlySet<string>,
+): string[] {
+  try {
+    validateDraftLinks(markdown, allowedUrls);
+    return [];
+  } catch (error) {
+    if (error instanceof PaperbotError) {
+      return [error.message];
+    }
+    throw error;
+  }
 }
 
 function isMarkdownUrlToken(

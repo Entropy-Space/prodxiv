@@ -100,6 +100,13 @@ const DOCUMENTATION_FILENAMES = new Set([
   "readme",
   "readme.md",
 ]);
+const AGENT_INSTRUCTION_FILENAMES = new Set([
+  "agents.md",
+  "claude.md",
+  "readme_ai.md",
+  "rules.md",
+  "skill.md",
+]);
 const EXCLUDED_DIRECTORY_NAMES = new Set([
   ".astro",
   ".aws",
@@ -325,29 +332,34 @@ export async function inspectGitHubRepository(
 export function selectDefaultGitHubSourcePaths(
   snapshot: GitHubRepositorySnapshot,
   limits?: Partial<GitHubSourceLimits>,
+  preferred_paths: readonly string[] = [],
 ): GitHubSourceSelection {
   const resolvedLimits = resolveLimits(limits);
   const skipped_file_counts = emptySkipCounts();
-  const eligible = snapshot.files
-    .filter((file) => {
-      if (file.file_type === undefined) {
-        skipped_file_counts.unsupported += 1;
-        return false;
-      }
-      if (isExcludedSourcePath(file.path)) {
-        skipped_file_counts.excluded += 1;
-        return false;
-      }
-      if (
-        file.byte_count !== undefined &&
-        file.byte_count > resolvedLimits.max_file_bytes
-      ) {
-        skipped_file_counts.oversized += 1;
-        return false;
-      }
-      return true;
-    })
-    .sort(compareSourcePriority);
+  const eligible = snapshot.files.filter((file) => {
+    if (file.file_type === undefined) {
+      skipped_file_counts.unsupported += 1;
+      return false;
+    }
+    if (isExcludedSourcePath(file.path)) {
+      skipped_file_counts.excluded += 1;
+      return false;
+    }
+    if (
+      file.byte_count !== undefined &&
+      file.byte_count > resolvedLimits.max_file_bytes
+    ) {
+      skipped_file_counts.oversized += 1;
+      return false;
+    }
+    return true;
+  });
+  const preferredRanks = new Map(
+    preferred_paths.map((path, index) => [path, index]),
+  );
+  eligible.sort((left, right) =>
+    compareDefaultSourcePriority(left, right, preferredRanks),
+  );
 
   const selected = eligible.slice(0, resolvedLimits.max_selected_files);
   skipped_file_counts.selection_limit = eligible.length - selected.length;
@@ -462,7 +474,11 @@ export async function fetchGitHubSource(
   const limits = resolveLimits(options.limits);
   const selection =
     options.selected_paths === undefined
-      ? selectDefaultGitHubSourcePaths(snapshot, limits)
+      ? await selectDefaultGitHubSourcePathsWithReadmeLinks(
+          snapshot,
+          limits,
+          options,
+        )
       : explicitSelection(snapshot, options.selected_paths, limits);
 
   if (selection.selected_paths.length === 0) {
@@ -473,6 +489,35 @@ export async function fetchGitHubSource(
   }
 
   return fetchGitHubSourceFiles(snapshot, selection, options);
+}
+
+async function selectDefaultGitHubSourcePathsWithReadmeLinks(
+  snapshot: GitHubRepositorySnapshot,
+  limits: GitHubSourceLimits,
+  options: GitHubSourceClientOptions,
+): Promise<GitHubSourceSelection> {
+  const initialSelection = selectDefaultGitHubSourcePaths(snapshot, limits);
+  const rootReadmePath = initialSelection.selected_paths.find((path) =>
+    isRootReadmePath(path),
+  );
+  if (rootReadmePath === undefined) {
+    return initialSelection;
+  }
+
+  const readme = await fetchGitHubSourceFiles(
+    snapshot,
+    explicitSelection(snapshot, [rootReadmePath], limits),
+    options,
+  );
+  const content = readme.files[0]?.content;
+  if (content === undefined) {
+    return initialSelection;
+  }
+  return selectDefaultGitHubSourcePaths(
+    snapshot,
+    limits,
+    linkedRepositoryPaths(content, snapshot),
+  );
 }
 
 function invalidRepositoryUrl(): GitHubSourceError {
@@ -861,6 +906,96 @@ function compareSourcePriority(
   return priority === 0 ? left.path.localeCompare(right.path) : priority;
 }
 
+function compareDefaultSourcePriority(
+  left: GitHubSourceTreeFile,
+  right: GitHubSourceTreeFile,
+  preferredRanks: ReadonlyMap<string, number>,
+): number {
+  const leftReadme = isRootReadmePath(left.path);
+  const rightReadme = isRootReadmePath(right.path);
+  if (leftReadme !== rightReadme) {
+    return leftReadme ? -1 : 1;
+  }
+  const leftPreferred = preferredRanks.get(left.path);
+  const rightPreferred = preferredRanks.get(right.path);
+  if (leftPreferred !== undefined || rightPreferred !== undefined) {
+    if (leftPreferred === undefined) {
+      return 1;
+    }
+    if (rightPreferred === undefined) {
+      return -1;
+    }
+    if (leftPreferred !== rightPreferred) {
+      return leftPreferred - rightPreferred;
+    }
+  }
+  return compareSourcePriority(left, right);
+}
+
+function isRootReadmePath(path: string): boolean {
+  const lowerPath = path.toLowerCase();
+  return lowerPath === "readme" || lowerPath === "readme.md";
+}
+
+function linkedRepositoryPaths(
+  content: string,
+  snapshot: GitHubRepositorySnapshot,
+): string[] {
+  const availablePaths = new Set(snapshot.files.map((file) => file.path));
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string | undefined) => {
+    const path = normalizeRelativeReadmeLink(value);
+    if (
+      path === undefined ||
+      !availablePaths.has(path) ||
+      !isSafeGitHubPath(path) ||
+      seen.has(path)
+    ) {
+      return;
+    }
+    seen.add(path);
+    paths.push(path);
+  };
+
+  for (const match of content.matchAll(
+    /!?\[[^\]]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/g,
+  )) {
+    add(match[1] ?? match[2]);
+  }
+  for (const match of content.matchAll(
+    /\bhref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi,
+  )) {
+    add(match[1] ?? match[2] ?? match[3]);
+  }
+  return paths;
+}
+
+function normalizeRelativeReadmeLink(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const target = value.trim().split(/\s+/, 1)[0];
+  if (target === undefined || target.length === 0) {
+    return undefined;
+  }
+  const path = target.split(/[?#]/, 1)[0];
+  if (
+    path === undefined ||
+    path.length === 0 ||
+    path.startsWith("/") ||
+    path.startsWith("//") ||
+    path.includes("://") ||
+    path.startsWith("mailto:")
+  ) {
+    return undefined;
+  }
+  const normalized = path.startsWith("./") ? path.slice(2) : path;
+  return normalized;
+}
+
 function sourcePriority(file: GitHubSourceTreeFile): number {
   const lowerPath = file.path.toLowerCase();
   const filename = basename(lowerPath);
@@ -868,22 +1003,28 @@ function sourcePriority(file: GitHubSourceTreeFile): number {
   if (depth === 1 && (filename === "readme" || filename === "readme.md")) {
     return 0;
   }
-  if (file.file_type === "documentation") {
-    return 10 + depth;
+  if (depth === 1 && file.file_type === "documentation") {
+    return 10;
   }
-  if (file.file_type === "manifest") {
-    return 20 + depth;
-  }
-  if (file.file_type === "configuration") {
-    return 30 + depth;
+  if (depth === 1 && file.file_type === "manifest") {
+    return 20;
   }
   if (file.file_type === "source_code") {
+    return 30 + depth;
+  }
+  if (file.file_type === "documentation") {
     return 40 + depth;
   }
-  if (file.file_type === "test") {
+  if (file.file_type === "manifest") {
     return 50 + depth;
   }
-  return 60 + depth;
+  if (file.file_type === "configuration") {
+    return 60 + depth;
+  }
+  if (file.file_type === "test") {
+    return 70 + depth;
+  }
+  return 80 + depth;
 }
 
 export function classifyGitHubSourcePath(
@@ -946,6 +1087,7 @@ function isExcludedSourcePath(path: string): boolean {
   const filename = basename(lowerPath);
   const segments = lowerPath.split("/");
   return (
+    isAgentInstructionFilename(filename) ||
     filename === ".env" ||
     filename.startsWith(".env.") ||
     filename === ".envrc" ||
@@ -967,6 +1109,13 @@ function isExcludedSourcePath(path: string): boolean {
     filename.startsWith("id_ed25519") ||
     filename.startsWith("id_rsa") ||
     segments.some((segment) => EXCLUDED_DIRECTORY_NAMES.has(segment))
+  );
+}
+
+function isAgentInstructionFilename(filename: string): boolean {
+  return (
+    AGENT_INSTRUCTION_FILENAMES.has(filename) ||
+    /^(?:rules|skill)[_-][a-z0-9-]+\.md$/.test(filename)
   );
 }
 

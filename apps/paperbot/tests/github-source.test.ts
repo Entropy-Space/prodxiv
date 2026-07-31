@@ -4,6 +4,8 @@ import {
   canonicalizeGitHubRepositoryUrl,
   fetchGitHubSource,
   GitHubSourceError,
+  selectDefaultGitHubSourcePaths,
+  type GitHubRepositorySnapshot,
 } from "../src/agent/github-source.ts";
 
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
@@ -62,10 +64,7 @@ function fetchMock(responses: Map<string, Response>): {
     fetch: async (url, init) => {
       calls.push({ url, init });
       const response = responses.get(url);
-      if (response === undefined) {
-        return new Response("not found", { status: 404 });
-      }
-      return response;
+      return response?.clone() ?? new Response("not found", { status: 404 });
     },
   };
 }
@@ -237,7 +236,167 @@ describe("fetchGitHubSource", () => {
     ]);
     expect(result.selection.skipped_file_counts.excluded).toBe(1);
     expect(result.selection.skipped_file_counts.selection_limit).toBe(20);
-    expect(mock.calls).toHaveLength(5);
+    expect(mock.calls).toHaveLength(6);
+  });
+
+  test("selects implementation before nested documentation can exhaust the cap", () => {
+    const snapshot: GitHubRepositorySnapshot = {
+      canonical_url: "https://github.com/example/product",
+      owner: "example",
+      repository: "product",
+      resolved_ref: "main",
+      resolved_revision: REVISION,
+      files: [
+        {
+          path: "README.md",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "documentation",
+        },
+        {
+          path: "CHANGELOG.md",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "documentation",
+        },
+        {
+          path: "package.json",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "manifest",
+        },
+        {
+          path: "src/index.ts",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "source_code",
+        },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          path: `nested-${index}/README.md`,
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "documentation" as const,
+        })),
+      ],
+    };
+
+    expect(
+      selectDefaultGitHubSourcePaths(snapshot, { max_selected_files: 4 }),
+    ).toMatchObject({
+      selected_paths: [
+        "README.md",
+        "CHANGELOG.md",
+        "package.json",
+        "src/index.ts",
+      ],
+      skipped_file_counts: { selection_limit: 16 },
+    });
+  });
+
+  test("excludes repository agent instruction documents from default selection", () => {
+    const snapshot: GitHubRepositorySnapshot = {
+      canonical_url: "https://github.com/example/product",
+      owner: "example",
+      repository: "product",
+      resolved_ref: "main",
+      resolved_revision: REVISION,
+      files: [
+        {
+          path: "README.md",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "documentation",
+        },
+        ...[
+          "AGENTS.md",
+          "CLAUDE.md",
+          "README_AI.md",
+          "RULES_zh.md",
+          "skills/SKILL.md",
+        ].map((path) => ({
+          path,
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "documentation" as const,
+        })),
+        {
+          path: "src/index.ts",
+          blob_sha: BLOB_SHA,
+          byte_count: 1,
+          file_type: "source_code",
+        },
+      ],
+    };
+
+    expect(selectDefaultGitHubSourcePaths(snapshot)).toMatchObject({
+      selected_paths: ["README.md", "src/index.ts"],
+      skipped_file_counts: { excluded: 5 },
+    });
+  });
+
+  test("prioritizes safe repository files linked by the root README", async () => {
+    const endpoint = urls();
+    const rootReadme = [
+      "# Product",
+      "",
+      "[Primary routing](skills/routing.md)",
+      "[Changelog](CHANGELOG.md)",
+      "",
+    ].join("\n");
+    const routing = "# Primary routing\n";
+    const changelog = "# Changelog\n";
+    const mock = fetchMock(
+      new Map([
+        [endpoint.metadata, jsonResponse(repositoryMetadata())],
+        [endpoint.commit, jsonResponse({ sha: REVISION })],
+        [
+          endpoint.tree,
+          jsonResponse(
+            tree([
+              blob(
+                "README.md",
+                Buffer.byteLength(rootReadme),
+                gitBlobSha(rootReadme),
+              ),
+              blob(
+                "skills/routing.md",
+                Buffer.byteLength(routing),
+                gitBlobSha(routing),
+              ),
+              blob(
+                "CHANGELOG.md",
+                Buffer.byteLength(changelog),
+                gitBlobSha(changelog),
+              ),
+              ...Array.from({ length: 16 }, (_, index) =>
+                blob(`nested-${index}/README.md`),
+              ),
+            ]),
+          ),
+        ],
+        [endpoint.readme, new Response(rootReadme)],
+        [
+          `https://raw.githubusercontent.com/example/product/${REVISION}/skills/routing.md`,
+          new Response(routing),
+        ],
+        [
+          `https://raw.githubusercontent.com/example/product/${REVISION}/CHANGELOG.md`,
+          new Response(changelog),
+        ],
+      ]),
+    );
+
+    const result = await fetchGitHubSource({
+      repository_url: "https://github.com/example/product",
+      fetch: mock.fetch,
+      limits: { max_selected_files: 3 },
+    });
+
+    expect(result.selection.selected_paths).toEqual([
+      "README.md",
+      "skills/routing.md",
+      "CHANGELOG.md",
+    ]);
   });
 
   test("rejects raw content whose Git blob identity does not match the tree", async () => {
