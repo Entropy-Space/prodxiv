@@ -3,7 +3,10 @@ import { lstat, readFile } from "node:fs/promises";
 import { marked, type Token, type Tokens } from "marked";
 
 import { ExitCode, PaperbotError } from "../errors.ts";
-import { validatePaperSource } from "../validator.ts";
+import {
+  validatePaperSource,
+  type PaperValidationResult,
+} from "../validator.ts";
 import {
   artifactPath,
   ensureRunDirectory,
@@ -151,10 +154,14 @@ export async function runAgent(
       artifactPath(runPath, "draft.md"),
       "draft",
     );
+    const initialDraftIsValid =
+      validation.report.valid &&
+      initialDraftFieldDiagnostics.length === 0 &&
+      initialDraftLinkDiagnostics.length === 0;
 
     record.state = "drafted";
     record.updated_at = now(dependencies).toISOString();
-    if (initialDraftLinkDiagnostics.length === 0) {
+    if (initialDraftIsValid) {
       await writeDraftArtifacts(runPath, draft, paper);
       record.artifacts.evidence = "evidence.jsonl";
       record.artifacts.draft = "draft.md";
@@ -171,8 +178,18 @@ export async function runAgent(
       run_path: runPath,
     });
     validateReviewSourceIds(review, allowedSourceIds);
+    await writeJsonArtifact(runPath, "review.json", {
+      schema_version: "1",
+      reviewed_at: now(dependencies).toISOString(),
+      issues: review.issues,
+      questions: review.questions,
+    });
+    await writeJsonArtifact(runPath, "validation.json", validation.report);
+    record.artifacts.review = "review.json";
+    record.artifacts.validation = "validation.json";
     record.state = "reviewed";
     record.updated_at = now(dependencies).toISOString();
+    await persistRunRecord(runPath, record);
 
     if (
       review.issues.some((issue) => issue.severity === "error") ||
@@ -206,22 +223,15 @@ export async function runAgent(
         artifactPath(runPath, "draft.md"),
         "draft",
       );
+      assertValidGeneratedPaper(validation, "revision");
       await writeDraftArtifacts(runPath, repaired, paper, review.questions);
       record.artifacts.evidence = "evidence.jsonl";
       record.artifacts.draft = "draft.md";
       record.artifacts.questions = "questions.md";
       record.draft_sha256 = sha256(paper);
+      await writeJsonArtifact(runPath, "validation.json", validation.report);
     }
 
-    await writeJsonArtifact(runPath, "review.json", {
-      schema_version: "1",
-      reviewed_at: now(dependencies).toISOString(),
-      issues: review.issues,
-      questions: review.questions,
-    });
-    await writeJsonArtifact(runPath, "validation.json", validation.report);
-    record.artifacts.review = "review.json";
-    record.artifacts.validation = "validation.json";
     record.state = "needs_author_review";
     record.updated_at = now(dependencies).toISOString();
     await persistRunRecord(runPath, record);
@@ -304,12 +314,13 @@ export async function resumeAgent(
   );
   const proposal = renderPaper(metadata, repaired);
   const proposalName = await nextProposalName(runPath);
-  await writeTextArtifact(runPath, proposalName, proposal);
   const validation = validatePaperSource(
     proposal,
     artifactPath(runPath, proposalName),
     "draft",
   );
+  assertValidGeneratedPaper(validation, "proposal");
+  await writeTextArtifact(runPath, proposalName, proposal);
   await writeJsonArtifact(
     runPath,
     `${proposalName}.validation.json`,
@@ -525,6 +536,26 @@ function assertValidDraftFields(draft: DraftResponse): void {
       ExitCode.validation,
     );
   }
+}
+
+function assertValidGeneratedPaper(
+  validation: PaperValidationResult,
+  artifactName: "proposal" | "revision",
+): void {
+  if (validation.report.valid) {
+    return;
+  }
+  const diagnostics = validation.report.diagnostics
+    .filter((diagnostic) => diagnostic.severity === "error")
+    .map(
+      (diagnostic) =>
+        `${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
+    )
+    .join("; ");
+  throw new PaperbotError(
+    `agent returned an invalid ${artifactName}: ${diagnostics}`,
+    ExitCode.validation,
+  );
 }
 
 async function writeDraftArtifacts(
