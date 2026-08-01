@@ -173,6 +173,11 @@ allows one repair pass for structural or evidence-review errors. The workflow
 ends in `needs_author_review` even when draft validation passes. It never
 submits or publishes.
 
+If the repair response fails host validation, Paperbot fails closed. When the
+initial draft and its review were valid, it retains those accepted artifacts
+for inspection and a later author-guided `resume`; it never writes the invalid
+repair over them.
+
 The initial agent has no general web-search or page-fetch capability. Use
 `--source <public-url>` only to provide a citeable URL; it is not fetched and
 cannot establish factual claims by itself. It must be an anonymous,

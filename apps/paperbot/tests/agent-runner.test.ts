@@ -108,6 +108,205 @@ describe("runAgent", () => {
     );
   });
 
+  test("checkpoints a valid initial draft and review when repair provenance is invalid", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime([
+      draftResponse(),
+      reviewResponse({
+        issues: [
+          {
+            severity: "error",
+            section: "Summary",
+            message: "Clarify this claim.",
+            source_ids: ["repository:README.md"],
+          },
+        ],
+      }),
+      draftResponse({
+        evidence: [
+          {
+            claim: "An invalid aggregate provenance reference.",
+            evidence_kind: "repository",
+            source_id: "repository:bundle",
+            confidence: "low",
+          },
+        ],
+      }),
+    ]);
+
+    await expect(
+      runAgent(
+        {
+          repository: repositoryPath,
+          output_path: outputPath,
+          allow_remote_model: true,
+          metadata: metadata(),
+        },
+        { create_runtime: () => runtime },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 5,
+      message: expect.stringContaining("repository:bundle"),
+    });
+
+    expect(runtime.prompts).toHaveLength(3);
+    expect(runtime.prompts[2]).toContain(
+      "`repository:bundle` is never a valid source_id",
+    );
+
+    const [draft, evidence, review, validation, run] = await Promise.all([
+      readFile(join(outputPath, "draft.md"), "utf8"),
+      readFile(join(outputPath, "evidence.jsonl"), "utf8"),
+      readFile(join(outputPath, "review.json"), "utf8"),
+      readFile(join(outputPath, "validation.json"), "utf8"),
+      readFile(join(outputPath, "run.json"), "utf8"),
+    ]);
+    expect(draft).toContain("Private research draft");
+    expect(evidence).not.toContain("repository:bundle");
+    expect(review).toContain("Clarify this claim.");
+    expect(JSON.parse(validation)).toMatchObject({
+      valid: true,
+      diagnostics: [],
+    });
+    expect(JSON.parse(run)).toMatchObject({
+      state: "failed",
+      artifacts: {
+        draft: "draft.md",
+        evidence: "evidence.jsonl",
+        questions: "questions.md",
+        review: "review.json",
+        validation: "validation.json",
+      },
+      error: {
+        message: expect.stringContaining("repository:bundle"),
+      },
+    });
+  });
+
+  test("does not checkpoint a structurally invalid initial draft after repair fails", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime([
+      draftResponse({ topics: ["Invalid topic"] }),
+      reviewResponse(),
+      draftResponse({
+        evidence: [
+          {
+            claim: "An invalid aggregate provenance reference.",
+            evidence_kind: "repository",
+            source_id: "repository:bundle",
+            confidence: "low",
+          },
+        ],
+      }),
+    ]);
+
+    await expect(
+      runAgent(
+        {
+          repository: repositoryPath,
+          output_path: outputPath,
+          allow_remote_model: true,
+          metadata: metadata(),
+        },
+        { create_runtime: () => runtime },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 5,
+      message: expect.stringContaining("repository:bundle"),
+    });
+
+    await expect(
+      readFile(join(outputPath, "draft.md"), "utf8"),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(outputPath, "evidence.jsonl"), "utf8"),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(outputPath, "questions.md"), "utf8"),
+    ).rejects.toThrow();
+
+    const [review, validation, run] = await Promise.all([
+      readFile(join(outputPath, "review.json"), "utf8"),
+      readFile(join(outputPath, "validation.json"), "utf8"),
+      readFile(join(outputPath, "run.json"), "utf8"),
+    ]);
+    expect(JSON.parse(review)).toMatchObject({ issues: [] });
+    expect(JSON.parse(validation)).toMatchObject({
+      valid: false,
+      diagnostics: [
+        expect.objectContaining({ path: "paper.metadata.topics[0]" }),
+      ],
+    });
+    expect(JSON.parse(run)).toMatchObject({
+      state: "failed",
+      artifacts: {
+        review: "review.json",
+        validation: "validation.json",
+      },
+    });
+    expect(JSON.parse(run).artifacts).not.toHaveProperty("draft");
+    expect(JSON.parse(run).artifacts).not.toHaveProperty("evidence");
+    expect(JSON.parse(run).artifacts).not.toHaveProperty("questions");
+  });
+
+  test("does not overwrite a valid checkpoint with an invalid repaired paper", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime([
+      draftResponse({
+        summary: "The valid initial draft must remain available.",
+      }),
+      reviewResponse({
+        issues: [
+          {
+            severity: "error",
+            section: "Summary",
+            message: "Clarify this claim.",
+            source_ids: ["repository:README.md"],
+          },
+        ],
+      }),
+      draftResponse({
+        summary: "The invalid repair must not replace the checkpoint.",
+        markdown: paperBodyWithoutLimitations(),
+      }),
+    ]);
+
+    await expect(
+      runAgent(
+        {
+          repository: repositoryPath,
+          output_path: outputPath,
+          allow_remote_model: true,
+          metadata: metadata(),
+        },
+        { create_runtime: () => runtime },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 5,
+      message: expect.stringContaining("agent returned an invalid revision"),
+    });
+
+    const [draft, validation, run] = await Promise.all([
+      readFile(join(outputPath, "draft.md"), "utf8"),
+      readFile(join(outputPath, "validation.json"), "utf8"),
+      readFile(join(outputPath, "run.json"), "utf8"),
+    ]);
+    expect(draft).toContain("The valid initial draft must remain available.");
+    expect(draft).not.toContain(
+      "The invalid repair must not replace the checkpoint.",
+    );
+    expect(JSON.parse(validation)).toMatchObject({
+      valid: true,
+      diagnostics: [],
+    });
+    expect(JSON.parse(run)).toMatchObject({
+      state: "failed",
+      error: {
+        message: expect.stringContaining("sections.missing"),
+      },
+    });
+  });
+
   test("requires explicit consent before creating a run directory", async () => {
     const outputPath = join(workspacePath, "run");
 
@@ -337,6 +536,113 @@ describe("runAgent", () => {
 });
 
 describe("resumeAgent", () => {
+  test("resumes a valid checkpoint after repair provenance is rejected", async () => {
+    const outputPath = join(workspacePath, "run");
+    await expect(
+      runAgent(
+        {
+          repository: repositoryPath,
+          output_path: outputPath,
+          allow_remote_model: true,
+          metadata: metadata(),
+        },
+        {
+          create_runtime: () =>
+            new FakeRuntime([
+              draftResponse(),
+              reviewResponse({
+                issues: [
+                  {
+                    severity: "error",
+                    section: "Summary",
+                    message: "Clarify this claim.",
+                    source_ids: ["repository:README.md"],
+                  },
+                ],
+              }),
+              draftResponse({
+                evidence: [
+                  {
+                    claim: "An invalid aggregate provenance reference.",
+                    evidence_kind: "repository",
+                    source_id: "repository:bundle",
+                    confidence: "low",
+                  },
+                ],
+              }),
+            ]),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 5,
+      message: expect.stringContaining("repository:bundle"),
+    });
+
+    const originalDraft = await readFile(join(outputPath, "draft.md"), "utf8");
+    const answersPath = join(workspacePath, "answers.md");
+    await writeFile(answersPath, "The author supplied clarification.\n");
+
+    const result = await resumeAgent(
+      {
+        run_path: outputPath,
+        answers_path: answersPath,
+        allow_remote_model: true,
+      },
+      { create_runtime: () => new FakeRuntime([draftResponse()]) },
+    );
+
+    expect(result).toMatchObject({
+      state: "needs_author_review",
+      validation: { valid: true, diagnostics: 0 },
+    });
+    expect(await readFile(join(outputPath, "draft.md"), "utf8")).toBe(
+      originalDraft,
+    );
+    expect(await readFile(join(outputPath, "proposal-1.md"), "utf8")).toContain(
+      "Private research draft",
+    );
+  });
+
+  test("does not write an invalid author-guided proposal", async () => {
+    const outputPath = join(workspacePath, "run");
+    await runAgent(
+      {
+        repository: repositoryPath,
+        output_path: outputPath,
+        allow_remote_model: true,
+        metadata: metadata(),
+      },
+      {
+        create_runtime: () =>
+          new FakeRuntime([draftResponse(), reviewResponse()]),
+      },
+    );
+    const answersPath = join(workspacePath, "answers.md");
+    await writeFile(answersPath, "The author supplied clarification.\n");
+
+    await expect(
+      resumeAgent(
+        {
+          run_path: outputPath,
+          answers_path: answersPath,
+          allow_remote_model: true,
+        },
+        {
+          create_runtime: () =>
+            new FakeRuntime([
+              draftResponse({ markdown: paperBodyWithoutLimitations() }),
+            ]),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 5,
+      message: expect.stringContaining("agent returned an invalid proposal"),
+    });
+    await expect(
+      readFile(join(outputPath, "proposal-1.md"), "utf8"),
+    ).rejects.toThrow();
+  });
+
   test("preserves a manually edited draft and writes a numbered proposal", async () => {
     const outputPath = join(workspacePath, "run");
     await runAgent(
@@ -737,8 +1043,10 @@ function draftResponse(
   });
 }
 
-function reviewResponse(): string {
-  return JSON.stringify({ issues: [], questions: [] });
+function reviewResponse(
+  overrides: Partial<Record<string, unknown>> = {},
+): string {
+  return JSON.stringify({ issues: [], questions: [], ...overrides });
 }
 
 function paperBody(): string {
@@ -775,6 +1083,13 @@ function paperBody(): string {
     "",
     "1. [Fixture repository](https://github.com/example/product).",
   ].join("\n");
+}
+
+function paperBodyWithoutLimitations(): string {
+  return paperBody().replace(
+    "\n# Limitations\n\nThis fixture does not establish production behavior.\n",
+    "\n",
+  );
 }
 
 const REMOTE_REVISION = "0123456789abcdef0123456789abcdef01234567";

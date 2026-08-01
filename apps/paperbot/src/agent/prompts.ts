@@ -80,6 +80,7 @@ export function createRepairPrompt(
   return [
     "Revise the private draft once to resolve the supplied review and structural-validation issues. Do not add unsupported claims.",
     "Return exactly the same fenced JSON shape required for an initial draft, with a full replacement `markdown` body and complete evidence/questions arrays. Do not include YAML front matter.",
+    "Every evidence item must use a source_id exactly as listed under `repository source IDs` in the supplied source bundle. If author answers are supplied, `author:answers` is also allowed. `repository:bundle` is never a valid source_id.",
     "Existing draft response:",
     fencedJson(input.draft),
     "Review response:",
