@@ -3,7 +3,7 @@ import { validation_policy } from "@prodxiv/contracts/validation-policy";
 import type { Diagnostic } from "@prodxiv/contracts/validation";
 import { marked, type Token, type Tokens } from "marked";
 
-import type { ValidationProfile } from "../arguments.ts";
+import type { ValidationProfile } from "./profile.ts";
 import { diagnostic, isHttpUrl, isRecord } from "./shared.ts";
 
 export function parsePaper(

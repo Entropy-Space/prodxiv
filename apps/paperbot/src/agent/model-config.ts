@@ -1,4 +1,4 @@
-import { ExitCode, PaperbotError } from "../errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 
 const LOCAL_ROUTER_FALLBACK_API_KEY = "paperbot-local-router";
 

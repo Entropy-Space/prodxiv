@@ -1,5 +1,5 @@
-import type { ScanResult, SkipReason } from "./scanner.ts";
-import type { PaperValidationResult } from "./validator.ts";
+import type { PaperValidationResult } from "@prodxiv/paperbot-core";
+import type { ScanResult, SkipReason } from "@prodxiv/paperbot-source";
 
 const SKIP_REASONS: SkipReason[] = [
   "excluded",

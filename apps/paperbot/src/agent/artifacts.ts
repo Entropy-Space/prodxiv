@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import { ExitCode, PaperbotError } from "../errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 
 const RUN_DIRECTORY_MODE = 0o700;
 

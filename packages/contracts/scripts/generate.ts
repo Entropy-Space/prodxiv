@@ -37,6 +37,22 @@ for (const [schemaFilename, outputFilename] of contracts) {
   await writeFile(join(outputDirectory, outputFilename), generated);
 }
 
+await writeFile(
+  join(outputDirectory, "paper.schema.json"),
+  await format(
+    await readFile(
+      join(repositoryRoot, "schemas", "paper.schema.json"),
+      "utf8",
+    ),
+    {
+      parser: "json",
+      printWidth: 80,
+      tabWidth: 2,
+      useTabs: false,
+    },
+  ),
+);
+
 const validationPolicy = JSON.parse(
   await readFile(
     join(repositoryRoot, "schemas", "validation-policy.json"),

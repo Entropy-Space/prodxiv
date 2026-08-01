@@ -8,7 +8,7 @@ import Ajv2020, {
 import addFormats from "ajv-formats";
 import { z } from "astro/zod";
 
-import paperSchema from "../../../../schemas/paper.schema.json";
+import paperSchema from "@prodxiv/contracts/paper-schema";
 
 const ajv = new Ajv2020({
   allErrors: true,

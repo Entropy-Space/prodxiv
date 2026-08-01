@@ -1,4 +1,4 @@
-import { ExitCode, PaperbotError } from "../errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import type { AgentPaperMetadata } from "./types.ts";
 
 export const MAX_AGENT_TEXT_LENGTH = 500;

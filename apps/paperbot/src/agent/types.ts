@@ -1,4 +1,4 @@
-import type { ScanFileType, ScanManifest } from "../scan-manifest.ts";
+import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 
 export const AGENT_RUN_SCHEMA_VERSION = "1";
 

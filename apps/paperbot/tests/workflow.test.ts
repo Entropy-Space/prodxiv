@@ -3,9 +3,8 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { preparePaperDraft } from "../src/drafter.ts";
-import { scanRepository } from "../src/scanner.ts";
-import { validatePaperFile } from "../src/validator.ts";
+import { preparePaperDraft, validatePaperFile } from "@prodxiv/paperbot-core";
+import { scanRepository } from "@prodxiv/paperbot-source";
 
 const repositoryFixture = resolve(import.meta.dir, "fixtures/repository");
 const paperFixture = resolve(

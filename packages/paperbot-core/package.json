@@ -1,0 +1,27 @@
+{
+  "name": "@prodxiv/paperbot-core",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./src/index.ts",
+    "./draft": "./src/drafter.ts",
+    "./errors": "./src/errors.ts",
+    "./paper": "./src/validation/paper.ts",
+    "./scan-manifest": "./src/scan-manifest.ts",
+    "./validation": "./src/validator.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prodxiv/contracts": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "marked": "18.0.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.13",
+    "typescript": "^6.0.0"
+  }
+}

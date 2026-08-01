@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PaperbotError } from "../src/errors.ts";
+import { PaperbotError } from "@prodxiv/paperbot-core";
 import {
   normalizeLoopbackBaseUrl,
   redactModelSecrets,

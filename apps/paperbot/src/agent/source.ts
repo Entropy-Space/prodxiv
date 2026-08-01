@@ -1,10 +1,17 @@
 import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { ExitCode, PaperbotError } from "../errors.ts";
-import { inspectGitRepository } from "../git.ts";
-import { type ScanFileType, validateScanManifest } from "../scan-manifest.ts";
-import { scanRepository } from "../scanner.ts";
+import {
+  ExitCode,
+  PaperbotError,
+  type ScanFileType,
+  validateScanManifest,
+} from "@prodxiv/paperbot-core";
+import {
+  inspectGitRepository,
+  scanRepository,
+  type GitHubSourceResult,
+} from "@prodxiv/paperbot-source";
 import {
   artifactPath,
   ensureRunDirectory,
@@ -13,7 +20,6 @@ import {
   writeTextArtifact,
 } from "./artifacts.ts";
 import type { AgentSource, AgentSourceFile } from "./types.ts";
-import type { GitHubSourceResult } from "./github-source.ts";
 import { normalizeAnonymousHttpUrl } from "./input.ts";
 
 const MAX_AGENT_FILE_BYTES = 48 * 1024;

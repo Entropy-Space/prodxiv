@@ -11,9 +11,10 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { scanRepository } from "@prodxiv/paperbot-source";
+
 import { parseArguments } from "../src/arguments.ts";
 import { run } from "../src/cli.ts";
-import { scanRepository } from "../src/scanner.ts";
 
 const fixturePath = resolve(import.meta.dir, "fixtures/repository");
 let repositoryPath = "";

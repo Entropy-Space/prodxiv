@@ -5,24 +5,28 @@ import type { AgentBatchOptions, AgentBatchResult } from "./agent/batch.ts";
 import type { AgentResumeOptions, AgentRunOptions } from "./agent/runner.ts";
 import type { AgentRunResult } from "./agent/types.ts";
 import {
+  ExitCode,
+  PaperbotError,
+  preparePaperDraft,
+  validatePaperFile,
+  writePaperDraft,
+} from "@prodxiv/paperbot-core";
+import { scanRepository } from "@prodxiv/paperbot-source";
+import {
   defaultAuthPath,
   initializeAuth,
   removeAuth,
   resolveAuth,
   saveAuth,
 } from "./auth.ts";
-import { preparePaperDraft, writePaperDraft } from "./drafter.ts";
-import { ExitCode, PaperbotError } from "./errors.ts";
 import { formatScanResult, formatValidationResult } from "./output.ts";
 import { preparePublication } from "./publisher.ts";
-import { scanRepository } from "./scanner.ts";
 import {
   findSkillComponent,
   findSkillScope,
   formatSkillCatalog,
   skillCatalog,
 } from "./skill-catalog.ts";
-import { validatePaperFile } from "./validator.ts";
 import { ProdxivApiError } from "@prodxiv/api-client";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";

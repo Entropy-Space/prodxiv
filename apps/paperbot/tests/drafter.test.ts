@@ -3,10 +3,14 @@ import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
+import {
+  PaperbotError,
+  preparePaperDraft,
+  validatePaperFile,
+  writePaperDraft,
+} from "@prodxiv/paperbot-core";
+
 import { parseArguments } from "../src/arguments.ts";
-import { preparePaperDraft, writePaperDraft } from "../src/drafter.ts";
-import { PaperbotError } from "../src/errors.ts";
-import { validatePaperFile } from "../src/validator.ts";
 
 const fixtureRoot = resolve(import.meta.dir, "fixtures/validation");
 

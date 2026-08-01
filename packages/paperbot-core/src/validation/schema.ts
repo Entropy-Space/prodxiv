@@ -1,8 +1,8 @@
 import type { Diagnostic } from "@prodxiv/contracts/validation";
+import paperSchema from "@prodxiv/contracts/paper-schema";
 import Ajv2020, { type AnySchema, type ErrorObject } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
-import paperSchema from "../../../../schemas/paper.schema.json";
 import { diagnostic } from "./shared.ts";
 
 const ajv = new Ajv2020({

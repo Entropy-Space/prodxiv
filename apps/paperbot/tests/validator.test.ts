@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { validation_policy } from "@prodxiv/contracts/validation-policy";
+import { validatePaperFile } from "@prodxiv/paperbot-core";
 
 import { parseArguments } from "../src/arguments.ts";
 import { run } from "../src/cli.ts";
-import { validatePaperFile } from "../src/validator.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "../../..");
 const fixtureRoot = resolve(import.meta.dir, "fixtures/validation");

@@ -91,6 +91,47 @@ Benchmarks section. It does not make performance claims.
 
 Paperbot should never turn missing context into polished but unsupported prose.
 
+## CLI and package boundaries
+
+Paperbot has one public command surface: `paperbot`. The Bun source entry and
+the compiled executable dispatch the same commands, preserve the same JSON
+formats and exit codes, and do not expose a separate executable for an
+internal package.
+
+The workspace separates deterministic capabilities from the CLI shell:
+
+- `apps/paperbot` owns argument parsing, terminal output, progressive skill
+  guidance, and the current agent and publishing adapters.
+- `packages/paperbot-core` owns stable exit-code errors, scan-manifest
+  validation, draft scaffolding, and canonical paper validation.
+- `packages/paperbot-source` owns local Git inspection, safe repository file
+  selection, shared file classification, and the read-only public GitHub
+  source client.
+
+Dependencies point toward the deterministic core:
+
+```text
+paperbot CLI -> paperbot-source -> paperbot-core
+             -> paperbot-core
+```
+
+The shared canonical paper JSON Schema is exported by
+`@prodxiv/contracts/paper-schema`. Both Paperbot and the website consume that
+generated artifact, so validation does not rely on a fragile repository-relative
+schema path.
+
+For a native executable on the current platform, run:
+
+```sh
+bun run build:paperbot
+```
+
+It writes `apps/paperbot/dist/paperbot`, which is intentionally ignored and is
+not a release artifact for another platform. The Paperbot test suite compiles a
+fresh binary and verifies `--version`, `skills`, `scan`, `draft`, and
+`validate` from a clean working directory, along with safe failure paths for
+the lazily loaded agent commands.
+
 ## Pi agent workflow
 
 `paperbot agent` is an optional, local-orchestrated drafting workflow. It uses

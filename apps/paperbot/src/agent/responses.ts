@@ -1,4 +1,4 @@
-import { ExitCode, PaperbotError } from "../errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import type {
   DraftResponse,
   EvidenceItem,

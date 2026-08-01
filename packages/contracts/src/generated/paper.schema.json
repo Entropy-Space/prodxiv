@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PaperDocument",
+  "type": "object",
+  "properties": {
+    "markdown": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "$ref": "#/$defs/PaperMetadata"
+    }
+  },
+  "additionalProperties": false,
+  "required": ["metadata", "markdown"],
+  "$defs": {
+    "Author": {
+      "type": "object",
+      "properties": {
+        "affiliation": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["name"]
+    },
+    "PaperMetadata": {
+      "type": "object",
+      "properties": {
+        "authors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Author"
+          },
+          "minItems": 1
+        },
+        "license": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "organization": {
+          "type": ["string", "null"]
+        },
+        "paper_id": {
+          "type": ["string", "null"],
+          "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
+        },
+        "product_name": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "product_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "published_at": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductRelationship"
+          }
+        },
+        "repository_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "schema_version": {
+          "type": "string",
+          "pattern": "^1$"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PaperScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ProductStatus"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+          },
+          "minItems": 1
+        },
+        "version": {
+          "type": ["integer", "null"],
+          "format": "uint32",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "title",
+        "summary",
+        "authors",
+        "status",
+        "topics"
+      ]
+    },
+    "PaperScope": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PaperScopeKind"
+        },
+        "name": {
+          "type": ["string", "null"]
+        },
+        "product_version": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false,
+      "required": ["kind"]
+    },
+    "PaperScopeKind": {
+      "type": "string",
+      "enum": ["product", "feature", "release"]
+    },
+    "ProductRelationship": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RelationshipKind"
+        },
+        "paper_id": {
+          "type": "string",
+          "pattern": "^prodxiv:[0-9]{4}\\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["kind", "paper_id"]
+    },
+    "ProductStatus": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "private_beta",
+        "public_beta",
+        "launched",
+        "discontinued"
+      ]
+    },
+    "RelationshipKind": {
+      "type": "string",
+      "enum": ["inspired_by", "built_on", "alternative_to", "supersedes"]
+    }
+  }
+}

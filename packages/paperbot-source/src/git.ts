@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { relative, sep } from "node:path";
 
-import { ExitCode, PaperbotError } from "./errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 
 interface GitResult {
   exit_code: number;

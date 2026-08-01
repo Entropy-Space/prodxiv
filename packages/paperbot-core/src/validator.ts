@@ -7,9 +7,9 @@ import type {
   ValidationReport,
 } from "@prodxiv/contracts/validation";
 
-import type { ValidationProfile } from "./arguments.ts";
 import { ExitCode, PaperbotError } from "./errors.ts";
 import { parsePaper, validatePaperRules } from "./validation/paper.ts";
+import type { ValidationProfile } from "./validation/profile.ts";
 import { validatePaperStructure } from "./validation/schema.ts";
 import { sortDiagnostics } from "./validation/shared.ts";
 

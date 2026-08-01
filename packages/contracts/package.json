@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "exports": {
     "./paper": "./src/generated/paper.ts",
+    "./paper-schema": "./src/generated/paper.schema.json",
     "./validation": "./src/generated/validation.ts",
     "./validation-policy": "./src/generated/validation-policy.ts"
   },
