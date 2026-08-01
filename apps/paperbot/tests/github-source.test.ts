@@ -6,7 +6,7 @@ import {
   GitHubSourceError,
   selectDefaultGitHubSourcePaths,
   type GitHubRepositorySnapshot,
-} from "../src/agent/github-source.ts";
+} from "@prodxiv/paperbot-source";
 
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
 const BLOB_SHA = "89abcdef0123456789abcdef0123456789abcdef";

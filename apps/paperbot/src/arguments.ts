@@ -1,7 +1,11 @@
-import { ExitCode, PaperbotError } from "./errors.ts";
+import {
+  ExitCode,
+  PaperbotError,
+  type ValidationProfile,
+} from "@prodxiv/paperbot-core";
 
 export type OutputFormat = "text" | "json";
-export type ValidationProfile = "draft" | "submission" | "publication";
+export type { ValidationProfile } from "@prodxiv/paperbot-core";
 export type AgentPaperStatus =
   "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
 

@@ -14,13 +14,14 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun run build:web && bun run build:domain",
+    "build": "bun run build:web && bun run build:paperbot && bun run build:domain",
     "build:domain": "cargo build --workspace --all-targets",
+    "build:paperbot": "bun --filter @prodxiv/paperbot build",
     "build:web": "bun --filter @prodxiv/web build",
     "check": "bun run check:web && bun run check:paperbot && bun run check:api-client && bun run check:collector",
     "check:api-client": "bun --filter @prodxiv/api-client check",
     "check:collector": "tsc -p scripts/tsconfig.json --noEmit",
-    "check:paperbot": "bun --filter @prodxiv/paperbot check",
+    "check:paperbot": "bun --filter @prodxiv/paperbot-core check && bun --filter @prodxiv/paperbot-source check && bun --filter @prodxiv/paperbot check",
     "check:web": "bun --filter @prodxiv/web check",
     "collect:github-trending": "bun run scripts/github-trending/cli.ts",
     "contracts": "bun --filter @prodxiv/contracts generate",

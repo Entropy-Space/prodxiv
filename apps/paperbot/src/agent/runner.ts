@@ -2,11 +2,18 @@ import { lstat, readFile } from "node:fs/promises";
 
 import { marked, type Token, type Tokens } from "marked";
 
-import { ExitCode, PaperbotError } from "../errors.ts";
 import {
+  ExitCode,
+  PaperbotError,
   validatePaperSource,
   type PaperValidationResult,
-} from "../validator.ts";
+} from "@prodxiv/paperbot-core";
+import {
+  canonicalizeGitHubRepositoryUrl,
+  fetchGitHubSource,
+  GitHubSourceError,
+  type GitHubSourceFetch,
+} from "@prodxiv/paperbot-source";
 import {
   artifactPath,
   ensureRunDirectory,
@@ -15,12 +22,6 @@ import {
   writeJsonArtifact,
   writeTextArtifact,
 } from "./artifacts.ts";
-import {
-  canonicalizeGitHubRepositoryUrl,
-  fetchGitHubSource,
-  GitHubSourceError,
-  type GitHubSourceFetch,
-} from "./github-source.ts";
 import {
   normalizeAgentMetadata,
   normalizeAnonymousHttpUrl,

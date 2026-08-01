@@ -3,7 +3,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { PaperbotError } from "../src/errors.ts";
+import { PaperbotError } from "@prodxiv/paperbot-core";
 import { resumeAgent, runAgent } from "../src/agent/runner.ts";
 import type { AuthoringRuntime, ModelCompletion } from "../src/agent/types.ts";
 

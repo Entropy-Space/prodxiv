@@ -10,7 +10,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { ExitCode, PaperbotError } from "./errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 
 export interface AuthConfig {
   version: 1;

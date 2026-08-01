@@ -10,7 +10,7 @@ import {
   saveAuth,
 } from "../src/auth.ts";
 import { parseArguments } from "../src/arguments.ts";
-import { ExitCode, PaperbotError } from "../src/errors.ts";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 
 const token = "paperbot_test_token_with_32_characters";
 let workspacePath = "";

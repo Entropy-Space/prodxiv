@@ -1,11 +1,11 @@
 import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { ExitCode, PaperbotError } from "../errors.ts";
 import {
   canonicalizeGitHubRepositoryUrl,
   type CanonicalGitHubRepository,
-} from "./github-source.ts";
+} from "@prodxiv/paperbot-source";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import {
   isAgentPaperStatus,
   MAX_AGENT_AUTHORS,

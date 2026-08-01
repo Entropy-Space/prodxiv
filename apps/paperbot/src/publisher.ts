@@ -4,6 +4,13 @@ import {
   type PublishPaperResult,
 } from "@prodxiv/api-client";
 import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
+import {
+  ExitCode,
+  PaperbotError,
+  parsePaper,
+  type PaperValidationResult,
+  validatePaperSource,
+} from "@prodxiv/paperbot-core";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
@@ -13,12 +20,6 @@ import {
   type ResolvedAuth,
 } from "./auth.ts";
 import type { Diagnostic } from "@prodxiv/contracts/validation";
-import { ExitCode, PaperbotError } from "./errors.ts";
-import { parsePaper } from "./validation/paper.ts";
-import {
-  validatePaperSource,
-  type PaperValidationResult,
-} from "./validator.ts";
 
 export interface PublicationResult {
   format_version: 1;
