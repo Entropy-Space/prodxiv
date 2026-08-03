@@ -8,6 +8,8 @@ import type { AgentRunResult } from "./agent/types.ts";
 import {
   ExitCode,
   PaperbotError,
+  type DraftPreparation,
+  type PaperValidationResult,
   writePaperDraft,
 } from "@prodxiv/paperbot-core";
 import {
@@ -21,10 +23,7 @@ import { formatScanResult, formatValidationResult } from "./output.ts";
 import { preparePublication } from "./publisher.ts";
 import {
   TOOL_SCHEMA_VERSION,
-  executeTool,
   findTool,
-  getSkillCatalog,
-  getSkillRead,
   runPaperScaffold,
   runPaperValidation,
   runRepositoryScan,
@@ -34,10 +33,12 @@ import {
   findSkillComponent,
   findSkillScope,
   formatSkillCatalog,
+  getSkillCatalog,
+  getSkillRead,
   skillCatalog,
 } from "./skill-catalog.ts";
 import { ProdxivApiError } from "@prodxiv/api-client";
-import { lstat, readFile } from "node:fs/promises";
+import type { ScanResult } from "@prodxiv/paperbot-source";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 
@@ -52,7 +53,9 @@ Usage:
   paperbot skills [scope] [component] [--format text|json]
   paperbot tools [list]
   paperbot tools describe <tool>
-  paperbot tools call <tool> --input <request.json|->
+  paperbot tools repo_scan [repository] [--exclude <glob>] [--include <glob>] [--format text|json]
+  paperbot tools paper_scaffold <scan.json> [--title <title>] [--format text|json]
+  paperbot tools paper_validate <paper.md> [--profile draft|submission|publication] [--format text|json]
   paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
   paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
@@ -71,8 +74,8 @@ Human workflows:
   skills    Discover focused agent guidance by artifact scope and component
   agent     Create or revise a private, evidence-backed paper draft with Pi
 
-Agent-host tool interface:
-  tools     Discover and invoke deterministic operations as JSON
+Agent-host deterministic tools:
+  tools     Discover or run deterministic repository and paper operations
 
 Operator-only remote operations:
   auth      Configure local publishing authentication
@@ -106,17 +109,21 @@ const TOOLS_HELP = `Paperbot deterministic tools
 Usage:
   paperbot tools [list]
   paperbot tools describe <tool>
-  paperbot tools call <tool> --input <request.json|->
+  paperbot tools repo_scan [repository] [--exclude <glob>] [--include <glob>] [--format text|json]
+  paperbot tools paper_scaffold <scan.json> [--title <title>] [--format text|json]
+  paperbot tools paper_validate <paper.md> [--profile draft|submission|publication] [--format text|json]
 
-The tools interface is JSON-only and intended for agent hosts and automation.
-Humans should normally use the top-level workflow commands. Publishing and
-authentication are operator-only commands and are not tools.
+list and describe emit JSON metadata. The deterministic commands accept
+normal CLI arguments and emit text by default or versioned JSON with
+--format json. JSON is output only; tools do not accept JSON request files.
 
-Tool call input:
-  {"schema_version":"1","arguments":{...}}
+The JSON output from repo_scan is a scan manifest that can be passed to
+paper_scaffold. paper_scaffold --format json includes the report and generated
+Markdown. paper_validate --format json emits its validation report.
 
-Tool call output:
-  {"schema_version":"1","tool_name":"...","ok":true,"result":...}
+Publishing and authentication are operator-only commands and are not tools.
+Skill discovery belongs to paperbot skills; prompt phases remain internal to
+paperbot agent.
 `;
 
 export interface CliIo {
@@ -181,7 +188,7 @@ export async function run(
       if (parsed.component === undefined) {
         io.stdout(
           parsed.format === "json"
-            ? JSON.stringify(getSkillRead({ scope: scope.scope }), null, 2)
+            ? JSON.stringify(getSkillRead(scope.scope), null, 2)
             : scope.instructions.trim(),
         );
         return ExitCode.success;
@@ -197,10 +204,7 @@ export async function run(
       io.stdout(
         parsed.format === "json"
           ? JSON.stringify(
-              getSkillRead({
-                scope: scope.scope,
-                component: component.component,
-              }),
+              getSkillRead(scope.scope, component.component),
               null,
               2,
             )
@@ -317,15 +321,7 @@ export async function run(
         input_path: parsed.input_path,
         profile: parsed.profile,
       });
-      if (parsed.format === "json") {
-        io.stdout(JSON.stringify(result.report, null, 2));
-        io.stderr(
-          `paperbot: validation ${result.report.valid ? "passed" : "failed"} with ${result.report.diagnostics.length} diagnostics`,
-        );
-      } else {
-        io.stdout(formatValidationResult(result));
-      }
-      return result.report.valid ? ExitCode.success : ExitCode.validation;
+      return writeValidationResult(io, parsed.format, result);
     }
 
     if (parsed.command === "draft") {
@@ -334,11 +330,7 @@ export async function run(
         ...(parsed.title === undefined ? {} : { title: parsed.title }),
       });
       if (!result.report.valid || result.markdown === undefined) {
-        for (const diagnostic of result.report.diagnostics) {
-          io.stderr(
-            `paperbot: [${diagnostic.severity}] ${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
-          );
-        }
+        writeDraftDiagnostics(io, result);
         return ExitCode.validation;
       }
       if (parsed.output_path === undefined) {
@@ -415,15 +407,7 @@ export async function run(
         exclusions: parsed.exclusions,
         inclusions: parsed.inclusions,
       });
-      if (parsed.format === "json") {
-        io.stdout(JSON.stringify(result.manifest, null, 2));
-        io.stderr(
-          `paperbot: selected ${result.manifest.files.length} files from ${result.discovered_file_count} discovered files`,
-        );
-      } else {
-        io.stdout(formatScanResult(result));
-      }
-      return ExitCode.success;
+      return writeScanResult(io, parsed.format, result);
     }
 
     throw new PaperbotError("unsupported command", ExitCode.usage);
@@ -465,7 +449,7 @@ async function runToolsCommand(
         {
           schema_version: TOOL_SCHEMA_VERSION,
           tools: toolCatalog,
-          excluded_commands: ["auth", "publish"],
+          excluded_commands: ["skills", "auth", "publish"],
         },
         null,
         2,
@@ -473,18 +457,13 @@ async function runToolsCommand(
     );
     return ExitCode.success;
   }
-
-  const toolName = parsed.tool_name;
-  if (toolName === undefined) {
-    throw new PaperbotError(
-      "tools command requires a tool name",
-      ExitCode.usage,
-    );
-  }
   if (parsed.action === "describe") {
-    const tool = findTool(toolName);
+    const tool = findTool(parsed.tool_name);
     if (tool === undefined) {
-      throw new PaperbotError(`unknown tool: ${toolName}`, ExitCode.usage);
+      throw new PaperbotError(
+        `unknown tool: ${parsed.tool_name}; expected one of: ${toolCatalog.map(({ name }) => name).join(", ")}`,
+        ExitCode.usage,
+      );
     }
     io.stdout(
       JSON.stringify(
@@ -499,90 +478,100 @@ async function runToolsCommand(
     return ExitCode.success;
   }
 
-  if (parsed.input_path === undefined) {
-    throw new PaperbotError(
-      "tools call requires --input <request.json|->",
-      ExitCode.usage,
+  if (parsed.action === "repo_scan") {
+    const result = await runRepositoryScan({
+      repository_path: parsed.repository_path,
+      exclusions: parsed.exclusions,
+      inclusions: parsed.inclusions,
+    });
+    return writeScanResult(io, parsed.format, result);
+  }
+
+  if (parsed.action === "paper_scaffold") {
+    const result = await runPaperScaffold({
+      scan_path: parsed.scan_path,
+      ...(parsed.title === undefined ? {} : { title: parsed.title }),
+    });
+    return writeToolScaffoldResult(io, parsed.format, result);
+  }
+
+  const result = await runPaperValidation({
+    input_path: parsed.input_path,
+    profile: parsed.profile,
+  });
+  return writeValidationResult(io, parsed.format, result);
+}
+
+function writeScanResult(
+  io: CliIo,
+  format: "text" | "json",
+  result: ScanResult,
+): number {
+  if (format === "json") {
+    io.stdout(JSON.stringify(result.manifest, null, 2));
+    io.stderr(
+      `paperbot: selected ${result.manifest.files.length} files from ${result.discovered_file_count} discovered files`,
+    );
+  } else {
+    io.stdout(formatScanResult(result));
+  }
+  return ExitCode.success;
+}
+
+function writeValidationResult(
+  io: CliIo,
+  format: "text" | "json",
+  result: PaperValidationResult,
+): number {
+  if (format === "json") {
+    io.stdout(JSON.stringify(result.report, null, 2));
+    io.stderr(
+      `paperbot: validation ${result.report.valid ? "passed" : "failed"} with ${result.report.diagnostics.length} diagnostics`,
+    );
+  } else {
+    io.stdout(formatValidationResult(result));
+  }
+  return result.report.valid ? ExitCode.success : ExitCode.validation;
+}
+
+function writeToolScaffoldResult(
+  io: CliIo,
+  format: "text" | "json",
+  result: DraftPreparation,
+): number {
+  if (format === "json") {
+    io.stdout(
+      JSON.stringify(
+        {
+          schema_version: result.report.schema_version,
+          valid: result.report.valid,
+          diagnostics: result.report.diagnostics,
+          ...(result.markdown === undefined
+            ? {}
+            : { markdown: result.markdown }),
+        },
+        null,
+        2,
+      ),
+    );
+  } else if (result.report.valid && result.markdown !== undefined) {
+    io.stdout(result.markdown);
+    io.stderr("paperbot: created draft scaffold on stdout");
+  } else {
+    writeDraftDiagnostics(io, result);
+  }
+
+  return result.report.valid && result.markdown !== undefined
+    ? ExitCode.success
+    : ExitCode.validation;
+}
+
+function writeDraftDiagnostics(io: CliIo, result: DraftPreparation): void {
+  for (const diagnostic of result.report.diagnostics) {
+    io.stderr(
+      `paperbot: [${diagnostic.severity}] ${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
     );
   }
-
-  try {
-    const serializedInput = await readToolInput(parsed.input_path, io);
-    const input = parseJson(serializedInput);
-    const result = await executeTool(toolName, input);
-    io.stdout(JSON.stringify(result, null, 2));
-    return ExitCode.success;
-  } catch (error) {
-    const failure = asToolFailure(toolName, error);
-    io.stdout(JSON.stringify(failure.result, null, 2));
-    io.stderr(`paperbot: ${failure.message}`);
-    return failure.exit_code;
-  }
-}
-
-async function readToolInput(path: string, io: CliIo): Promise<string> {
-  if (path === "-") {
-    return (await (io.read_stdin ?? defaultIo.read_stdin)()).trim();
-  }
-  try {
-    const metadata = await lstat(path);
-    if (
-      !metadata.isFile() ||
-      metadata.isSymbolicLink() ||
-      metadata.size > 1024 * 1024
-    ) {
-      throw new Error("unsupported tool input file");
-    }
-    return (await readFile(path, "utf8")).trim();
-  } catch {
-    throw new PaperbotError(`could not read tool input: ${path}`, ExitCode.io);
-  }
-}
-
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new PaperbotError("tool input is not valid JSON", ExitCode.usage);
-  }
-}
-
-function asToolFailure(
-  toolName: string,
-  error: unknown,
-): {
-  result: {
-    schema_version: typeof TOOL_SCHEMA_VERSION;
-    tool_name: string;
-    ok: false;
-    error: { message: string; exit_code: number };
-  };
-  message: string;
-  exit_code: number;
-} {
-  if (error instanceof PaperbotError) {
-    return {
-      result: {
-        schema_version: TOOL_SCHEMA_VERSION,
-        tool_name: toolName,
-        ok: false,
-        error: { message: error.message, exit_code: error.exit_code },
-      },
-      message: error.message,
-      exit_code: error.exit_code,
-    };
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    result: {
-      schema_version: TOOL_SCHEMA_VERSION,
-      tool_name: toolName,
-      ok: false,
-      error: { message, exit_code: ExitCode.io },
-    },
-    message,
-    exit_code: ExitCode.io,
-  };
 }
 
 async function loadAgentBatch(): Promise<typeof import("./agent/batch.ts")> {

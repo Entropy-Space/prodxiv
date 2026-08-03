@@ -12,6 +12,7 @@ import publicationSkill from "../../../skills/paperbot/references/publication-sk
 import publicationSubmission from "../../../skills/paperbot/references/publication-submission.md" with { type: "text" };
 
 export type SkillScope = "project" | "paper" | "publication";
+export const SKILL_SCHEMA_VERSION = "1" as const;
 
 export interface SkillComponent {
   component: string;
@@ -120,4 +121,47 @@ export function formatSkillCatalog(): string {
     "",
     "Run paperbot skills <scope> to load its guidance.",
   ].join("\n");
+}
+
+export function getSkillCatalog(): Record<string, unknown> {
+  return {
+    schema_version: SKILL_SCHEMA_VERSION,
+    scopes: skillCatalog.map(({ scope, description }) => ({
+      scope,
+      description,
+    })),
+  };
+}
+
+export function getSkillRead(
+  scopeName: string,
+  componentName?: string,
+): Record<string, unknown> {
+  const scope = findSkillScope(scopeName);
+  if (scope === undefined) {
+    throw new Error(`unknown skill scope: ${scopeName}`);
+  }
+  if (componentName === undefined) {
+    return {
+      schema_version: SKILL_SCHEMA_VERSION,
+      scope: scope.scope,
+      description: scope.description,
+      instructions: scope.instructions.trim(),
+      components: scope.components.map(({ component, description }) => ({
+        component,
+        description,
+      })),
+    };
+  }
+  const component = findSkillComponent(scope.scope, componentName);
+  if (component === undefined) {
+    throw new Error(`unknown ${scope.scope} skill component: ${componentName}`);
+  }
+  return {
+    schema_version: SKILL_SCHEMA_VERSION,
+    scope: scope.scope,
+    component: component.component,
+    description: component.description,
+    instructions: component.instructions.trim(),
+  };
 }

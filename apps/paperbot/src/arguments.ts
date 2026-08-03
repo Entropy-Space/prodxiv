@@ -46,14 +46,60 @@ export interface SkillsArguments {
   format: OutputFormat;
 }
 
-export type ToolsAction = "list" | "describe" | "call" | "help";
+export type ToolsAction =
+  | "list"
+  | "describe"
+  | "repo_scan"
+  | "paper_scaffold"
+  | "paper_validate"
+  | "help";
 
-export interface ToolsArguments {
+export interface ToolsListArguments {
   command: "tools";
-  action: ToolsAction;
-  tool_name?: string;
-  input_path?: string;
+  action: "list";
 }
+
+export interface ToolsDescribeArguments {
+  command: "tools";
+  action: "describe";
+  tool_name: string;
+}
+
+export interface ToolsRepoScanArguments {
+  command: "tools";
+  action: "repo_scan";
+  repository_path: string;
+  format: OutputFormat;
+  exclusions: string[];
+  inclusions: string[];
+}
+
+export interface ToolsPaperScaffoldArguments {
+  command: "tools";
+  action: "paper_scaffold";
+  scan_path: string;
+  title?: string;
+  format: OutputFormat;
+}
+
+export interface ToolsPaperValidateArguments {
+  command: "tools";
+  action: "paper_validate";
+  input_path: string;
+  profile: ValidationProfile;
+  format: OutputFormat;
+}
+
+export type ToolsArguments =
+  | ToolsListArguments
+  | ToolsDescribeArguments
+  | ToolsRepoScanArguments
+  | ToolsPaperScaffoldArguments
+  | ToolsPaperValidateArguments
+  | {
+      command: "tools";
+      action: "help";
+    };
 
 export interface AgentRunArguments {
   command: "agent";
@@ -588,13 +634,30 @@ function parseToolsArguments(args: string[]): ToolsArguments {
     return { command: "tools", action: "describe", tool_name: args[1] };
   }
 
-  if (action !== "call") {
-    throw usageError("tools requires one of: list, describe, call");
+  if (action === "repo_scan") {
+    return parseToolsRepoScanArguments(args.slice(1));
   }
+  if (action === "paper_scaffold") {
+    return parseToolsPaperScaffoldArguments(args.slice(1));
+  }
+  if (action === "paper_validate") {
+    return parseToolsPaperValidateArguments(args.slice(1));
+  }
+  throw usageError(
+    "tools requires one of: list, describe, repo_scan, paper_scaffold, paper_validate",
+  );
+}
 
-  let tool_name: string | undefined;
-  let input_path: string | undefined;
-  for (let index = 1; index < args.length; index += 1) {
+function parseToolsRepoScanArguments(
+  args: string[],
+): ToolsRepoScanArguments | { command: "tools"; action: "help" } {
+  let repository_path = ".";
+  let hasRepositoryPath = false;
+  let format: OutputFormat = "text";
+  const exclusions: string[] = [];
+  const inclusions: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === undefined) {
       continue;
@@ -602,31 +665,161 @@ function parseToolsArguments(args: string[]): ToolsArguments {
     if (argument === "--help" || argument === "-h") {
       return { command: "tools", action: "help" };
     }
-    if (argument === "--input") {
-      input_path = requiredFollowingValue(args, index, "--input");
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
       index += 1;
       continue;
     }
-    if (argument.startsWith("--input=")) {
-      input_path = requiredInlineValue(argument, "--input");
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--exclude") {
+      exclusions.push(requiredFollowingValue(args, index, "--exclude"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--exclude=")) {
+      exclusions.push(requiredInlineValue(argument, "--exclude"));
+      continue;
+    }
+    if (argument === "--include") {
+      inclusions.push(requiredFollowingValue(args, index, "--include"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--include=")) {
+      inclusions.push(requiredInlineValue(argument, "--include"));
       continue;
     }
     if (argument.startsWith("-")) {
-      throw usageError(`unknown tools call option: ${argument}`);
+      throw usageError(`unknown tools repo_scan option: ${argument}`);
     }
-    if (tool_name !== undefined) {
-      throw usageError("tools call accepts only one tool name");
+    if (hasRepositoryPath) {
+      throw usageError("tools repo_scan accepts only one repository path");
     }
-    tool_name = argument;
+    repository_path = argument;
+    hasRepositoryPath = true;
   }
 
-  if (tool_name === undefined) {
-    throw usageError("tools call requires a tool name");
+  return {
+    command: "tools",
+    action: "repo_scan",
+    repository_path,
+    format,
+    exclusions,
+    inclusions,
+  };
+}
+
+function parseToolsPaperScaffoldArguments(
+  args: string[],
+): ToolsPaperScaffoldArguments | { command: "tools"; action: "help" } {
+  let scan_path: string | undefined;
+  let title: string | undefined;
+  let format: OutputFormat = "text";
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "tools", action: "help" };
+    }
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--title") {
+      title = requiredFollowingValue(args, index, "--title");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--title=")) {
+      title = requiredInlineValue(argument, "--title");
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown tools paper_scaffold option: ${argument}`);
+    }
+    if (scan_path !== undefined) {
+      throw usageError(
+        "tools paper_scaffold accepts only one scan manifest path",
+      );
+    }
+    scan_path = argument;
   }
+
+  if (scan_path === undefined) {
+    throw usageError("tools paper_scaffold requires a scan manifest path");
+  }
+  return {
+    command: "tools",
+    action: "paper_scaffold",
+    scan_path,
+    ...(title === undefined ? {} : { title }),
+    format,
+  };
+}
+
+function parseToolsPaperValidateArguments(
+  args: string[],
+): ToolsPaperValidateArguments | { command: "tools"; action: "help" } {
+  let input_path: string | undefined;
+  let profile: ValidationProfile = "draft";
+  let format: OutputFormat = "text";
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "tools", action: "help" };
+    }
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument === "--profile") {
+      profile = parseProfile(requiredFollowingValue(args, index, "--profile"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--profile=")) {
+      profile = parseProfile(requiredInlineValue(argument, "--profile"));
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown tools paper_validate option: ${argument}`);
+    }
+    if (input_path !== undefined) {
+      throw usageError("tools paper_validate accepts only one paper path");
+    }
+    input_path = argument;
+  }
+
   if (input_path === undefined) {
-    throw usageError("tools call requires --input <request.json|->");
+    throw usageError("tools paper_validate requires a paper path");
   }
-  return { command: "tools", action: "call", tool_name, input_path };
+  return {
+    command: "tools",
+    action: "paper_validate",
+    input_path,
+    profile,
+    format,
+  };
 }
 
 function parsePublishArguments(

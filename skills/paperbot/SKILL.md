@@ -25,11 +25,19 @@ Do not install dependencies, send repository contents to a remote service, or
 make remote writes unless the user explicitly requests it.
 
 For machine-facing integrations, discover the deterministic interface with
-`PAPERBOT_CMD tools list` and `PAPERBOT_CMD tools describe <tool>`. Invoke a
-tool with `PAPERBOT_CMD tools call <tool> --input <request.json|->` using the
-versioned JSON request envelope. These tools do not include authentication or
-publication. The model itself must not obtain shell access or call the CLI
-directly; the host controls which bounded tool inputs are supplied.
+`PAPERBOT_CMD tools list` and `PAPERBOT_CMD tools describe <tool>`. Invoke the
+direct commands with normal CLI arguments, for example:
+
+```sh
+PAPERBOT_CMD tools repo_scan . --format json
+PAPERBOT_CMD tools paper_scaffold scan.json
+PAPERBOT_CMD tools paper_validate paper.md --format json
+```
+
+JSON is an output format, not a request envelope. These tools do not include
+authentication or publication. The model itself must not obtain shell access
+or call the CLI directly; the host controls which bounded tool commands and
+arguments are supplied.
 
 ## Use the optional Pi agent
 

@@ -16,8 +16,9 @@ bun run paperbot skills paper references
 bun run paperbot skills publication readiness --format json
 bun run paperbot tools list
 bun run paperbot tools describe paper_validate
-printf '%s\n' '{"schema_version":"1","arguments":{"input_path":"paper.md","profile":"draft"}}' \
-  | bun run paperbot tools call paper_validate --input -
+bun run paperbot tools repo_scan . --format json > scan.json
+bun run paperbot tools paper_scaffold scan.json > paper.md
+bun run paperbot tools paper_validate paper.md --format json
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -52,13 +53,15 @@ versioned diagnostic report in JSON mode. Local validation is a fast authoring
 check; the publishing API will validate again using the authoritative Rust
 domain.
 
-`tools` is the strict machine-facing interface for deterministic operations.
-`tools list` and `tools describe <tool>` expose the versioned catalog. `tools
-call <tool> --input <request.json|->` accepts a JSON request with
-`schema_version` and `arguments`, and emits one JSON result envelope on
-stdout. Tool calls do not publish, authenticate, write files, access the
-network, or execute shell commands. The human-friendly `scan`, `draft`,
-`validate`, and `skills` commands use the same underlying adapters.
+`tools` is the strict interface for deterministic operations that an agent host
+or automation may call. `tools list` and `tools describe <tool>` expose the
+versioned catalog. The direct tool commands use normal CLI arguments; JSON is
+an output format, never a tool input envelope. `repo_scan --format json` emits
+the canonical scan manifest, `paper_scaffold` emits Markdown by default or a
+JSON report-plus-Markdown result, and `paper_validate --format json` emits the
+validation report. Tool commands do not publish, authenticate, write files,
+access the network, or execute shell commands. The human-friendly `scan`,
+`draft`, `validate`, and `skills` commands use the same underlying adapters.
 
 `draft` accepts a valid scan manifest and creates a section-complete Markdown
 scaffold. It does not turn repository observations into prose. Missing author

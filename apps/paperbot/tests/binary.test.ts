@@ -75,10 +75,10 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   expect(JSON.parse(tools.stdout)).toMatchObject({
     schema_version: "1",
     tools: expect.arrayContaining([
+      expect.objectContaining({ name: "repo_scan" }),
       expect.objectContaining({ name: "paper_validate" }),
-      expect.objectContaining({ name: "skill_read" }),
     ]),
-    excluded_commands: ["auth", "publish"],
+    excluded_commands: ["skills", "auth", "publish"],
   });
 
   const validation = await runProcess(
@@ -128,6 +128,20 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
     ]),
   });
 
+  const toolScan = await runProcess(
+    [binaryPath, "tools", "repo_scan", sourcePath, "--format", "json"],
+    cleanPath,
+    environment,
+  );
+  expect(toolScan.exit_code).toBe(0);
+  expect(JSON.parse(toolScan.stdout)).toMatchObject({
+    schema_version: "1",
+    files: expect.arrayContaining([
+      expect.objectContaining({ path: "README.md" }),
+      expect.objectContaining({ path: "package.json" }),
+    ]),
+  });
+
   const scanPath = join(cleanPath, "scan.json");
   const draftPath = join(cleanPath, "draft.md");
   await writeFile(scanPath, scan.stdout);
@@ -146,6 +160,33 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   );
   expect(draft.exit_code).toBe(0);
   expect(await readFile(draftPath, "utf8")).toContain("# References");
+
+  const toolDraft = await runProcess(
+    [
+      binaryPath,
+      "tools",
+      "paper_scaffold",
+      scanPath,
+      "--title",
+      "Compiled Paperbot tool fixture",
+    ],
+    cleanPath,
+    environment,
+  );
+  expect(toolDraft.exit_code).toBe(0);
+  expect(toolDraft.stdout).toContain("# References");
+
+  const toolValidation = await runProcess(
+    [binaryPath, "tools", "paper_validate", fixturePath, "--format", "json"],
+    cleanPath,
+    environment,
+  );
+  expect(toolValidation.exit_code).toBe(0);
+  expect(JSON.parse(toolValidation.stdout)).toMatchObject({
+    schema_version: "1",
+    valid: true,
+    diagnostics: [],
+  });
 
   const agent = await runProcess(
     [

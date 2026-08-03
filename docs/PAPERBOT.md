@@ -126,15 +126,20 @@ Paperbot exposes deterministic operations through a separate machine-facing
 ```text
 paperbot tools list
 paperbot tools describe paper_validate
-paperbot tools call paper_validate --input request.json
+paperbot tools repo_scan . --format json
+paperbot tools paper_scaffold scan.json
+paperbot tools paper_validate paper.md --format json
 ```
 
-Tool calls use a versioned JSON request and result envelope. The initial
-catalog covers repository scanning, paper scaffolding and validation, skill
-retrieval, and prompt-phase discovery. Human-friendly commands such as
-`scan`, `draft`, `validate`, and `skills` remain top-level commands and share
-the same adapters. `auth` and `publish` are intentionally excluded from the
-tool catalog; publication remains an explicit human-authorized remote write.
+The direct tool commands use normal CLI arguments. JSON is output only, not a
+request envelope. `repo_scan --format json` emits the canonical scan manifest
+that can be passed to `paper_scaffold`; `paper_scaffold --format json` emits
+its validation report and generated Markdown; and `paper_validate --format
+json` emits the validation report. The catalog covers only deterministic
+repository and paper operations. Skill discovery and reading remain under the
+`skills` command, prompt rendering remains internal to `agent`, and `auth` and
+`publish` are intentionally excluded from the tool catalog. Publication remains
+an explicit human-authorized remote write.
 
 For a native executable on the current platform, run:
 

@@ -1,18 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { parseArguments } from "../src/arguments.ts";
 import { run } from "../src/cli.ts";
 
-const validPaperPath = resolve(
-  import.meta.dir,
-  "fixtures/validation/valid-paper.md",
-);
+const fixtureRoot = resolve(import.meta.dir, "fixtures/validation");
+const validPaperPath = resolve(fixtureRoot, "valid-paper.md");
+const validScanPath = resolve(fixtureRoot, "valid-scan.json");
 
 describe("Paperbot tools interface", () => {
-  test("parses list, describe, call, and help actions", () => {
+  test("parses direct tool actions and help", () => {
     expect(parseArguments(["tools"])).toEqual({
       command: "tools",
       action: "list",
@@ -23,20 +20,66 @@ describe("Paperbot tools interface", () => {
       tool_name: "paper_validate",
     });
     expect(
-      parseArguments(["tools", "call", "paper_validate", "--input", "-"]),
+      parseArguments([
+        "tools",
+        "repo_scan",
+        ".",
+        "--exclude",
+        "docs/**",
+        "--format",
+        "json",
+      ]),
     ).toEqual({
       command: "tools",
-      action: "call",
-      tool_name: "paper_validate",
-      input_path: "-",
+      action: "repo_scan",
+      repository_path: ".",
+      exclusions: ["docs/**"],
+      inclusions: [],
+      format: "json",
+    });
+    expect(
+      parseArguments([
+        "tools",
+        "paper_scaffold",
+        "scan.json",
+        "--title",
+        "Fixture",
+        "--format=json",
+      ]),
+    ).toEqual({
+      command: "tools",
+      action: "paper_scaffold",
+      scan_path: "scan.json",
+      title: "Fixture",
+      format: "json",
+    });
+    expect(
+      parseArguments([
+        "tools",
+        "paper_validate",
+        "paper.md",
+        "--profile",
+        "publication",
+        "--format",
+        "json",
+      ]),
+    ).toEqual({
+      command: "tools",
+      action: "paper_validate",
+      input_path: "paper.md",
+      profile: "publication",
+      format: "json",
     });
     expect(parseArguments(["tools", "--help"])).toEqual({
       command: "tools",
       action: "help",
     });
+    expect(() =>
+      parseArguments(["tools", "call", "paper_validate", "--input", "-"]),
+    ).toThrow("tools requires one of");
   });
 
-  test("lists deterministic tools and keeps publication outside the catalog", async () => {
+  test("lists only deterministic repository and paper tools", async () => {
     const stdout: string[] = [];
 
     expect(
@@ -50,6 +93,7 @@ describe("Paperbot tools interface", () => {
       schema_version?: string;
       tools?: Array<{
         name?: string;
+        invocation?: string;
         human_commands?: string[];
         network_access?: boolean;
       }>;
@@ -57,123 +101,79 @@ describe("Paperbot tools interface", () => {
     };
     expect(result.schema_version).toBe("1");
     expect(result.tools?.map((tool) => tool.name)).toEqual([
-      "repository_scan",
+      "repo_scan",
       "paper_scaffold",
       "paper_validate",
-      "skill_catalog",
-      "skill_read",
-      "prompt_catalog",
     ]);
-    expect(
-      result.tools?.find((tool) => tool.name === "paper_validate"),
-    ).toEqual(
+    expect(result.tools?.find((tool) => tool.name === "repo_scan")).toEqual(
       expect.objectContaining({
-        human_commands: ["validate"],
+        invocation: expect.stringContaining("tools repo_scan"),
+        human_commands: ["scan"],
         network_access: false,
       }),
     );
-    expect(result.excluded_commands).toEqual(["auth", "publish"]);
+    expect(result.excluded_commands).toEqual(["skills", "auth", "publish"]);
   });
 
-  test("calls a validation tool with a versioned JSON request", async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), "paperbot-tools-"));
-    try {
-      const requestPath = join(workspacePath, "request.json");
-      await writeFile(
-        requestPath,
-        `${JSON.stringify(
-          {
-            schema_version: "1",
-            arguments: {
-              input_path: validPaperPath,
-              profile: "draft",
-            },
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      const stdout: string[] = [];
-      const stderr: string[] = [];
-
-      expect(
-        await run(["tools", "call", "paper_validate", "--input", requestPath], {
-          stdout: (message) => stdout.push(message),
-          stderr: (message) => stderr.push(message),
-        }),
-      ).toBe(0);
-
-      expect(JSON.parse(stdout[0] ?? "{}")).toEqual(
-        expect.objectContaining({
-          schema_version: "1",
-          tool_name: "paper_validate",
-          ok: true,
-          result: expect.objectContaining({
-            profile: "draft",
-            report: expect.objectContaining({ valid: true }),
-          }),
-        }),
-      );
-      expect(stderr).toEqual([]);
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true });
-    }
-  });
-
-  test("returns structured failures for invalid tool input", async () => {
+  test("validates a paper with direct CLI arguments", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
 
     expect(
-      await run(["tools", "call", "skill_catalog", "--input", "-"], {
-        stdout: (message) => stdout.push(message),
-        stderr: (message) => stderr.push(message),
-        read_stdin: async () =>
-          JSON.stringify({
-            schema_version: "1",
-            arguments: { unexpected: true },
-          }),
-      }),
-    ).toBe(2);
+      await run(
+        [
+          "tools",
+          "paper_validate",
+          validPaperPath,
+          "--profile",
+          "draft",
+          "--format",
+          "json",
+        ],
+        {
+          stdout: (message) => stdout.push(message),
+          stderr: (message) => stderr.push(message),
+        },
+      ),
+    ).toBe(0);
 
     expect(JSON.parse(stdout[0] ?? "{}")).toEqual({
       schema_version: "1",
-      tool_name: "skill_catalog",
-      ok: false,
-      error: {
-        message: "skill_catalog does not accept argument: unexpected",
-        exit_code: 2,
-      },
+      valid: true,
+      diagnostics: [],
     });
-    expect(stderr).toEqual([
-      "paperbot: skill_catalog does not accept argument: unexpected",
-    ]);
+    expect(stderr).toEqual(["paperbot: validation passed with 0 diagnostics"]);
   });
 
-  test("reads skill guidance through the same JSON tool contract", async () => {
+  test("scaffolds a paper and emits Markdown in the tool output", async () => {
     const stdout: string[] = [];
+    const stderr: string[] = [];
 
     expect(
-      await run(["tools", "call", "skill_read", "--input", "-"], {
-        stdout: (message) => stdout.push(message),
-        stderr: () => {},
-        read_stdin: async () =>
-          JSON.stringify({
-            schema_version: "1",
-            arguments: { scope: "paper", component: "references" },
-          }),
-      }),
+      await run(
+        [
+          "tools",
+          "paper_scaffold",
+          validScanPath,
+          "--title",
+          "Fixture product",
+          "--format",
+          "json",
+        ],
+        {
+          stdout: (message) => stdout.push(message),
+          stderr: (message) => stderr.push(message),
+        },
+      ),
     ).toBe(0);
 
+    expect(stderr).toEqual([]);
     expect(JSON.parse(stdout[0] ?? "{}")).toEqual(
       expect.objectContaining({
-        tool_name: "skill_read",
-        ok: true,
-        result: expect.objectContaining({
-          scope: "paper",
-          component: "references",
-          instructions: expect.stringContaining("# Paper references"),
-        }),
+        schema_version: "1",
+        valid: true,
+        diagnostics: [],
+        markdown: expect.stringContaining("# Summary"),
       }),
     );
   });
