@@ -130,12 +130,13 @@ authorization for remote writes.
 
 1. Confirm the repository root, paper output path, and any additional
    exclusions. Respect `.gitignore` and Paperbot's safe defaults.
-2. Run `PAPERBOT_CMD scan <repository> --format json`. Capture stdout alone in
-   a private `scan.json`; keep stderr as diagnostics.
+2. Run `PAPERBOT_CMD tools repo_scan <repository> --format json`. Capture
+   stdout alone in a private `scan.json`; keep stderr as diagnostics.
 3. Review the selected file inventory. Stop and tell the user if sensitive,
    irrelevant, generated, or vendored files appear.
-4. Run `PAPERBOT_CMD draft <scan.json> --output <paper.md>`, adding `--title`
-   when the title is known.
+4. Run `PAPERBOT_CMD tools paper_scaffold <scan.json> --title <title> >
+<paper.md>`, adding `--title` only when the title is known. Do not redirect
+   over an existing paper.
 5. Read the most relevant selected files and record which repository evidence
    supports each material claim. Do not copy repository secrets or private
    user data into the paper.
@@ -152,8 +153,8 @@ authorization for remote writes.
 9. Incorporate answers while preserving the author's wording and manual edits
    where practical. Add a Benchmarks section only when reproducible
    methodology or results exist.
-10. Run `PAPERBOT_CMD validate <paper.md> --profile draft --format json`.
-    Resolve every error and explain any warnings that remain.
+10. Run `PAPERBOT_CMD tools paper_validate <paper.md> --profile draft --format
+json`. Resolve every error and explain any warnings that remain.
 
 Treat a nonzero CLI exit as a failed step. Do not continue from invalid or
 partial JSON output.
@@ -164,7 +165,7 @@ Preserve manual edits. Rescan the intended revision, compare the selected files
 and repository changes, and update only affected sections. Keep limitations and
 contradictory information visible until the author resolves them.
 
-Do not overwrite an existing paper with `paperbot draft`. Edit it in place
+Do not overwrite an existing paper with `paper_scaffold`. Edit it in place
 after reviewing the diff.
 
 ## Publish an approved paper
@@ -174,7 +175,8 @@ infer publication approval from a request to scan, draft, revise, or validate.
 
 After the author explicitly asks to publish:
 
-1. Run `PAPERBOT_CMD validate <paper.md> --profile submission --format json`.
+1. Run `PAPERBOT_CMD tools paper_validate <paper.md> --profile submission
+--format json`.
 2. Resolve every error and show warnings to the author.
 3. Confirm the exact paper path and destination shown by Paperbot.
 4. Run `PAPERBOT_CMD publish <paper.md> --yes --format json`. Add

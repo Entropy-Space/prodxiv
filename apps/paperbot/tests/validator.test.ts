@@ -156,18 +156,20 @@ describe("validatePaperFile", () => {
   });
 });
 
-describe("validate CLI", () => {
+describe("paper_validate tool", () => {
   test("parses the publication profile and JSON format", () => {
     expect(
       parseArguments([
-        "validate",
+        "tools",
+        "paper_validate",
         "paper.md",
         "--profile=publication",
         "--format",
         "json",
       ]),
     ).toEqual({
-      command: "validate",
+      command: "tools",
+      action: "paper_validate",
       input_path: "paper.md",
       profile: "publication",
       format: "json",
@@ -180,7 +182,8 @@ describe("validate CLI", () => {
 
     const exitCode = await run(
       [
-        "validate",
+        "tools",
+        "paper_validate",
         resolve(fixtureRoot, "valid-paper.md"),
         "--profile",
         "publication",

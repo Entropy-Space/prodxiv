@@ -2,7 +2,7 @@
 
 Use this component to establish what the product is before drafting claims.
 
-1. Run `PAPERBOT_CMD scan <repository> --format json`.
+1. Run `PAPERBOT_CMD tools repo_scan <repository> --format json`.
 2. Review the selected paths. Rerun the scan with `--exclude` when sensitive,
    generated, vendored, or irrelevant files appear.
 3. Identify the product surface, primary users visible in documentation,

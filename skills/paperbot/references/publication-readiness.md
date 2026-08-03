@@ -4,7 +4,7 @@ Use this component for the final author-controlled review before a remote
 write.
 
 1. Confirm the exact Markdown path and intended destination.
-2. Run `PAPERBOT_CMD validate <paper.md> --profile submission --format json`.
+2. Run `PAPERBOT_CMD tools paper_validate <paper.md> --profile submission --format json`.
 3. Resolve every error and show every remaining warning to the author.
 4. Check that material claims have inspectable evidence or explicit author
    attribution.

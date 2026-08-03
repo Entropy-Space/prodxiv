@@ -149,16 +149,16 @@ bun run build:paperbot
 
 It writes `apps/paperbot/dist/paperbot`, which is intentionally ignored and is
 not a release artifact for another platform. The Paperbot test suite compiles a
-fresh binary and verifies `--version`, `skills`, `scan`, `draft`, and
-`validate` from a clean working directory, along with safe failure paths for
-the lazily loaded agent commands.
+fresh binary and verifies `--version`, `skills`, and the direct `tools`
+commands from a clean working directory, along with safe failure paths for the
+lazily loaded agent commands.
 
 ## Pi agent workflow
 
 `paperbot agent` is an optional, local-orchestrated drafting workflow. It uses
 the Pi SDK with `deepseek-v4-flash` by default, but it is deliberately separate
-from deterministic commands such as `scan`, `draft`, `validate`, and `publish`.
-Those commands do not require a model key or start Pi.
+from deterministic `tools` commands and the explicit `publish` command. Those
+commands do not require a model key or start Pi.
 
 Configure one of the following model connections before starting an agent run:
 

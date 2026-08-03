@@ -77,6 +77,11 @@ describe("Paperbot tools interface", () => {
     expect(() =>
       parseArguments(["tools", "call", "paper_validate", "--input", "-"]),
     ).toThrow("tools requires one of");
+    for (const command of ["scan", "draft", "validate"]) {
+      expect(() => parseArguments([command])).toThrow(
+        `unknown command: ${command}`,
+      );
+    }
   });
 
   test("lists only deterministic repository and paper tools", async () => {

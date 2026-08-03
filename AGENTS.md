@@ -91,10 +91,10 @@ Work toward the smallest complete loop:
 
 ```text
 repository
-  -> Paperbot scan
+  -> Paperbot tools repo_scan
   -> private scan manifest
   -> agent-authored paper draft
-  -> Paperbot validation
+  -> Paperbot tools paper_validate
   -> website paper page
 ```
 
@@ -102,7 +102,8 @@ Prioritize work in this order:
 
 1. Define the canonical paper schema.
 2. Write one exemplary product paper by hand.
-3. Implement `paperbot scan`, `paperbot draft`, and `paperbot validate`.
+3. Implement `paperbot tools repo_scan`, `paperbot tools paper_scaffold`, and
+   `paperbot tools paper_validate`.
 4. Package the Paperbot Agent Skill.
 5. Render the exemplary and generated papers on one website route.
 6. Implement the Axum submission and immutable publication path.

@@ -10,7 +10,6 @@ import {
   PaperbotError,
   type DraftPreparation,
   type PaperValidationResult,
-  writePaperDraft,
 } from "@prodxiv/paperbot-core";
 import {
   defaultAuthPath,
@@ -47,9 +46,6 @@ const VERSION = "0.0.1";
 const HELP = `Paperbot — repository-assisted product paper drafting
 
 Usage:
-  paperbot scan [repository] [--format text|json] [--exclude <glob>] [--include <glob>]
-  paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
-  paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
   paperbot skills [scope] [component] [--format text|json]
   paperbot tools [list]
   paperbot tools describe <tool>
@@ -67,15 +63,15 @@ Usage:
   paperbot --help
   paperbot --version
 
-Human workflows:
-  scan      Select relevant repository files into a private scan manifest
-  draft     Create a Markdown paper scaffold from a scan manifest
-  validate  Validate a product paper
+Deterministic operations:
+  tools     Discover or run repository scanning, paper scaffolding, and validation
+
+Human and agent workflows:
   skills    Discover focused agent guidance by artifact scope and component
   agent     Create or revise a private, evidence-backed paper draft with Pi
 
 Agent-host deterministic tools:
-  tools     Discover or run deterministic repository and paper operations
+  tools     Use the same deterministic operations with direct CLI arguments
 
 Operator-only remote operations:
   auth      Configure local publishing authentication
@@ -316,36 +312,6 @@ export async function run(
         : ExitCode.remote;
     }
 
-    if (parsed.command === "validate") {
-      const result = await runPaperValidation({
-        input_path: parsed.input_path,
-        profile: parsed.profile,
-      });
-      return writeValidationResult(io, parsed.format, result);
-    }
-
-    if (parsed.command === "draft") {
-      const result = await runPaperScaffold({
-        scan_path: parsed.scan_path,
-        ...(parsed.title === undefined ? {} : { title: parsed.title }),
-      });
-      if (!result.report.valid || result.markdown === undefined) {
-        writeDraftDiagnostics(io, result);
-        return ExitCode.validation;
-      }
-      if (parsed.output_path === undefined) {
-        io.stdout(result.markdown);
-        io.stderr("paperbot: created draft scaffold on stdout");
-      } else {
-        const outputPath = await writePaperDraft(
-          parsed.output_path,
-          result.markdown,
-        );
-        io.stdout(`Created draft: ${outputPath}`);
-      }
-      return ExitCode.success;
-    }
-
     if (parsed.command === "publish") {
       const preparation = await preparePublication(parsed.input_path, {
         ...(parsed.product_id === undefined
@@ -399,15 +365,6 @@ export async function run(
         );
       }
       return ExitCode.success;
-    }
-
-    if (parsed.command === "scan") {
-      const result = await runRepositoryScan({
-        repository_path: parsed.repository_path,
-        exclusions: parsed.exclusions,
-        inclusions: parsed.inclusions,
-      });
-      return writeScanResult(io, parsed.format, result);
     }
 
     throw new PaperbotError("unsupported command", ExitCode.usage);
