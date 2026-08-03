@@ -46,6 +46,15 @@ export interface SkillsArguments {
   format: OutputFormat;
 }
 
+export type ToolsAction = "list" | "describe" | "call" | "help";
+
+export interface ToolsArguments {
+  command: "tools";
+  action: ToolsAction;
+  tool_name?: string;
+  input_path?: string;
+}
+
 export interface AgentRunArguments {
   command: "agent";
   action: "run";
@@ -112,6 +121,7 @@ export type ParsedArguments =
   | DraftArguments
   | PublishArguments
   | SkillsArguments
+  | ToolsArguments
   | AgentRunArguments
   | AgentResumeArguments
   | AgentBatchArguments
@@ -144,6 +154,9 @@ export function parseArguments(args: string[]): ParsedArguments {
   }
   if (args[0] === "skills") {
     return parseSkillsArguments(args.slice(1));
+  }
+  if (args[0] === "tools") {
+    return parseToolsArguments(args.slice(1));
   }
   if (args[0] === "auth") {
     return parseAuthArguments(args.slice(1));
@@ -548,6 +561,72 @@ function parseSkillsArguments(
     ...(component === undefined ? {} : { component }),
     format,
   };
+}
+
+function parseToolsArguments(args: string[]): ToolsArguments {
+  const action = args[0];
+  if (action === undefined) {
+    return { command: "tools", action: "list" };
+  }
+  if (action === "--help" || action === "-h" || action === "help") {
+    if (args.length !== 1) {
+      throw usageError("tools help does not accept options");
+    }
+    return { command: "tools", action: "help" };
+  }
+  if (action === "list") {
+    if (args.length !== 1) {
+      throw usageError("tools list does not accept options");
+    }
+    return { command: "tools", action: "list" };
+  }
+
+  if (action === "describe") {
+    if (args.length !== 2 || args[1] === undefined || args[1].startsWith("-")) {
+      throw usageError("tools describe requires exactly one tool name");
+    }
+    return { command: "tools", action: "describe", tool_name: args[1] };
+  }
+
+  if (action !== "call") {
+    throw usageError("tools requires one of: list, describe, call");
+  }
+
+  let tool_name: string | undefined;
+  let input_path: string | undefined;
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "tools", action: "help" };
+    }
+    if (argument === "--input") {
+      input_path = requiredFollowingValue(args, index, "--input");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--input=")) {
+      input_path = requiredInlineValue(argument, "--input");
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown tools call option: ${argument}`);
+    }
+    if (tool_name !== undefined) {
+      throw usageError("tools call accepts only one tool name");
+    }
+    tool_name = argument;
+  }
+
+  if (tool_name === undefined) {
+    throw usageError("tools call requires a tool name");
+  }
+  if (input_path === undefined) {
+    throw usageError("tools call requires --input <request.json|->");
+  }
+  return { command: "tools", action: "call", tool_name, input_path };
 }
 
 function parsePublishArguments(

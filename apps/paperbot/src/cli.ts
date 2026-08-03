@@ -2,16 +2,14 @@
 
 import { parseArguments } from "./arguments.ts";
 import type { AgentBatchOptions, AgentBatchResult } from "./agent/batch.ts";
+import type { ToolsArguments } from "./arguments.ts";
 import type { AgentResumeOptions, AgentRunOptions } from "./agent/runner.ts";
 import type { AgentRunResult } from "./agent/types.ts";
 import {
   ExitCode,
   PaperbotError,
-  preparePaperDraft,
-  validatePaperFile,
   writePaperDraft,
 } from "@prodxiv/paperbot-core";
-import { scanRepository } from "@prodxiv/paperbot-source";
 import {
   defaultAuthPath,
   initializeAuth,
@@ -22,12 +20,24 @@ import {
 import { formatScanResult, formatValidationResult } from "./output.ts";
 import { preparePublication } from "./publisher.ts";
 import {
+  TOOL_SCHEMA_VERSION,
+  executeTool,
+  findTool,
+  getSkillCatalog,
+  getSkillRead,
+  runPaperScaffold,
+  runPaperValidation,
+  runRepositoryScan,
+  toolCatalog,
+} from "./tools.ts";
+import {
   findSkillComponent,
   findSkillScope,
   formatSkillCatalog,
   skillCatalog,
 } from "./skill-catalog.ts";
 import { ProdxivApiError } from "@prodxiv/api-client";
+import { lstat, readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 
@@ -40,6 +50,9 @@ Usage:
   paperbot draft <scan.json> [--title <title>] [--output <paper.md>]
   paperbot validate <paper.md> [--profile draft|submission|publication] [--format text|json]
   paperbot skills [scope] [component] [--format text|json]
+  paperbot tools [list]
+  paperbot tools describe <tool>
+  paperbot tools call <tool> --input <request.json|->
   paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
   paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
@@ -51,12 +64,17 @@ Usage:
   paperbot --help
   paperbot --version
 
-Commands:
+Human workflows:
   scan      Select relevant repository files into a private scan manifest
   draft     Create a Markdown paper scaffold from a scan manifest
   validate  Validate a product paper
   skills    Discover focused agent guidance by artifact scope and component
   agent     Create or revise a private, evidence-backed paper draft with Pi
+
+Agent-host tool interface:
+  tools     Discover and invoke deterministic operations as JSON
+
+Operator-only remote operations:
   auth      Configure local publishing authentication
   publish   Validate and explicitly publish a product paper
 
@@ -81,6 +99,24 @@ Options:
   --yes                Confirm publication without an interactive prompt
   -h, --help           Show help
   -V, --version        Show version
+`;
+
+const TOOLS_HELP = `Paperbot deterministic tools
+
+Usage:
+  paperbot tools [list]
+  paperbot tools describe <tool>
+  paperbot tools call <tool> --input <request.json|->
+
+The tools interface is JSON-only and intended for agent hosts and automation.
+Humans should normally use the top-level workflow commands. Publishing and
+authentication are operator-only commands and are not tools.
+
+Tool call input:
+  {"schema_version":"1","arguments":{...}}
+
+Tool call output:
+  {"schema_version":"1","tool_name":"...","ok":true,"result":...}
 `;
 
 export interface CliIo {
@@ -121,21 +157,15 @@ export async function run(
       return ExitCode.success;
     }
 
+    if (parsed.command === "tools") {
+      return await runToolsCommand(parsed, io);
+    }
+
     if (parsed.command === "skills") {
       if (parsed.scope === undefined) {
         io.stdout(
           parsed.format === "json"
-            ? JSON.stringify(
-                {
-                  schema_version: "1",
-                  scopes: skillCatalog.map(({ scope, description }) => ({
-                    scope,
-                    description,
-                  })),
-                },
-                null,
-                2,
-              )
+            ? JSON.stringify(getSkillCatalog(), null, 2)
             : formatSkillCatalog(),
         );
         return ExitCode.success;
@@ -151,22 +181,7 @@ export async function run(
       if (parsed.component === undefined) {
         io.stdout(
           parsed.format === "json"
-            ? JSON.stringify(
-                {
-                  schema_version: "1",
-                  scope: scope.scope,
-                  description: scope.description,
-                  instructions: scope.instructions.trim(),
-                  components: scope.components.map(
-                    ({ component, description }) => ({
-                      component,
-                      description,
-                    }),
-                  ),
-                },
-                null,
-                2,
-              )
+            ? JSON.stringify(getSkillRead({ scope: scope.scope }), null, 2)
             : scope.instructions.trim(),
         );
         return ExitCode.success;
@@ -182,13 +197,10 @@ export async function run(
       io.stdout(
         parsed.format === "json"
           ? JSON.stringify(
-              {
-                schema_version: "1",
+              getSkillRead({
                 scope: scope.scope,
                 component: component.component,
-                description: component.description,
-                instructions: component.instructions.trim(),
-              },
+              }),
               null,
               2,
             )
@@ -301,7 +313,10 @@ export async function run(
     }
 
     if (parsed.command === "validate") {
-      const result = await validatePaperFile(parsed.input_path, parsed.profile);
+      const result = await runPaperValidation({
+        input_path: parsed.input_path,
+        profile: parsed.profile,
+      });
       if (parsed.format === "json") {
         io.stdout(JSON.stringify(result.report, null, 2));
         io.stderr(
@@ -314,10 +329,8 @@ export async function run(
     }
 
     if (parsed.command === "draft") {
-      const result = await preparePaperDraft(parsed.scan_path, {
-        ...(parsed.output_path === undefined
-          ? {}
-          : { output_path: parsed.output_path }),
+      const result = await runPaperScaffold({
+        scan_path: parsed.scan_path,
         ...(parsed.title === undefined ? {} : { title: parsed.title }),
       });
       if (!result.report.valid || result.markdown === undefined) {
@@ -397,7 +410,8 @@ export async function run(
     }
 
     if (parsed.command === "scan") {
-      const result = await scanRepository(parsed.repository_path, {
+      const result = await runRepositoryScan({
+        repository_path: parsed.repository_path,
         exclusions: parsed.exclusions,
         inclusions: parsed.inclusions,
       });
@@ -435,6 +449,140 @@ export async function run(
 
 async function loadAgentRunner(): Promise<typeof import("./agent/runner.ts")> {
   return import("./agent/runner.ts");
+}
+
+async function runToolsCommand(
+  parsed: ToolsArguments,
+  io: CliIo,
+): Promise<number> {
+  if (parsed.action === "help") {
+    io.stdout(TOOLS_HELP.trimEnd());
+    return ExitCode.success;
+  }
+  if (parsed.action === "list") {
+    io.stdout(
+      JSON.stringify(
+        {
+          schema_version: TOOL_SCHEMA_VERSION,
+          tools: toolCatalog,
+          excluded_commands: ["auth", "publish"],
+        },
+        null,
+        2,
+      ),
+    );
+    return ExitCode.success;
+  }
+
+  const toolName = parsed.tool_name;
+  if (toolName === undefined) {
+    throw new PaperbotError(
+      "tools command requires a tool name",
+      ExitCode.usage,
+    );
+  }
+  if (parsed.action === "describe") {
+    const tool = findTool(toolName);
+    if (tool === undefined) {
+      throw new PaperbotError(`unknown tool: ${toolName}`, ExitCode.usage);
+    }
+    io.stdout(
+      JSON.stringify(
+        {
+          schema_version: TOOL_SCHEMA_VERSION,
+          tool,
+        },
+        null,
+        2,
+      ),
+    );
+    return ExitCode.success;
+  }
+
+  if (parsed.input_path === undefined) {
+    throw new PaperbotError(
+      "tools call requires --input <request.json|->",
+      ExitCode.usage,
+    );
+  }
+
+  try {
+    const serializedInput = await readToolInput(parsed.input_path, io);
+    const input = parseJson(serializedInput);
+    const result = await executeTool(toolName, input);
+    io.stdout(JSON.stringify(result, null, 2));
+    return ExitCode.success;
+  } catch (error) {
+    const failure = asToolFailure(toolName, error);
+    io.stdout(JSON.stringify(failure.result, null, 2));
+    io.stderr(`paperbot: ${failure.message}`);
+    return failure.exit_code;
+  }
+}
+
+async function readToolInput(path: string, io: CliIo): Promise<string> {
+  if (path === "-") {
+    return (await (io.read_stdin ?? defaultIo.read_stdin)()).trim();
+  }
+  try {
+    const metadata = await lstat(path);
+    if (
+      !metadata.isFile() ||
+      metadata.isSymbolicLink() ||
+      metadata.size > 1024 * 1024
+    ) {
+      throw new Error("unsupported tool input file");
+    }
+    return (await readFile(path, "utf8")).trim();
+  } catch {
+    throw new PaperbotError(`could not read tool input: ${path}`, ExitCode.io);
+  }
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new PaperbotError("tool input is not valid JSON", ExitCode.usage);
+  }
+}
+
+function asToolFailure(
+  toolName: string,
+  error: unknown,
+): {
+  result: {
+    schema_version: typeof TOOL_SCHEMA_VERSION;
+    tool_name: string;
+    ok: false;
+    error: { message: string; exit_code: number };
+  };
+  message: string;
+  exit_code: number;
+} {
+  if (error instanceof PaperbotError) {
+    return {
+      result: {
+        schema_version: TOOL_SCHEMA_VERSION,
+        tool_name: toolName,
+        ok: false,
+        error: { message: error.message, exit_code: error.exit_code },
+      },
+      message: error.message,
+      exit_code: error.exit_code,
+    };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    result: {
+      schema_version: TOOL_SCHEMA_VERSION,
+      tool_name: toolName,
+      ok: false,
+      error: { message, exit_code: ExitCode.io },
+    },
+    message,
+    exit_code: ExitCode.io,
+  };
 }
 
 async function loadAgentBatch(): Promise<typeof import("./agent/batch.ts")> {

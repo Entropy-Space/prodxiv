@@ -14,6 +14,10 @@ bun run paperbot skills
 bun run paperbot skills paper
 bun run paperbot skills paper references
 bun run paperbot skills publication readiness --format json
+bun run paperbot tools list
+bun run paperbot tools describe paper_validate
+printf '%s\n' '{"schema_version":"1","arguments":{"input_path":"paper.md","profile":"draft"}}' \
+  | bun run paperbot tools call paper_validate --input -
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -47,6 +51,14 @@ Markdown sections, and draft or publication requirements. It returns a
 versioned diagnostic report in JSON mode. Local validation is a fast authoring
 check; the publishing API will validate again using the authoritative Rust
 domain.
+
+`tools` is the strict machine-facing interface for deterministic operations.
+`tools list` and `tools describe <tool>` expose the versioned catalog. `tools
+call <tool> --input <request.json|->` accepts a JSON request with
+`schema_version` and `arguments`, and emits one JSON result envelope on
+stdout. Tool calls do not publish, authenticate, write files, access the
+network, or execute shell commands. The human-friendly `scan`, `draft`,
+`validate`, and `skills` commands use the same underlying adapters.
 
 `draft` accepts a valid scan manifest and creates a section-complete Markdown
 scaffold. It does not turn repository observations into prose. Missing author

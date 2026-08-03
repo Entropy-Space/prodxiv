@@ -66,6 +66,21 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
     component: "references",
   });
 
+  const tools = await runProcess(
+    [binaryPath, "tools", "list"],
+    cleanPath,
+    environment,
+  );
+  expect(tools.exit_code).toBe(0);
+  expect(JSON.parse(tools.stdout)).toMatchObject({
+    schema_version: "1",
+    tools: expect.arrayContaining([
+      expect.objectContaining({ name: "paper_validate" }),
+      expect.objectContaining({ name: "skill_read" }),
+    ]),
+    excluded_commands: ["auth", "publish"],
+  });
+
   const validation = await runProcess(
     [binaryPath, "validate", fixturePath, "--format", "json"],
     cleanPath,
@@ -171,7 +186,7 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   expect(batch.stderr).toContain(
     "agent batch manifest projects must not be empty",
   );
-});
+}, 15_000);
 
 async function runProcess(
   command: string[],

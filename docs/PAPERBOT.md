@@ -120,6 +120,22 @@ The shared canonical paper JSON Schema is exported by
 generated artifact, so validation does not rely on a fragile repository-relative
 schema path.
 
+Paperbot exposes deterministic operations through a separate machine-facing
+`tools` interface:
+
+```text
+paperbot tools list
+paperbot tools describe paper_validate
+paperbot tools call paper_validate --input request.json
+```
+
+Tool calls use a versioned JSON request and result envelope. The initial
+catalog covers repository scanning, paper scaffolding and validation, skill
+retrieval, and prompt-phase discovery. Human-friendly commands such as
+`scan`, `draft`, `validate`, and `skills` remain top-level commands and share
+the same adapters. `auth` and `publish` are intentionally excluded from the
+tool catalog; publication remains an explicit human-authorized remote write.
+
 For a native executable on the current platform, run:
 
 ```sh
