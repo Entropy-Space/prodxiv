@@ -120,6 +120,27 @@ The shared canonical paper JSON Schema is exported by
 generated artifact, so validation does not rely on a fragile repository-relative
 schema path.
 
+Paperbot exposes deterministic operations through a separate machine-facing
+`tools` interface:
+
+```text
+paperbot tools list
+paperbot tools describe paper_validate
+paperbot tools repo_scan . --format json
+paperbot tools paper_scaffold scan.json
+paperbot tools paper_validate paper.md --format json
+```
+
+The direct tool commands use normal CLI arguments. JSON is output only, not a
+request envelope. `repo_scan --format json` emits the canonical scan manifest
+that can be passed to `paper_scaffold`; `paper_scaffold --format json` emits
+its validation report and generated Markdown; and `paper_validate --format
+json` emits the validation report. The catalog covers only deterministic
+repository and paper operations. Skill discovery and reading remain under the
+`skills` command, prompt rendering remains internal to `agent`, and `auth` and
+`publish` are intentionally excluded from the tool catalog. Publication remains
+an explicit human-authorized remote write.
+
 For a native executable on the current platform, run:
 
 ```sh
@@ -128,16 +149,16 @@ bun run build:paperbot
 
 It writes `apps/paperbot/dist/paperbot`, which is intentionally ignored and is
 not a release artifact for another platform. The Paperbot test suite compiles a
-fresh binary and verifies `--version`, `skills`, `scan`, `draft`, and
-`validate` from a clean working directory, along with safe failure paths for
-the lazily loaded agent commands.
+fresh binary and verifies `--version`, `skills`, and the direct `tools`
+commands from a clean working directory, along with safe failure paths for the
+lazily loaded agent commands.
 
 ## Pi agent workflow
 
 `paperbot agent` is an optional, local-orchestrated drafting workflow. It uses
 the Pi SDK with `deepseek-v4-flash` by default, but it is deliberately separate
-from deterministic commands such as `scan`, `draft`, `validate`, and `publish`.
-Those commands do not require a model key or start Pi.
+from deterministic `tools` commands and the explicit `publish` command. Those
+commands do not require a model key or start Pi.
 
 Configure one of the following model connections before starting an agent run:
 

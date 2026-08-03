@@ -177,11 +177,12 @@ describe("scanRepository", () => {
   });
 });
 
-describe("CLI", () => {
+describe("repo_scan tool", () => {
   test("parses repeatable exclusions and JSON output", () => {
     expect(
       parseArguments([
-        "scan",
+        "tools",
+        "repo_scan",
         "./repo",
         "--format=json",
         "--exclude",
@@ -191,7 +192,8 @@ describe("CLI", () => {
         ".env.example",
       ]),
     ).toEqual({
-      command: "scan",
+      command: "tools",
+      action: "repo_scan",
       repository_path: "./repo",
       format: "json",
       exclusions: ["private/**", "tmp/**"],
@@ -222,10 +224,13 @@ describe("CLI", () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
 
-    const exitCode = await run(["scan", repositoryPath, "--format", "json"], {
-      stdout: (message) => stdout.push(message),
-      stderr: (message) => stderr.push(message),
-    });
+    const exitCode = await run(
+      ["tools", "repo_scan", repositoryPath, "--format", "json"],
+      {
+        stdout: (message) => stdout.push(message),
+        stderr: (message) => stderr.push(message),
+      },
+    );
 
     expect(exitCode).toBe(0);
     expect(stdout).toHaveLength(1);
@@ -240,7 +245,7 @@ describe("CLI", () => {
 
   test("returns a stable usage exit code for invalid options", async () => {
     const stderr: string[] = [];
-    const exitCode = await run(["scan", "--format", "yaml"], {
+    const exitCode = await run(["tools", "repo_scan", "--format", "yaml"], {
       stdout: () => {},
       stderr: (message) => stderr.push(message),
     });
@@ -251,10 +256,13 @@ describe("CLI", () => {
 
   test("returns a stable repository exit code for an unreadable path", async () => {
     const stderr: string[] = [];
-    const exitCode = await run(["scan", join(repositoryPath, "missing")], {
-      stdout: () => {},
-      stderr: (message) => stderr.push(message),
-    });
+    const exitCode = await run(
+      ["tools", "repo_scan", join(repositoryPath, "missing")],
+      {
+        stdout: () => {},
+        stderr: (message) => stderr.push(message),
+      },
+    );
 
     expect(exitCode).toBe(3);
     expect(stderr).toEqual([

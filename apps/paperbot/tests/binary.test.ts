@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -66,16 +66,19 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
     component: "references",
   });
 
-  const validation = await runProcess(
-    [binaryPath, "validate", fixturePath, "--format", "json"],
+  const tools = await runProcess(
+    [binaryPath, "tools", "list"],
     cleanPath,
     environment,
   );
-  expect(validation.exit_code).toBe(0);
-  expect(JSON.parse(validation.stdout)).toMatchObject({
+  expect(tools.exit_code).toBe(0);
+  expect(JSON.parse(tools.stdout)).toMatchObject({
     schema_version: "1",
-    valid: true,
-    diagnostics: [],
+    tools: expect.arrayContaining([
+      expect.objectContaining({ name: "repo_scan" }),
+      expect.objectContaining({ name: "paper_validate" }),
+    ]),
+    excluded_commands: ["skills", "auth", "publish"],
   });
 
   const sourcePath = join(temporaryPath, "source-repository");
@@ -100,7 +103,7 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   }
 
   const scan = await runProcess(
-    [binaryPath, "scan", sourcePath, "--format", "json"],
+    [binaryPath, "tools", "repo_scan", sourcePath, "--format", "json"],
     cleanPath,
     environment,
   );
@@ -114,23 +117,33 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   });
 
   const scanPath = join(cleanPath, "scan.json");
-  const draftPath = join(cleanPath, "draft.md");
   await writeFile(scanPath, scan.stdout);
-  const draft = await runProcess(
+  const toolDraft = await runProcess(
     [
       binaryPath,
-      "draft",
+      "tools",
+      "paper_scaffold",
       scanPath,
       "--title",
-      "Compiled Paperbot fixture",
-      "--output",
-      draftPath,
+      "Compiled Paperbot tool fixture",
     ],
     cleanPath,
     environment,
   );
-  expect(draft.exit_code).toBe(0);
-  expect(await readFile(draftPath, "utf8")).toContain("# References");
+  expect(toolDraft.exit_code).toBe(0);
+  expect(toolDraft.stdout).toContain("# References");
+
+  const toolValidation = await runProcess(
+    [binaryPath, "tools", "paper_validate", fixturePath, "--format", "json"],
+    cleanPath,
+    environment,
+  );
+  expect(toolValidation.exit_code).toBe(0);
+  expect(JSON.parse(toolValidation.stdout)).toMatchObject({
+    schema_version: "1",
+    valid: true,
+    diagnostics: [],
+  });
 
   const agent = await runProcess(
     [
@@ -171,7 +184,7 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   expect(batch.stderr).toContain(
     "agent batch manifest projects must not be empty",
   );
-});
+}, 15_000);
 
 async function runProcess(
   command: string[],

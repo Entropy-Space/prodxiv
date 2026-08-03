@@ -4,16 +4,21 @@ Paperbot is a local-first Bun CLI that turns an existing repository into an
 initial product paper draft:
 
 ```sh
-bun run paperbot scan .
-bun run paperbot scan . --format json
-bun run paperbot scan . --include .env.example
-bun run paperbot draft scan.json --output paper.md
-bun run paperbot validate paper.md
-bun run paperbot validate paper.md --profile publication --format json
+bun run paperbot tools repo_scan .
+bun run paperbot tools repo_scan . --format json
+bun run paperbot tools repo_scan . --include .env.example --format json
+bun run paperbot tools paper_scaffold scan.json > paper.md
+bun run paperbot tools paper_validate paper.md
+bun run paperbot tools paper_validate paper.md --profile publication --format json
 bun run paperbot skills
 bun run paperbot skills paper
 bun run paperbot skills paper references
 bun run paperbot skills publication readiness --format json
+bun run paperbot tools list
+bun run paperbot tools describe paper_validate
+bun run paperbot tools repo_scan . --format json > scan.json
+bun run paperbot tools paper_scaffold scan.json > paper.md
+bun run paperbot tools paper_validate paper.md --format json
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -23,7 +28,7 @@ bun run paperbot publish paper.md
 
 The human-readable format summarizes the scan. JSON output is a versioned,
 private manifest containing repository metadata and the selected file
-inventory. Drafting is a separate, agent-guided step.
+inventory. Scaffolding and validation are separate deterministic tool steps.
 
 `skills` exposes focused agent guidance through stable artifact scopes:
 `project`, `paper`, and `publication`. It follows Agent Skill progressive
@@ -34,7 +39,7 @@ needed. JSON output is versioned for agent integrations. The guidance is
 bundled from the portable Paperbot Agent Skill so the CLI and installed skill
 share one source.
 
-The scanner requires a Git worktree. It uses Git's file index so `.gitignore`
+`repo_scan` requires a Git worktree. It uses Git's file index so `.gitignore`
 and global ignore rules are respected. Sensitive, generated, vendored, binary,
 and oversized files are excluded even when they are tracked. Additional
 exclusions can be supplied with repeatable `--exclude <glob>` options.
@@ -42,18 +47,27 @@ Tracked files that match a default path exclusion can be opted in with a
 repeatable `--include <glob>`. Explicit exclusions, Git ignore rules, generated
 content, binary files, symlinks, and size limits still take precedence.
 
-`validate` checks YAML front matter, the canonical paper schema, required
+`paper_validate` checks YAML front matter, the canonical paper schema, required
 Markdown sections, and draft or publication requirements. It returns a
 versioned diagnostic report in JSON mode. Local validation is a fast authoring
 check; the publishing API will validate again using the authoritative Rust
 domain.
 
-`draft` accepts a valid scan manifest and creates a section-complete Markdown
-scaffold. It does not turn repository observations into prose. Missing author
-metadata and narrative content remain visibly incomplete for the Agent Skill
-and author to resolve. Without `--output`, the scaffold is written to stdout.
-With `--output`, Paperbot creates a new file and refuses to overwrite an
-existing draft.
+`tools` is the strict interface for deterministic operations that an agent host
+or automation may call. `tools list` and `tools describe <tool>` expose the
+versioned catalog. The direct tool commands use normal CLI arguments; JSON is
+an output format, never a tool input envelope. `repo_scan --format json` emits
+the canonical scan manifest, `paper_scaffold` emits Markdown by default or a
+JSON report-plus-Markdown result, and `paper_validate --format json` emits the
+validation report. Tool commands do not publish, authenticate, write files,
+access the network, or execute shell commands. `skills`, `agent`, `auth`, and
+`publish` remain separate command families with different responsibilities.
+
+`paper_scaffold` accepts a valid scan manifest and emits a section-complete
+Markdown scaffold to stdout. It does not turn repository observations into
+prose, and it never writes or overwrites a paper file. Missing author metadata
+and narrative content remain visibly incomplete for the Agent Skill and author
+to resolve.
 
 `auth` creates a commented credential template if it does not exist and never
 overwrites it. `auth set` stores the API URL, optional public site URL, and

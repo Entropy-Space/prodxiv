@@ -10,26 +10,7 @@ import {
   writePaperDraft,
 } from "@prodxiv/paperbot-core";
 
-import { parseArguments } from "../src/arguments.ts";
-
 const fixtureRoot = resolve(import.meta.dir, "fixtures/validation");
-
-test("parses deterministic draft arguments", () => {
-  expect(
-    parseArguments([
-      "draft",
-      "scan.json",
-      "--title",
-      "Fixture",
-      "--output=paper.md",
-    ]),
-  ).toEqual({
-    command: "draft",
-    scan_path: "scan.json",
-    title: "Fixture",
-    output_path: "paper.md",
-  });
-});
 
 test("creates a complete scaffold from a scan manifest", async () => {
   const result = await preparePaperDraft(
