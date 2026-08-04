@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "PRODXIV_VERCEL_GIT_REMOTE_URL=https://github.com/Entropy-Space/prodxiv.git sh ../../scripts/vercel-ignore-build.sh web"
+}
