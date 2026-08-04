@@ -210,7 +210,10 @@ export async function runAgentBatch(
         projectReport.error = {
           message: `agent draft did not pass validation (${result.validation.diagnostics} diagnostics)`,
         };
-      } else if (result.state !== "needs_author_review") {
+      } else if (
+        result.state !== "needs_author_review" &&
+        result.state !== "awaiting_author"
+      ) {
         projectReport.state = "failed";
         projectReport.error = {
           message: `agent returned an unexpected terminal state: ${result.state}`,

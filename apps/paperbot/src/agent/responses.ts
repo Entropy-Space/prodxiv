@@ -1,11 +1,12 @@
 import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import type {
+  AskQuestionsResponse,
+  AuthoringResponse,
   DraftResponse,
-  EvidenceItem,
+  EvidenceCandidate,
+  EvidenceConflict,
   EvidenceKind,
-  ReviewIssue,
-  ReviewResponse,
-  ReviewSeverity,
+  EvidenceResponse,
 } from "./types.ts";
 
 const EVIDENCE_KINDS = new Set<EvidenceKind>([
@@ -14,102 +15,298 @@ const EVIDENCE_KINDS = new Set<EvidenceKind>([
   "author",
   "inference",
 ]);
-const REVIEW_SEVERITIES = new Set<ReviewSeverity>([
-  "error",
-  "warning",
-  "question",
-]);
 const CONFIDENCES = new Set(["high", "medium", "low"]);
+const MAX_EVIDENCE_ITEMS = 64;
+const MAX_EVIDENCE_EXCERPT_CHARACTERS = 2_000;
+const MAX_CONTRADICTIONS = 16;
+const MAX_UNKNOWN_ITEMS = 24;
+const MAX_QUESTIONS_PER_ROUND = 5;
+const MAX_RESPONSE_TEXT_CHARACTERS = 2_000;
+const MAX_DRAFT_CHARACTERS = 256 * 1024;
+
+export function parseEvidenceResponse(value: string): EvidenceResponse {
+  const object = parseJsonObject(value, "evidence");
+  assertOnlyFields(
+    object,
+    ["evidence", "contradictions", "unknowns", "questions"],
+    "evidence",
+  );
+  if (!Array.isArray(object.evidence)) {
+    invalidResponse("evidence.evidence must be an array");
+  }
+  if (object.evidence.length > MAX_EVIDENCE_ITEMS) {
+    invalidResponse(
+      `evidence.evidence must contain at most ${MAX_EVIDENCE_ITEMS} items`,
+    );
+  }
+  if (!Array.isArray(object.contradictions)) {
+    invalidResponse("evidence.contradictions must be an array");
+  }
+  if (object.contradictions.length > MAX_CONTRADICTIONS) {
+    invalidResponse(
+      `evidence.contradictions must contain at most ${MAX_CONTRADICTIONS} items`,
+    );
+  }
+  return {
+    evidence: object.evidence.map((item, index) =>
+      evidenceCandidate(item, `evidence.evidence[${index}]`),
+    ),
+    contradictions: object.contradictions.map((item, index) =>
+      evidenceConflict(item, index),
+    ),
+    unknowns: boundedStringArray(
+      object.unknowns,
+      "evidence.unknowns",
+      MAX_UNKNOWN_ITEMS,
+    ),
+    questions: boundedStringArray(
+      object.questions,
+      "evidence.questions",
+      MAX_UNKNOWN_ITEMS,
+    ),
+  };
+}
+
+export function parseAuthoringResponse(value: string): AuthoringResponse {
+  const object = parseJsonObject(value, "authoring");
+  const action = requiredString(object.action, "authoring.action");
+  if (action === "ask_questions") {
+    return parseAskQuestionsResponse(object);
+  }
+  if (action === "submit_draft") {
+    return parseDraftObject(object);
+  }
+  invalidResponse(`authoring.action is not recognized: ${action}`);
+}
 
 export function parseDraftResponse(value: string): DraftResponse {
-  const object = parseJsonObject(value, "draft");
-  const summary = requiredString(object.summary, "draft.summary");
-  const markdown = requiredString(object.markdown, "draft.markdown");
-  if (markdown.trimStart().startsWith("---")) {
-    invalidResponse("draft.markdown must not contain YAML front matter");
+  const response = parseAuthoringResponse(value);
+  if (response.action !== "submit_draft") {
+    invalidResponse("authoring response must submit a draft in this phase");
   }
-  return {
-    summary,
-    topics: stringArray(object.topics, "draft.topics"),
-    markdown,
-    evidence: evidenceArray(object.evidence),
-    questions: stringArray(object.questions, "draft.questions"),
-  };
+  return response;
 }
 
-export function parseReviewResponse(value: string): ReviewResponse {
-  const object = parseJsonObject(value, "review");
-  if (!Array.isArray(object.issues)) {
-    invalidResponse("review.issues must be an array");
-  }
-  return {
-    issues: object.issues.map((item, index) => reviewIssue(item, index)),
-    questions: stringArray(object.questions, "review.questions"),
-  };
-}
-
-export function validateEvidenceSourceIds(
-  evidence: EvidenceItem[],
+export function validateEvidenceCandidateSourceIds(
+  evidence: EvidenceCandidate[],
   allowedSourceIds: ReadonlySet<string>,
-): EvidenceItem[] {
+): EvidenceCandidate[] {
   for (const item of evidence) {
     if (item.evidence_kind === "external") {
       invalidResponse(
         "external URLs are reference-only until Paperbot snapshots their contents",
       );
     }
+    if (item.evidence_kind === "author") {
+      invalidResponse(
+        "the evidence session cannot create author evidence before answers are supplied",
+      );
+    }
     if (!allowedSourceIds.has(item.source_id)) {
       invalidResponse(`evidence source_id is not available: ${item.source_id}`);
     }
-    if (
-      item.evidence_kind === "repository" &&
-      !isRepositorySourceId(item.source_id)
-    ) {
+    if (!isRepositorySourceId(item.source_id)) {
       invalidResponse(
-        `repository evidence must use a repository source_id: ${item.source_id}`,
-      );
-    }
-    if (item.evidence_kind === "author" && !isAuthorSourceId(item.source_id)) {
-      invalidResponse(
-        `author evidence must use an author source_id: ${item.source_id}`,
-      );
-    }
-    if (
-      item.evidence_kind === "inference" &&
-      !isRepositorySourceId(item.source_id) &&
-      !isAuthorSourceId(item.source_id)
-    ) {
-      invalidResponse(
-        `inference must identify a repository or author source_id: ${item.source_id}`,
+        `${item.evidence_kind} evidence must use a repository source_id: ${item.source_id}`,
       );
     }
   }
   return evidence;
 }
 
-export function validateReviewSourceIds(
-  review: ReviewResponse,
+export function validateConflictSourceIds(
+  conflicts: EvidenceConflict[],
   allowedSourceIds: ReadonlySet<string>,
-): ReviewResponse {
-  for (const issue of review.issues) {
-    const invalidSourceId = issue.source_ids.find(
-      (sourceId) =>
-        !allowedSourceIds.has(sourceId) ||
-        (!isRepositorySourceId(sourceId) && !isAuthorSourceId(sourceId)),
+): EvidenceConflict[] {
+  for (const conflict of conflicts) {
+    const invalidSourceId = conflict.source_ids.find(
+      (sourceId) => !allowedSourceIds.has(sourceId),
     );
     if (invalidSourceId !== undefined) {
-      invalidResponse(`review source_id is not available: ${invalidSourceId}`);
+      invalidResponse(
+        `contradiction source_id is not available: ${invalidSourceId}`,
+      );
     }
   }
-  return review;
+  return conflicts;
+}
+
+export function validateAuthoringEvidenceIds(
+  response: AuthoringResponse,
+  allowedEvidenceIds: ReadonlySet<string>,
+): AuthoringResponse {
+  const evidenceIds =
+    response.action === "submit_draft"
+      ? response.evidence_ids
+      : response.questions.flatMap((question) => question.evidence_ids);
+  const invalidEvidenceId = evidenceIds.find(
+    (evidenceId) => !allowedEvidenceIds.has(evidenceId),
+  );
+  if (invalidEvidenceId !== undefined) {
+    invalidResponse(`evidence_id is not available: ${invalidEvidenceId}`);
+  }
+  return response;
+}
+
+function parseAskQuestionsResponse(
+  object: Record<string, unknown>,
+): AskQuestionsResponse {
+  assertOnlyFields(object, ["action", "questions"], "authoring");
+  if (!Array.isArray(object.questions)) {
+    invalidResponse("authoring.questions must be an array");
+  }
+  if (
+    object.questions.length === 0 ||
+    object.questions.length > MAX_QUESTIONS_PER_ROUND
+  ) {
+    invalidResponse(
+      `authoring.questions must contain one to ${MAX_QUESTIONS_PER_ROUND} questions`,
+    );
+  }
+  return {
+    action: "ask_questions",
+    questions: object.questions.map((value, index) => {
+      const path = `authoring.questions[${index}]`;
+      if (!isRecord(value)) {
+        invalidResponse(`${path} must be an object`);
+      }
+      assertOnlyFields(value, ["question", "reason", "evidence_ids"], path);
+      return {
+        question: boundedString(
+          value.question,
+          `${path}.question`,
+          MAX_RESPONSE_TEXT_CHARACTERS,
+        ),
+        reason: boundedString(
+          value.reason,
+          `${path}.reason`,
+          MAX_RESPONSE_TEXT_CHARACTERS,
+        ),
+        evidence_ids: boundedStringArray(
+          value.evidence_ids,
+          `${path}.evidence_ids`,
+          MAX_EVIDENCE_ITEMS,
+          100,
+        ),
+      };
+    }),
+  };
+}
+
+function parseDraftObject(object: Record<string, unknown>): DraftResponse {
+  assertOnlyFields(
+    object,
+    [
+      "action",
+      "summary",
+      "topics",
+      "markdown",
+      "evidence_ids",
+      "unresolved_questions",
+    ],
+    "authoring",
+  );
+  const markdown = requiredString(object.markdown, "authoring.markdown");
+  if (markdown.length > MAX_DRAFT_CHARACTERS) {
+    invalidResponse(
+      `authoring.markdown must contain at most ${MAX_DRAFT_CHARACTERS} characters`,
+    );
+  }
+  if (markdown.trimStart().startsWith("---")) {
+    invalidResponse("authoring.markdown must not contain YAML front matter");
+  }
+  return {
+    action: "submit_draft",
+    summary: boundedString(
+      object.summary,
+      "authoring.summary",
+      MAX_RESPONSE_TEXT_CHARACTERS,
+    ),
+    topics: boundedStringArray(object.topics, "authoring.topics", 5, 100),
+    markdown,
+    evidence_ids: boundedStringArray(
+      object.evidence_ids,
+      "authoring.evidence_ids",
+      MAX_EVIDENCE_ITEMS,
+      100,
+    ),
+    unresolved_questions: boundedStringArray(
+      object.unresolved_questions,
+      "authoring.unresolved_questions",
+      MAX_UNKNOWN_ITEMS,
+      MAX_RESPONSE_TEXT_CHARACTERS,
+    ),
+  };
+}
+
+function evidenceCandidate(value: unknown, path: string): EvidenceCandidate {
+  if (!isRecord(value)) {
+    invalidResponse(`${path} must be an object`);
+  }
+  assertOnlyFields(
+    value,
+    ["claim", "evidence_kind", "source_id", "excerpt", "confidence", "note"],
+    path,
+  );
+  const evidenceKind = requiredString(
+    value.evidence_kind,
+    `${path}.evidence_kind`,
+  );
+  if (!EVIDENCE_KINDS.has(evidenceKind as EvidenceKind)) {
+    invalidResponse(`${path}.evidence_kind is not recognized`);
+  }
+  const confidence = requiredString(value.confidence, `${path}.confidence`);
+  if (!CONFIDENCES.has(confidence)) {
+    invalidResponse(`${path}.confidence is not recognized`);
+  }
+  const excerpt = requiredString(value.excerpt, `${path}.excerpt`);
+  if (excerpt.length > MAX_EVIDENCE_EXCERPT_CHARACTERS) {
+    invalidResponse(
+      `${path}.excerpt must contain at most ${MAX_EVIDENCE_EXCERPT_CHARACTERS} characters`,
+    );
+  }
+  const note = optionalString(
+    value.note,
+    `${path}.note`,
+    MAX_RESPONSE_TEXT_CHARACTERS,
+  );
+  return {
+    claim: boundedString(
+      value.claim,
+      `${path}.claim`,
+      MAX_RESPONSE_TEXT_CHARACTERS,
+    ),
+    evidence_kind: evidenceKind as EvidenceKind,
+    source_id: boundedString(value.source_id, `${path}.source_id`, 500),
+    excerpt,
+    confidence: confidence as EvidenceCandidate["confidence"],
+    ...(note === undefined ? {} : { note }),
+  };
+}
+
+function evidenceConflict(value: unknown, index: number): EvidenceConflict {
+  const path = `evidence.contradictions[${index}]`;
+  if (!isRecord(value)) {
+    invalidResponse(`${path} must be an object`);
+  }
+  assertOnlyFields(value, ["description", "source_ids"], path);
+  return {
+    description: boundedString(
+      value.description,
+      `${path}.description`,
+      MAX_RESPONSE_TEXT_CHARACTERS,
+    ),
+    source_ids: boundedStringArray(
+      value.source_ids,
+      `${path}.source_ids`,
+      MAX_EVIDENCE_ITEMS,
+      500,
+    ),
+  };
 }
 
 function isRepositorySourceId(sourceId: string): boolean {
   return sourceId.startsWith("repository:");
-}
-
-function isAuthorSourceId(sourceId: string): boolean {
-  return sourceId.startsWith("author:");
 }
 
 function parseJsonObject(
@@ -130,74 +327,38 @@ function parseJsonObject(
   return parsed;
 }
 
-function evidenceArray(value: unknown): EvidenceItem[] {
-  if (!Array.isArray(value)) {
-    invalidResponse("draft.evidence must be an array");
+function boundedStringArray(
+  value: unknown,
+  path: string,
+  maximumItems: number,
+  maximumCharacters = MAX_RESPONSE_TEXT_CHARACTERS,
+): string[] {
+  const values = uniqueStringArray(value, path);
+  if (values.length > maximumItems) {
+    invalidResponse(`${path} must contain at most ${maximumItems} items`);
   }
-  return value.map((item, index) => {
-    if (!isRecord(item)) {
-      invalidResponse(`draft.evidence[${index}] must be an object`);
-    }
-    const evidenceKind = requiredString(
-      item.evidence_kind,
-      `draft.evidence[${index}].evidence_kind`,
-    );
-    if (!EVIDENCE_KINDS.has(evidenceKind as EvidenceKind)) {
-      invalidResponse(
-        `draft.evidence[${index}].evidence_kind is not recognized`,
-      );
-    }
-    const confidence = requiredString(
-      item.confidence,
-      `draft.evidence[${index}].confidence`,
-    );
-    if (!CONFIDENCES.has(confidence)) {
-      invalidResponse(`draft.evidence[${index}].confidence is not recognized`);
-    }
-    const note = item.note;
-    if (note !== undefined && typeof note !== "string") {
-      invalidResponse(`draft.evidence[${index}].note must be a string`);
-    }
-    return {
-      claim: requiredString(item.claim, `draft.evidence[${index}].claim`),
-      evidence_kind: evidenceKind as EvidenceKind,
-      source_id: requiredString(
-        item.source_id,
-        `draft.evidence[${index}].source_id`,
-      ),
-      confidence: confidence as EvidenceItem["confidence"],
-      ...(note === undefined ? {} : { note }),
-    };
-  });
-}
-
-function reviewIssue(value: unknown, index: number): ReviewIssue {
-  if (!isRecord(value)) {
-    invalidResponse(`review.issues[${index}] must be an object`);
-  }
-  const severity = requiredString(
-    value.severity,
-    `review.issues[${index}].severity`,
+  const oversizedIndex = values.findIndex(
+    (item) => item.length > maximumCharacters,
   );
-  if (!REVIEW_SEVERITIES.has(severity as ReviewSeverity)) {
-    invalidResponse(`review.issues[${index}].severity is not recognized`);
+  if (oversizedIndex !== -1) {
+    invalidResponse(
+      `${path}[${oversizedIndex}] must contain at most ${maximumCharacters} characters`,
+    );
   }
-  return {
-    severity: severity as ReviewSeverity,
-    section: requiredString(value.section, `review.issues[${index}].section`),
-    message: requiredString(value.message, `review.issues[${index}].message`),
-    source_ids: stringArray(
-      value.source_ids,
-      `review.issues[${index}].source_ids`,
-    ),
-  };
+  return values;
 }
 
-function stringArray(value: unknown, path: string): string[] {
+function uniqueStringArray(value: unknown, path: string): string[] {
   if (!Array.isArray(value)) {
     invalidResponse(`${path} must be an array`);
   }
-  return value.map((item, index) => requiredString(item, `${path}[${index}]`));
+  const values = value.map((item, index) =>
+    requiredString(item, `${path}[${index}]`),
+  );
+  if (new Set(values).size !== values.length) {
+    invalidResponse(`${path} must not contain duplicates`);
+  }
+  return values;
 }
 
 function requiredString(value: unknown, path: string): string {
@@ -205,6 +366,43 @@ function requiredString(value: unknown, path: string): string {
     invalidResponse(`${path} must be a non-empty string`);
   }
   return value;
+}
+
+function boundedString(
+  value: unknown,
+  path: string,
+  maximumCharacters: number,
+): string {
+  const result = requiredString(value, path);
+  if (result.length > maximumCharacters) {
+    invalidResponse(
+      `${path} must contain at most ${maximumCharacters} characters`,
+    );
+  }
+  return result;
+}
+
+function optionalString(
+  value: unknown,
+  path: string,
+  maximumCharacters: number,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return boundedString(value, path, maximumCharacters);
+}
+
+function assertOnlyFields(
+  value: Record<string, unknown>,
+  allowedFields: string[],
+  path: string,
+): void {
+  const allowed = new Set(allowedFields);
+  const unknown = Object.keys(value).find((field) => !allowed.has(field));
+  if (unknown !== undefined) {
+    invalidResponse(`${path} contains an unknown field: ${unknown}`);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

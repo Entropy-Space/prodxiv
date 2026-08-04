@@ -261,6 +261,44 @@ describe("runAgentBatch", () => {
     });
   });
 
+  test("treats an awaiting-author checkpoint as a successful batch project", async () => {
+    const workspace = await createWorkspace();
+    const inputPath = await writeManifest(workspace, {
+      schema_version: "1",
+      projects: [
+        {
+          repository_url: "https://github.com/example/needs-context",
+          authors: ["Author"],
+          status: "concept",
+        },
+      ],
+    });
+
+    const result = await runAgentBatch(
+      {
+        input_path: inputPath,
+        output_path: join(workspace, "runs"),
+        allow_remote_model: true,
+      },
+      {
+        run_agent: async (options) => ({
+          ...successfulRun(options.output_path),
+          state: "awaiting_author",
+          questions: { pending: 2, round: 1 },
+        }),
+      },
+    );
+
+    expect(result.report.summary).toMatchObject({ succeeded: 1, failed: 0 });
+    expect(result.report.projects[0]).toMatchObject({
+      state: "succeeded",
+      result: {
+        state: "awaiting_author",
+        questions: { pending: 2, round: 1 },
+      },
+    });
+  });
+
   test("rejects unsafe manifests and invalid batch options before running a project", async () => {
     const workspace = await createWorkspace();
     const unsafeInputPath = await writeManifest(workspace, {
@@ -333,6 +371,7 @@ function successfulRun(outputPath: string): AgentRunResult {
     run_path: outputPath,
     state: "needs_author_review",
     validation: { valid: true, diagnostics: 0 },
+    questions: { pending: 0, round: 0 },
     source: {
       resolved_revision: "0123456789abcdef0123456789abcdef01234567",
       selected_file_count: 3,

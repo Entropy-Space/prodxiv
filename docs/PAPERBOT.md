@@ -45,23 +45,27 @@ visible instead of filling them with speculation.
    and which are excluded.
 3. **Create a scan manifest.** The CLI records the repository revision and
    selected file inventory.
-4. **Understand the project.** The drafting agent reads relevant files and
-   detects languages, architecture, dependencies, tests, releases, and
-   benchmark suites.
-5. **Research related work.** The agent identifies specific products,
-   websites, repositories, documentation, and papers, verifies claims against
-   inspectable sources, and records public citations without disclosing private
-   repository contents.
-6. **Generate a private draft.** The agent completes sections supported by
-   repository evidence, external sources, or author statements and leaves
+4. **Build an evidence ledger.** An evidence session reads the bounded source
+   bundle, extracts exact source excerpts, and records observations,
+   qualified inferences, contradictions, unknowns, and candidate questions.
+5. **Validate evidence integrity.** The host verifies source IDs, exact
+   excerpts, locators, digests, evidence kinds, and source revision before any
+   prose is drafted. This gate does not claim to prove semantic entailment.
+6. **Collect related-work inputs.** The host may record public reference URLs,
+   but a URL alone cannot support a factual claim. The current Pi workflow
+   keeps URLs reference-only; a future collector must snapshot and validate
+   their contents before admitting them as external evidence.
+7. **Generate a private draft.** A separate author session completes sections
+   supported by validated repository evidence or author statements and leaves
    uncertain details as questions.
-7. **Interview the author.** It asks a short, adaptive set of questions about
-   motivation, background, alternatives, tradeoffs, and lessons.
-8. **Revise collaboratively.** Author answers are incorporated without
+8. **Interview the author.** The same author session asks a short, adaptive set
+   of questions about motivation, background, alternatives, tradeoffs, and
+   lessons.
+9. **Revise collaboratively.** Author answers are incorporated without
    overwriting deliberate manual edits.
-9. **Review and approve.** The author reviews privacy, accuracy, and
-   completeness before any submission.
-10. **Publish explicitly.** After approval, the CLI submits the exact reviewed
+10. **Review and approve.** The author reviews privacy, accuracy, and
+    completeness before any submission.
+11. **Publish explicitly.** After approval, the CLI submits the exact reviewed
     Markdown to the authoritative API and reports its allocated identifier.
 
 ## Example draft behavior
@@ -212,33 +216,60 @@ reading a small SHA-pinned UTF-8 source bundle. It does not clone the
 repository, run its code, install dependencies, or fetch
 arbitrary URLs.
 
-Pi runs with an in-memory credential store and session, with built-in tools,
-extensions, skills, prompt templates, themes, and repository context-file
-discovery disabled. The model receives a host-built source bundle; it cannot
-use a shell, read arbitrary files, browse the web, access environment
-variables, or call `publish`.
+Pi runs with an in-memory credential store and exactly two private logical
+sessions: an evidence session and an author session. Their append-only session
+files live inside the mode-`0700` run directory and are mode `0600`; Paperbot
+records and verifies their IDs and SHA-256 digests before reopening the author
+session. Built-in tools, extensions, skills, prompt templates, themes, and
+repository context-file discovery remain disabled. The model receives
+host-built bundles; it cannot use a shell, read arbitrary files, browse the
+web, access environment variables, or call `publish`.
 
 The agent writes a new private run directory with:
 
-- `run.json` — state, requested model, source revision, artifact paths, and
-  draft SHA-256;
+- `run.json` — schema-versioned state, requested model, source revision,
+  bounded workflow counters, session records, artifact paths, and draft/paper
+  SHA-256 values;
 - `source.json`, `scan.json`, and `source/` — the bounded private source
   snapshot and original scan inventory;
-- `evidence.jsonl` — claim-level repository, author, or inference
-  provenance; supplied external URLs remain reference-only until their
+- `evidence-candidates/`, `evidence-analysis.json`, and `evidence.jsonl` — the
+  evidence session's candidate checkpoints, unresolved analysis, and the
+  integrity-validated claim ledger. Each repository item has an
+  `evidence_id`, exact excerpt and digest, source ID, line locator, confidence,
+  and status. Supplied external URLs remain reference-only until their
   contents are explicitly snapshotted;
-- `draft.md`, `questions.md`, `review.json`, and `validation.json` — the draft,
-  unresolved author questions, independent review, and deterministic report.
+- `sessions/evidence/` and `sessions/author/` — the two private Pi
+  conversations;
+- `draft.md` and `drafts/` — the editable first draft and immutable accepted
+  draft checkpoints with deterministic validation reports;
+- `questions.jsonl`, `questions.md`, and `answers/` — the bounded author
+  interview protocol and copied answer checkpoints;
+- `paper.md` and `validation.json` — the final generated private paper and
+  current deterministic validation report.
 
-The model first drafts, then a fresh Pi session reviews the draft, and Paperbot
-allows one repair pass for structural or evidence-review errors. The workflow
-ends in `needs_author_review` even when draft validation passes. It never
-submits or publishes.
+The evidence session sees the bounded source bundle and returns evidence, not
+paper Markdown. After the integrity gate, the author session sees only the
+validated evidence excerpts, metadata, external reference URLs, and recorded
+unknowns. It creates a candidate, then reviews and revises that candidate in
+the same conversation. That pass is self-review, not an independent model
+review; an independent final evidence review is intentionally deferred.
 
-If the repair response fails host validation, Paperbot fails closed. When the
-initial draft and its review were valid, it retains those accepted artifacts
-for inspection and a later author-guided `resume`; it never writes the invalid
-repair over them.
+During review, the author session emits one of two host-controlled protocol
+events: `submit_draft` or `ask_questions`. `ask_questions` is not a public
+deterministic CLI tool. Paperbot checkpoints the questions, moves to
+`awaiting_author`, and later reopens the same logical author session through
+`agent resume`. The workflow permits at most three question rounds, two
+host-directed draft repair attempts per stage, and twelve author-session
+turns. Every submitted draft is checked for evidence IDs, fields, links, raw
+HTML, benchmark policy, and canonical paper structure before it is accepted.
+
+When no questions remain, Paperbot writes `paper.md` and ends in
+`needs_author_review`. A run waiting for answers has a validated draft
+checkpoint but no `paper.md` yet. Neither state submits or publishes. If a
+model response or restored artifact fails validation, Paperbot fails closed
+without replacing an accepted checkpoint. Run schema version 1 used the old
+multi-session draft/review protocol and is deliberately not resumable as a
+schema-version-2 conversation.
 
 The initial agent has no general web-search or page-fetch capability. Use
 `--source <public-url>` only to provide a citeable URL; it is not fetched and
@@ -292,11 +323,13 @@ never fills either in from GitHub. A batch supports up to 100 repositories and
 one to four concurrent runs. It creates one isolated child directory per
 repository plus an incrementally updated `batch.json` report. One project
 failure does not stop other projects, but the command exits nonzero if any
-project fails or its generated draft does not pass validation. The batch
-workflow never submits or publishes.
+project fails or its generated draft does not pass validation. A project that
+reaches `awaiting_author` is a successful private checkpoint; its result
+reports the pending question count and requires a later individual
+`agent resume`. The batch workflow never submits or publishes.
 
-To incorporate author answers, create a proposal rather than overwriting the
-reviewed draft:
+To answer the current bounded question round and continue the same logical
+author session:
 
 ```sh
 bun run paperbot agent resume ./paperbot-runs/openwork \
@@ -304,12 +337,13 @@ bun run paperbot agent resume ./paperbot-runs/openwork \
   --allow-remote-model
 ```
 
-This leaves `draft.md` intact and writes the next `proposal-<n>.md` with its
-own validation report. The author compares it with their draft and decides
-what to adopt. Before sending any revision prompt, Paperbot treats the saved
-run as untrusted input again: it rejects changed digests, symlinks,
-non-UTF-8 files, sensitive paths or markers, and source snapshots outside
-the original bounded limits.
+This copies the answers into `answers/`, appends an `author_supplied` evidence
+item, and either records another question round or writes another immutable
+checkpoint plus `paper.md`. It leaves the editable `draft.md` intact; manual
+edits are included in the resumed author context. Before sending any revision
+prompt, Paperbot treats the saved run as untrusted input again: it rejects
+changed session or excerpt digests, symlinks, non-UTF-8 files, sensitive paths
+or markers, and source snapshots outside the original bounded limits.
 
 ## Skill catalog
 

@@ -1,7 +1,3 @@
-import { lstat, readFile } from "node:fs/promises";
-
-import { marked, type Token, type Tokens } from "marked";
-
 import {
   ExitCode,
   PaperbotError,
@@ -16,30 +12,73 @@ import {
 } from "@prodxiv/paperbot-source";
 import {
   artifactPath,
-  ensureRunDirectory,
   initializeRunDirectory,
   sha256,
   writeJsonArtifact,
   writeTextArtifact,
 } from "./artifacts.ts";
 import {
+  appendAuthorEvidence,
+  buildValidatedEvidence,
+  evidenceIds,
+  formatEvidenceJsonLines,
+  parseStoredEvidence,
+  type AuthorEvidenceSource,
+} from "./evidence.ts";
+import {
   normalizeAgentMetadata,
   normalizeAnonymousHttpUrl,
   normalizeExternalSources,
 } from "./input.ts";
 import { redactModelSecrets } from "./model-config.ts";
+import {
+  assessDraft,
+  draftFromPaper,
+  emptyDraftResponse,
+  type DraftAssessment,
+} from "./paper.ts";
 import { PiAuthoringRuntime } from "./pi.ts";
 import {
+  createAnswersPrompt,
+  createDraftCorrectionPrompt,
   createDraftPrompt,
-  createRepairPrompt,
-  createReviewPrompt,
+  createEvidenceCorrectionPrompt,
+  createEvidencePrompt,
+  createSelfReviewPrompt,
 } from "./prompts.ts";
 import {
+  parseAuthoringResponse,
   parseDraftResponse,
-  parseReviewResponse,
-  validateEvidenceSourceIds,
-  validateReviewSourceIds,
+  parseEvidenceResponse,
+  validateAuthoringEvidenceIds,
+  validateConflictSourceIds,
+  validateEvidenceCandidateSourceIds,
 } from "./responses.ts";
+import {
+  assertRestoredSourceMatchesRunRecord,
+  assertResumableRecord,
+  createRunRecord,
+  MAX_AUTHOR_ANSWERS_BYTES,
+  MAX_AUTHOR_QUESTION_ROUNDS,
+  MAX_EVIDENCE_BYTES,
+  MAX_SESSION_BYTES,
+  pendingQuestionsFor,
+  persistRunRecord,
+  readArtifact,
+  readAuthorEvidenceSources,
+  readCurrentDraft,
+  readEvidenceAnalysis,
+  readQuestions,
+  readQuestionsIfPresent,
+  readRequiredArtifact,
+  readRunRecord,
+  relativeArtifact,
+  requiredSessionRecord,
+  resolveExistingRun,
+  sourceRecord,
+  writeQuestionsArtifacts,
+  type StoredEvidenceAnalysis,
+} from "./run-store.ts";
 import {
   acquireLocalSource,
   agent_source_limits,
@@ -51,18 +90,24 @@ import type {
   AgentPaperMetadata,
   AgentRunRecord,
   AgentRunResult,
-  AgentRunSourceRecord,
+  AgentSessionRecord,
+  AgentSessionRole,
   AgentSource,
+  AskQuestionsResponse,
+  AuthoringResponse,
   AuthoringRuntime,
-  DraftResponse,
-  ReviewResponse,
+  AuthoringSession,
+  AuthorQuestion,
+  EvidenceItem,
 } from "./types.ts";
 
-const MAX_RESUME_DRAFT_BYTES = 256 * 1024;
-const MAX_AUTHOR_ANSWERS_BYTES = 32 * 1024;
-const MAX_RUN_RECORD_BYTES = 128 * 1024;
-const MAX_REVIEW_BYTES = 128 * 1024;
-const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const MAX_EVIDENCE_REPAIR_ATTEMPTS = 1;
+const MAX_DRAFT_REPAIR_ATTEMPTS = 2;
+const MAX_EVIDENCE_SESSION_TURNS = 4;
+const MAX_AUTHOR_SESSION_TURNS = 12;
+
+export { MAX_AUTHOR_QUESTION_ROUNDS } from "./run-store.ts";
+export { renderPaper } from "./paper.ts";
 
 export interface AgentRunOptions {
   repository: string;
@@ -103,28 +148,23 @@ export async function runAgent(
   );
   const runPath = await initializeRunDirectory(options.output_path);
   const model = normalizeModelName(options.model ?? "deepseek-v4-flash");
-  let record: AgentRunRecord = createRunRecord(
+  let record = createRunRecord(
     { ...options, metadata: requestedMetadata },
     model,
     externalSources,
-    dependencies,
+    now(dependencies).toISOString(),
   );
+  let evidenceSession: AuthoringSession | undefined;
+  let authorSession: AuthoringSession | undefined;
   await persistRunRecord(runPath, record);
 
   try {
     const source = await acquireSource(options, dependencies);
     const metadata = completeMetadata(requestedMetadata, source);
-    record = {
-      ...record,
-      updated_at: now(dependencies).toISOString(),
-      input: {
-        ...record.input,
-        metadata,
-      },
-      state: "source_ready",
-      source: sourceRecord(source),
-    };
     const sourceArtifacts = await writeSourceArtifacts(runPath, source);
+    record.input.metadata = metadata;
+    record.state = "inputs_ready";
+    record.source = sourceRecord(source);
     record.artifacts.source = relativeArtifact(
       runPath,
       sourceArtifacts.source_path,
@@ -133,128 +173,124 @@ export async function runAgent(
       runPath,
       sourceArtifacts.scan_path,
     );
+    record.updated_at = now(dependencies).toISOString();
     await persistRunRecord(runPath, record);
 
     const runtime = runtimeFor(model, dependencies);
-    const draft = await generateDraft(runtime, {
+    evidenceSession = await runtime.startSession({
+      role: "evidence",
+      run_path: runPath,
+    });
+    const { analysis, evidence } = await produceEvidence({
+      runtime_session: evidenceSession,
       source,
       metadata,
       external_sources: externalSources,
       run_path: runPath,
+      record,
+      dependencies,
     });
-    const allowedSourceIds = availableEvidenceSourceIds(source);
-    validateEvidenceSourceIds(draft.evidence, allowedSourceIds);
-    const initialDraftLinkDiagnostics = draftLinkDiagnostics(
-      draft.markdown,
-      allowedMarkdownUrls(metadata, externalSources),
-    );
-    const initialDraftFieldDiagnostics = draftFieldDiagnostics(draft);
-    let paper = renderPaper(metadata, draft);
-    let validation = validatePaperSource(
-      paper,
-      artifactPath(runPath, "draft.md"),
-      "draft",
-    );
-    const initialDraftIsValid =
-      validation.report.valid &&
-      initialDraftFieldDiagnostics.length === 0 &&
-      initialDraftLinkDiagnostics.length === 0;
+    await evidenceSession.dispose();
+    evidenceSession = undefined;
 
-    record.state = "drafted";
-    record.updated_at = now(dependencies).toISOString();
-    if (initialDraftIsValid) {
-      await writeDraftArtifacts(runPath, draft, paper);
-      record.artifacts.evidence = "evidence.jsonl";
-      record.artifacts.draft = "draft.md";
-      record.artifacts.questions = "questions.md";
-      record.draft_sha256 = sha256(paper);
-    }
-    await persistRunRecord(runPath, record);
-
-    const review = await generateReview(runtime, {
-      source,
-      metadata,
-      external_sources: externalSources,
-      draft,
+    authorSession = await runtime.startSession({
+      role: "author",
       run_path: runPath,
     });
-    validateReviewSourceIds(review, allowedSourceIds);
-    await writeJsonArtifact(runPath, "review.json", {
-      schema_version: "1",
-      reviewed_at: now(dependencies).toISOString(),
-      issues: review.issues,
-      questions: review.questions,
-    });
-    await writeJsonArtifact(runPath, "validation.json", validation.report);
-    record.artifacts.review = "review.json";
-    record.artifacts.validation = "validation.json";
-    record.state = "reviewed";
+    record.state = "authoring";
+    record.workflow.author_phase = "drafting";
     record.updated_at = now(dependencies).toISOString();
     await persistRunRecord(runPath, record);
 
-    if (
-      review.issues.some((issue) => issue.severity === "error") ||
-      !validation.report.valid ||
-      initialDraftFieldDiagnostics.length > 0 ||
-      initialDraftLinkDiagnostics.length > 0
-    ) {
-      const repaired = await generateRepair(runtime, {
+    const initialDraft = await parseWithOneRetry(
+      authorSession,
+      "author",
+      createDraftPrompt({
         source,
         metadata,
         external_sources: externalSources,
-        draft,
-        review,
-        validation_diagnostics: validation.report.diagnostics
-          .map(
-            (diagnostic) =>
-              `${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
-          )
-          .concat(initialDraftFieldDiagnostics, initialDraftLinkDiagnostics),
-        run_path: runPath,
-      });
-      validateEvidenceSourceIds(repaired.evidence, allowedSourceIds);
-      assertValidDraftFields(repaired);
-      validateDraftLinks(
-        repaired.markdown,
-        allowedMarkdownUrls(metadata, externalSources),
+        evidence,
+        analysis,
+      }),
+      runPath,
+      record,
+      dependencies,
+      parseDraftResponse,
+      "initial draft",
+    );
+    const initialResolution = await resolveDraftResponse({
+      initial_response: initialDraft,
+      allow_questions: false,
+      session: authorSession,
+      source,
+      metadata,
+      external_sources: externalSources,
+      evidence,
+      run_path: runPath,
+      record,
+      dependencies,
+    });
+    if (initialResolution.action === "ask_questions") {
+      throw new PaperbotError(
+        "authoring session asked questions before producing its first draft",
+        ExitCode.validation,
       );
-      paper = renderPaper(metadata, repaired);
-      validation = validatePaperSource(
-        paper,
-        artifactPath(runPath, "draft.md"),
-        "draft",
+    }
+    await checkpointDraft(runPath, record, initialResolution, dependencies);
+
+    const reviewResponse = await parseWithOneRetry(
+      authorSession,
+      "author",
+      createSelfReviewPrompt({
+        source,
+        metadata,
+        external_sources: externalSources,
+        evidence,
+        analysis,
+        draft: initialResolution.draft,
+        remaining_question_rounds: remainingQuestionRounds(record),
+      }),
+      runPath,
+      record,
+      dependencies,
+      parseAuthoringResponse,
+      "draft review",
+    );
+    const reviewResolution = await resolveDraftResponse({
+      initial_response: reviewResponse,
+      allow_questions: remainingQuestionRounds(record) > 0,
+      session: authorSession,
+      source,
+      metadata,
+      external_sources: externalSources,
+      evidence,
+      run_path: runPath,
+      record,
+      dependencies,
+    });
+    if (reviewResolution.action === "ask_questions") {
+      await checkpointQuestions(
+        runPath,
+        record,
+        reviewResolution,
+        [],
+        dependencies,
       );
-      assertValidGeneratedPaper(validation, "revision");
-      await writeDraftArtifacts(runPath, repaired, paper, review.questions);
-      record.artifacts.evidence = "evidence.jsonl";
-      record.artifacts.draft = "draft.md";
-      record.artifacts.questions = "questions.md";
-      record.draft_sha256 = sha256(paper);
-      await writeJsonArtifact(runPath, "validation.json", validation.report);
+      return runResult(runPath, record, initialResolution.validation, source);
     }
 
-    record.state = "needs_author_review";
-    record.updated_at = now(dependencies).toISOString();
-    await persistRunRecord(runPath, record);
-
-    return {
-      run_path: runPath,
-      state: record.state,
-      validation: {
-        valid: validation.report.valid,
-        diagnostics: validation.report.diagnostics.length,
-      },
-      source: {
-        resolved_revision: source.resolved_revision,
-        selected_file_count: source.files.length,
-      },
-    };
+    await checkpointDraft(runPath, record, reviewResolution, dependencies);
+    await finalizePaper(runPath, record, reviewResolution, dependencies);
+    return runResult(runPath, record, reviewResolution.validation, source);
   } catch (error) {
     record.state = "failed";
     record.updated_at = now(dependencies).toISOString();
     record.error = { message: safeErrorMessage(error) };
     await persistRunRecord(runPath, record).catch(() => undefined);
     throw error;
+  } finally {
+    await evidenceSession?.dispose();
+    await authorSession?.dispose();
   }
 }
 
@@ -270,105 +306,619 @@ export async function resumeAgent(
   }
   const runPath = await resolveExistingRun(options.run_path);
   const record = await readRunRecord(runPath);
+  assertResumableRecord(record, runPath);
   const metadata = normalizeAgentMetadata(record.input.metadata);
   const externalSources = normalizeExternalSources(
     record.input.external_sources,
   );
-  const draftPath = artifactPath(runPath, "draft.md");
-  const currentDraft = await readArtifact(
-    draftPath,
-    "draft",
-    MAX_RESUME_DRAFT_BYTES,
+  const source = await readSourceArtifact(runPath);
+  assertRestoredSourceMatchesRunRecord(source, record, runPath);
+  const analysis = await readEvidenceAnalysis(runPath, source, record);
+  const authorSources = await readAuthorEvidenceSources(runPath, record);
+  let evidence = parseStoredEvidence(
+    await readRequiredArtifact(
+      runPath,
+      record.artifacts.evidence,
+      "evidence",
+      MAX_EVIDENCE_BYTES,
+    ),
+    source,
+    authorSources,
   );
+  const questionHistory = await readQuestions(runPath, record, evidence);
+  const pendingQuestions = pendingQuestionsFor(record, questionHistory);
   const answers = await readArtifact(
     options.answers_path,
     "answers",
     MAX_AUTHOR_ANSWERS_BYTES,
   );
-  const source = await readSourceArtifact(runPath);
-  assertRestoredSourceMatchesRunRecord(source, record, runPath);
-  const review = await readReviewArtifact(
-    runPath,
-    availableEvidenceSourceIds(source),
-  );
+  const currentPaper = await readCurrentDraft(runPath, record);
+  const currentDraft = draftFromPaper(currentPaper, evidence);
+  const answerRound = record.workflow.question_rounds;
+  const answerArtifact = `answers/round-${answerRound}.md`;
+  if (record.artifacts.answers?.includes(answerArtifact)) {
+    const storedAnswers = await readArtifact(
+      artifactPath(runPath, answerArtifact),
+      "stored answers",
+      MAX_AUTHOR_ANSWERS_BYTES,
+    );
+    if (storedAnswers !== answers) {
+      throw new PaperbotError(
+        `author answers for round ${answerRound} were already recorded`,
+        ExitCode.io,
+      );
+    }
+  } else {
+    await writeTextArtifact(runPath, answerArtifact, answers);
+    record.artifacts.answers = [
+      ...(record.artifacts.answers ?? []),
+      answerArtifact,
+    ];
+  }
+  const authorSource: AuthorEvidenceSource = {
+    source_id: `author:answers:round-${answerRound}`,
+    path: answerArtifact,
+    content: answers,
+  };
+  if (!evidence.some((item) => item.source_id === authorSource.source_id)) {
+    evidence = appendAuthorEvidence(evidence, authorSource, answerRound);
+    await writeTextArtifact(
+      runPath,
+      "evidence.jsonl",
+      formatEvidenceJsonLines(evidence),
+    );
+  }
+  record.state = "authoring";
+  record.updated_at = now(dependencies).toISOString();
+  delete record.error;
+  await persistRunRecord(runPath, record);
+
   const runtime = runtimeFor(
     normalizeModelName(options.model ?? record.agent.model),
     dependencies,
   );
-  const draft = draftFromPaper(currentDraft);
-  const repaired = await generateRepair(runtime, {
-    source,
-    metadata,
-    external_sources: externalSources,
-    draft,
-    review,
-    validation_diagnostics: [],
-    answers,
-    run_path: runPath,
-  });
-  const allowedSourceIds = availableEvidenceSourceIds(source, true);
-  validateEvidenceSourceIds(repaired.evidence, allowedSourceIds);
-  assertValidDraftFields(repaired);
-  validateDraftLinks(
-    repaired.markdown,
-    allowedMarkdownUrls(metadata, externalSources),
-  );
-  const proposal = renderPaper(metadata, repaired);
-  const proposalName = await nextProposalName(runPath);
-  const validation = validatePaperSource(
-    proposal,
-    artifactPath(runPath, proposalName),
-    "draft",
-  );
-  assertValidGeneratedPaper(validation, "proposal");
-  await writeTextArtifact(runPath, proposalName, proposal);
-  await writeJsonArtifact(
-    runPath,
-    `${proposalName}.validation.json`,
-    validation.report,
-  );
-  return {
-    run_path: runPath,
-    state: "needs_author_review",
-    validation: {
-      valid: validation.report.valid,
-      diagnostics: validation.report.diagnostics.length,
-    },
-    source: {
-      resolved_revision: source.resolved_revision,
-      selected_file_count: source.files.length,
-    },
-  };
+  let authorSession: AuthoringSession | undefined;
+  try {
+    const storedSession = requiredSessionRecord(record, "author", runPath);
+    const sessionPath = await verifiedSessionPath(
+      runPath,
+      "author",
+      storedSession,
+    );
+    authorSession = await runtime.startSession({
+      role: "author",
+      run_path: runPath,
+      session_id: storedSession.session_id,
+      ...(sessionPath === undefined ? {} : { session_path: sessionPath }),
+    });
+    const response = await parseWithOneRetry(
+      authorSession,
+      "author",
+      createAnswersPrompt({
+        source,
+        metadata,
+        external_sources: externalSources,
+        evidence,
+        analysis,
+        draft: currentDraft,
+        questions: pendingQuestions,
+        answers,
+        remaining_question_rounds: remainingQuestionRounds(record),
+      }),
+      runPath,
+      record,
+      dependencies,
+      parseAuthoringResponse,
+      "author-guided revision",
+    );
+    const resolution = await resolveDraftResponse({
+      initial_response: response,
+      allow_questions: remainingQuestionRounds(record) > 0,
+      session: authorSession,
+      source,
+      metadata,
+      external_sources: externalSources,
+      evidence,
+      run_path: runPath,
+      record,
+      dependencies,
+    });
+    if (resolution.action === "ask_questions") {
+      const currentValidation = validatePaperSource(
+        currentPaper,
+        artifactPath(runPath, record.workflow.current_draft ?? "draft.md"),
+        "draft",
+      );
+      await checkpointQuestions(
+        runPath,
+        record,
+        resolution,
+        questionHistory,
+        dependencies,
+      );
+      return runResult(runPath, record, currentValidation, source);
+    }
+    await checkpointDraft(runPath, record, resolution, dependencies);
+    await finalizePaper(runPath, record, resolution, dependencies);
+    return runResult(runPath, record, resolution.validation, source);
+  } catch (error) {
+    record.state = "failed";
+    record.updated_at = now(dependencies).toISOString();
+    record.error = { message: safeErrorMessage(error) };
+    await persistRunRecord(runPath, record).catch(() => undefined);
+    throw error;
+  } finally {
+    await authorSession?.dispose();
+  }
 }
 
-export function renderPaper(
-  metadata: AgentPaperMetadata,
-  draft: Pick<DraftResponse, "summary" | "topics" | "markdown">,
-): string {
-  const frontMatter = [
-    'schema_version: "1"',
-    `title: ${JSON.stringify(metadata.title)}`,
-    `product_name: ${JSON.stringify(metadata.product_name)}`,
-    "scope:",
-    "  kind: product",
-    `summary: ${JSON.stringify(draft.summary.trim())}`,
-    "authors:",
-    ...metadata.authors.map((author) => `  - name: ${JSON.stringify(author)}`),
-    `status: ${JSON.stringify(metadata.status)}`,
-    "topics:",
-    ...draft.topics.map((topic) => `  - ${JSON.stringify(topic)}`),
-    ...(metadata.product_url === undefined
-      ? []
-      : [`product_url: ${JSON.stringify(metadata.product_url)}`]),
-    ...(metadata.repository_url === undefined
-      ? []
-      : [`repository_url: ${JSON.stringify(metadata.repository_url)}`]),
-  ].join("\n");
-  const notice = [
-    "> **Private research draft.** This paper was generated from bounded public repository evidence and has not been reviewed or endorsed by the product maintainers.",
-    "> Confirm factual claims, product status, author attribution, related-work comparisons, and publication rights before submitting it.",
-  ].join("\n");
-  return `---\n${frontMatter}\n---\n\n${notice}\n\n${draft.markdown.trim()}\n`;
+async function produceEvidence(input: {
+  runtime_session: AuthoringSession;
+  source: AgentSource;
+  metadata: AgentPaperMetadata;
+  external_sources: string[];
+  run_path: string;
+  record: AgentRunRecord;
+  dependencies: AgentRunnerDependencies;
+}): Promise<{ analysis: StoredEvidenceAnalysis; evidence: EvidenceItem[] }> {
+  let response = await parseWithOneRetry(
+    input.runtime_session,
+    "evidence",
+    createEvidencePrompt(input),
+    input.run_path,
+    input.record,
+    input.dependencies,
+    parseEvidenceResponse,
+    "evidence analysis",
+  );
+  for (let attempt = 0; attempt <= MAX_EVIDENCE_REPAIR_ATTEMPTS; attempt += 1) {
+    const candidateArtifact = `evidence-candidates/candidate-${attempt + 1}.json`;
+    await writeJsonArtifact(input.run_path, candidateArtifact, {
+      schema_version: "1",
+      ...response,
+    });
+    input.record.state = "evidence_ready";
+    input.record.artifacts.evidence_candidates = candidateArtifact;
+    input.record.updated_at = now(input.dependencies).toISOString();
+    await persistRunRecord(input.run_path, input.record);
+    try {
+      const allowedSourceIds = availableSourceIds(input.source);
+      validateEvidenceCandidateSourceIds(response.evidence, allowedSourceIds);
+      validateConflictSourceIds(response.contradictions, allowedSourceIds);
+      const evidence = buildValidatedEvidence(response.evidence, input.source);
+      const analysis: StoredEvidenceAnalysis = {
+        schema_version: "1",
+        contradictions: response.contradictions,
+        unknowns: response.unknowns,
+        questions: response.questions,
+      };
+      await writeTextArtifact(
+        input.run_path,
+        "evidence.jsonl",
+        formatEvidenceJsonLines(evidence),
+      );
+      await writeJsonArtifact(
+        input.run_path,
+        "evidence-analysis.json",
+        analysis,
+      );
+      input.record.state = "evidence_validated";
+      input.record.artifacts.evidence = "evidence.jsonl";
+      input.record.artifacts.evidence_analysis = "evidence-analysis.json";
+      input.record.updated_at = now(input.dependencies).toISOString();
+      await persistRunRecord(input.run_path, input.record);
+      return { analysis, evidence };
+    } catch (error) {
+      if (
+        attempt >= MAX_EVIDENCE_REPAIR_ATTEMPTS ||
+        !(error instanceof PaperbotError) ||
+        error.exit_code !== ExitCode.validation
+      ) {
+        throw error;
+      }
+      response = await parseWithOneRetry(
+        input.runtime_session,
+        "evidence",
+        createEvidenceCorrectionPrompt({ diagnostics: [error.message] }),
+        input.run_path,
+        input.record,
+        input.dependencies,
+        parseEvidenceResponse,
+        "corrected evidence analysis",
+      );
+    }
+  }
+  throw new PaperbotError(
+    "evidence analysis exhausted its repair limit",
+    ExitCode.validation,
+  );
+}
+
+async function resolveDraftResponse(input: {
+  initial_response: AuthoringResponse;
+  allow_questions: boolean;
+  session: AuthoringSession;
+  source: AgentSource;
+  metadata: AgentPaperMetadata;
+  external_sources: string[];
+  evidence: EvidenceItem[];
+  run_path: string;
+  record: AgentRunRecord;
+  dependencies: AgentRunnerDependencies;
+}): Promise<AskQuestionsResponse | DraftAssessment> {
+  let response = input.initial_response;
+  for (let attempt = 0; attempt <= MAX_DRAFT_REPAIR_ATTEMPTS; attempt += 1) {
+    try {
+      validateAuthoringEvidenceIds(response, evidenceIds(input.evidence));
+    } catch (error) {
+      if (!(error instanceof PaperbotError)) {
+        throw error;
+      }
+      if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+        throw error;
+      }
+      input.record.workflow.repair_attempts = attempt + 1;
+      response = await parseWithOneRetry(
+        input.session,
+        "author",
+        createDraftCorrectionPrompt({
+          draft:
+            response.action === "submit_draft"
+              ? response
+              : emptyDraftResponse(input.evidence),
+          diagnostics: [error.message],
+          remaining_question_rounds: input.allow_questions
+            ? remainingQuestionRounds(input.record)
+            : 0,
+        }),
+        input.run_path,
+        input.record,
+        input.dependencies,
+        input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
+        "evidence-bound draft correction",
+      );
+      continue;
+    }
+    if (response.action === "ask_questions") {
+      if (input.allow_questions) {
+        input.record.workflow.repair_attempts = 0;
+        return response;
+      }
+      if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+        throw new PaperbotError(
+          "authoring session exceeded the question-round limit",
+          ExitCode.validation,
+        );
+      }
+      input.record.workflow.repair_attempts = attempt + 1;
+      response = await parseWithOneRetry(
+        input.session,
+        "author",
+        createDraftCorrectionPrompt({
+          draft: emptyDraftResponse(input.evidence),
+          diagnostics: [
+            "A full draft is required now; no author-question round is available in this phase.",
+          ],
+          remaining_question_rounds: 0,
+        }),
+        input.run_path,
+        input.record,
+        input.dependencies,
+        parseDraftResponse,
+        "required draft correction",
+      );
+      continue;
+    }
+    const assessment = assessDraft(
+      input.metadata,
+      input.external_sources,
+      input.evidence,
+      input.run_path,
+      response,
+    );
+    if (assessment.diagnostics.length === 0) {
+      input.record.workflow.repair_attempts = 0;
+      return assessment;
+    }
+    if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+      throw invalidDraftError(assessment.diagnostics);
+    }
+    input.record.workflow.repair_attempts = attempt + 1;
+    response = await parseWithOneRetry(
+      input.session,
+      "author",
+      createDraftCorrectionPrompt({
+        draft: response,
+        diagnostics: assessment.diagnostics,
+        remaining_question_rounds: input.allow_questions
+          ? remainingQuestionRounds(input.record)
+          : 0,
+      }),
+      input.run_path,
+      input.record,
+      input.dependencies,
+      input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
+      "draft correction",
+    );
+  }
+  throw new PaperbotError(
+    "authoring session exhausted its repair limit",
+    ExitCode.validation,
+  );
+}
+
+async function checkpointDraft(
+  runPath: string,
+  record: AgentRunRecord,
+  assessment: DraftAssessment,
+  dependencies: AgentRunnerDependencies,
+): Promise<void> {
+  const revision = record.workflow.draft_revision + 1;
+  const markdownArtifact = `drafts/draft-${revision}.md`;
+  const responseArtifact = `drafts/draft-${revision}.json`;
+  const validationArtifact = `drafts/draft-${revision}.validation.json`;
+  await writeTextArtifact(runPath, markdownArtifact, assessment.paper);
+  await writeJsonArtifact(runPath, responseArtifact, assessment.draft);
+  await writeJsonArtifact(
+    runPath,
+    validationArtifact,
+    assessment.validation.report,
+  );
+  await writeJsonArtifact(
+    runPath,
+    "validation.json",
+    assessment.validation.report,
+  );
+  if (revision === 1) {
+    await writeTextArtifact(runPath, "draft.md", assessment.paper);
+    record.artifacts.draft = "draft.md";
+  }
+  record.artifacts.drafts = [
+    ...(record.artifacts.drafts ?? []),
+    markdownArtifact,
+  ];
+  record.artifacts.validation = "validation.json";
+  record.workflow.current_draft = markdownArtifact;
+  record.workflow.draft_revision = revision;
+  record.workflow.author_phase = "reviewing";
+  record.workflow.repair_attempts = 0;
+  record.draft_sha256 = sha256(assessment.paper);
+  record.state = "authoring";
+  record.updated_at = now(dependencies).toISOString();
+  await persistRunRecord(runPath, record);
+}
+
+async function checkpointQuestions(
+  runPath: string,
+  record: AgentRunRecord,
+  response: AskQuestionsResponse,
+  history: AuthorQuestion[],
+  dependencies: AgentRunnerDependencies,
+): Promise<void> {
+  if (remainingQuestionRounds(record) <= 0) {
+    throw new PaperbotError(
+      `agent author questions are limited to ${MAX_AUTHOR_QUESTION_ROUNDS} rounds`,
+      ExitCode.validation,
+    );
+  }
+  const round = record.workflow.question_rounds + 1;
+  const nextIndex = history.length + 1;
+  const questions = response.questions.map((question, index) => ({
+    question_id: `question:${(nextIndex + index).toString().padStart(3, "0")}`,
+    ...question,
+  }));
+  const allQuestions = [...history, ...questions];
+  await writeQuestionsArtifacts(
+    runPath,
+    allQuestions,
+    new Set(questions.map((question) => question.question_id)),
+    [],
+  );
+  record.state = "awaiting_author";
+  record.workflow.question_rounds = round;
+  record.workflow.pending_question_ids = questions.map(
+    (question) => question.question_id,
+  );
+  record.artifacts.questions = "questions.jsonl";
+  record.updated_at = now(dependencies).toISOString();
+  await persistRunRecord(runPath, record);
+}
+
+async function finalizePaper(
+  runPath: string,
+  record: AgentRunRecord,
+  assessment: DraftAssessment,
+  dependencies: AgentRunnerDependencies,
+): Promise<void> {
+  const questionHistory = await readQuestionsIfPresent(runPath, record);
+  await writeTextArtifact(runPath, "paper.md", assessment.paper);
+  await writeQuestionsArtifacts(
+    runPath,
+    questionHistory,
+    new Set(),
+    assessment.draft.unresolved_questions,
+  );
+  record.state = "needs_author_review";
+  record.workflow.pending_question_ids = [];
+  record.artifacts.paper = "paper.md";
+  record.artifacts.questions = "questions.jsonl";
+  record.paper_sha256 = sha256(assessment.paper);
+  record.updated_at = now(dependencies).toISOString();
+  await persistRunRecord(runPath, record);
+}
+
+async function parseWithOneRetry<T>(
+  session: AuthoringSession,
+  role: AgentSessionRole,
+  prompt: string,
+  runPath: string,
+  record: AgentRunRecord,
+  dependencies: AgentRunnerDependencies,
+  parser: (value: string) => T,
+  operation: string,
+): Promise<T> {
+  let response = await completeModelTurn(
+    session,
+    role,
+    prompt,
+    runPath,
+    record,
+    dependencies,
+  );
+  try {
+    return parser(response);
+  } catch (firstError) {
+    if (!(firstError instanceof PaperbotError)) {
+      throw firstError;
+    }
+    response = await completeModelTurn(
+      session,
+      role,
+      [
+        `Your previous ${operation} response could not be parsed: ${firstError.message}`,
+        "Return exactly one valid fenced JSON object in the shape requested by the previous turn, with no prose outside it.",
+      ].join("\n\n"),
+      runPath,
+      record,
+      dependencies,
+    );
+    return parser(response);
+  }
+}
+
+async function completeModelTurn(
+  session: AuthoringSession,
+  role: AgentSessionRole,
+  prompt: string,
+  runPath: string,
+  record: AgentRunRecord,
+  dependencies: AgentRunnerDependencies,
+): Promise<string> {
+  const currentTurns = record.sessions[role]?.turn_count ?? 0;
+  const maximumTurns =
+    role === "evidence" ? MAX_EVIDENCE_SESSION_TURNS : MAX_AUTHOR_SESSION_TURNS;
+  if (currentTurns >= maximumTurns) {
+    throw new PaperbotError(
+      `${role} session exceeded its ${maximumTurns}-turn limit`,
+      ExitCode.validation,
+    );
+  }
+  let completion;
+  try {
+    completion = await session.complete({ prompt });
+  } catch (error) {
+    // Pi may persist the user turn before a provider failure. Keep the host's
+    // digest and turn counter aligned with that durable session so a retry is
+    // not mistaken for artifact tampering.
+    await checkpointSession(
+      runPath,
+      record,
+      role,
+      session,
+      currentTurns + 1,
+      dependencies,
+    );
+    throw error;
+  }
+  await checkpointSession(
+    runPath,
+    record,
+    role,
+    session,
+    currentTurns + 1,
+    dependencies,
+  );
+  return completion.final_text;
+}
+
+async function checkpointSession(
+  runPath: string,
+  record: AgentRunRecord,
+  role: AgentSessionRole,
+  session: AuthoringSession,
+  turnCount: number,
+  dependencies: AgentRunnerDependencies,
+): Promise<void> {
+  const snapshot = session.snapshot();
+  const existing = record.sessions[role];
+  if (existing !== undefined && existing.session_id !== snapshot.session_id) {
+    throw new PaperbotError(
+      `${role} session ID changed during the Paperbot run`,
+      ExitCode.io,
+    );
+  }
+  let artifact: string | undefined;
+  let artifactSha256: string | undefined;
+  if (snapshot.session_path !== undefined) {
+    artifact = relativeArtifact(runPath, snapshot.session_path);
+    if (!artifact.startsWith(`sessions/${role}/`)) {
+      throw new PaperbotError(
+        `${role} session artifact is outside its private directory`,
+        ExitCode.io,
+      );
+    }
+    const serialized = await readArtifact(
+      snapshot.session_path,
+      `${role} session`,
+      MAX_SESSION_BYTES,
+    );
+    artifactSha256 = sha256(serialized);
+  }
+  record.sessions[role] = {
+    session_id: snapshot.session_id,
+    ...(artifact === undefined ? {} : { artifact }),
+    ...(artifactSha256 === undefined
+      ? {}
+      : { artifact_sha256: artifactSha256 }),
+    turn_count: turnCount,
+  };
+  record.updated_at = now(dependencies).toISOString();
+  await persistRunRecord(runPath, record);
+}
+
+async function verifiedSessionPath(
+  runPath: string,
+  role: AgentSessionRole,
+  session: AgentSessionRecord,
+): Promise<string | undefined> {
+  if (session.artifact === undefined && session.artifact_sha256 === undefined) {
+    return undefined;
+  }
+  if (
+    session.artifact === undefined ||
+    session.artifact_sha256 === undefined ||
+    !session.artifact.startsWith(`sessions/${role}/`) ||
+    !/^[0-9a-f]{64}$/.test(session.artifact_sha256)
+  ) {
+    throw new PaperbotError(
+      `agent ${role} session record is invalid: ${runPath}`,
+      ExitCode.io,
+    );
+  }
+  const path = artifactPath(runPath, session.artifact);
+  const serialized = await readArtifact(
+    path,
+    `${role} session`,
+    MAX_SESSION_BYTES,
+  );
+  if (sha256(serialized) !== session.artifact_sha256) {
+    throw new PaperbotError(
+      `agent ${role} session artifact was changed: ${runPath}`,
+      ExitCode.io,
+    );
+  }
+  return path;
+}
+
+function invalidDraftError(diagnostics: string[]): PaperbotError {
+  return new PaperbotError(
+    `agent returned an invalid draft after ${MAX_DRAFT_REPAIR_ATTEMPTS} repair attempts: ${diagnostics.join("; ")}`,
+    ExitCode.validation,
+  );
+}
+
+function availableSourceIds(source: AgentSource): Set<string> {
+  return new Set(source.files.map((file) => file.source_id));
 }
 
 async function acquireSource(
@@ -425,266 +975,6 @@ function normalizeModelName(value: unknown): string {
     );
   }
   return value;
-}
-
-async function generateDraft(
-  runtime: AuthoringRuntime,
-  input: {
-    source: AgentSource;
-    metadata: AgentPaperMetadata;
-    external_sources: string[];
-    run_path: string;
-  },
-): Promise<DraftResponse> {
-  return parseWithOneRetry(
-    runtime,
-    createDraftPrompt(input),
-    input.run_path,
-    parseDraftResponse,
-    "initial draft",
-  );
-}
-
-async function generateReview(
-  runtime: AuthoringRuntime,
-  input: {
-    source: AgentSource;
-    metadata: AgentPaperMetadata;
-    external_sources: string[];
-    draft: DraftResponse;
-    run_path: string;
-  },
-): Promise<ReviewResponse> {
-  return parseWithOneRetry(
-    runtime,
-    createReviewPrompt(input),
-    input.run_path,
-    parseReviewResponse,
-    "review",
-  );
-}
-
-async function generateRepair(
-  runtime: AuthoringRuntime,
-  input: {
-    source: AgentSource;
-    metadata: AgentPaperMetadata;
-    external_sources: string[];
-    draft: DraftResponse;
-    review: ReviewResponse;
-    validation_diagnostics: string[];
-    answers?: string;
-    run_path: string;
-  },
-): Promise<DraftResponse> {
-  return parseWithOneRetry(
-    runtime,
-    createRepairPrompt(input),
-    input.run_path,
-    parseDraftResponse,
-    "revision",
-  );
-}
-
-async function parseWithOneRetry<T>(
-  runtime: AuthoringRuntime,
-  prompt: string,
-  runPath: string,
-  parser: (value: string) => T,
-  operation: string,
-): Promise<T> {
-  let response = await runtime.complete({ prompt, run_path: runPath });
-  try {
-    return parser(response.final_text);
-  } catch (firstError) {
-    if (!(firstError instanceof PaperbotError)) {
-      throw firstError;
-    }
-    response = await runtime.complete({
-      prompt: `${prompt}\n\nYour previous ${operation} response could not be parsed: ${firstError.message}\nReturn exactly one valid fenced JSON object in the requested shape, with no prose outside it.`,
-      run_path: runPath,
-    });
-    return parser(response.final_text);
-  }
-}
-
-function draftFieldDiagnostics(draft: DraftResponse): string[] {
-  const diagnostics: string[] = [];
-  if (draft.topics.length === 0 || draft.topics.length > 5) {
-    diagnostics.push("topics must contain one to five labels");
-  }
-  const seen = new Set<string>();
-  for (const topic of draft.topics) {
-    if (!/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(topic) || seen.has(topic)) {
-      diagnostics.push("topics must be unique lowercase snake_case labels");
-      break;
-    }
-    seen.add(topic);
-  }
-  if (/^#\s+Benchmarks\s*$/im.test(draft.markdown)) {
-    diagnostics.push(
-      "remove the Benchmarks section because no explicit reproducible benchmark input was supplied",
-    );
-  }
-  return diagnostics;
-}
-
-function assertValidDraftFields(draft: DraftResponse): void {
-  const diagnostics = draftFieldDiagnostics(draft);
-  if (diagnostics.length > 0) {
-    throw new PaperbotError(
-      `agent returned an invalid revision: ${diagnostics.join("; ")}`,
-      ExitCode.validation,
-    );
-  }
-}
-
-function assertValidGeneratedPaper(
-  validation: PaperValidationResult,
-  artifactName: "proposal" | "revision",
-): void {
-  if (validation.report.valid) {
-    return;
-  }
-  const diagnostics = validation.report.diagnostics
-    .filter((diagnostic) => diagnostic.severity === "error")
-    .map(
-      (diagnostic) =>
-        `${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
-    )
-    .join("; ");
-  throw new PaperbotError(
-    `agent returned an invalid ${artifactName}: ${diagnostics}`,
-    ExitCode.validation,
-  );
-}
-
-async function writeDraftArtifacts(
-  runPath: string,
-  draft: DraftResponse,
-  paper: string,
-  additionalQuestions: string[] = [],
-): Promise<void> {
-  await writeTextArtifact(runPath, "draft.md", paper);
-  await writeTextArtifact(
-    runPath,
-    "evidence.jsonl",
-    draft.evidence.map((item) => JSON.stringify(item)).join("\n") +
-      (draft.evidence.length === 0 ? "" : "\n"),
-  );
-  const questions = [...new Set([...draft.questions, ...additionalQuestions])];
-  await writeTextArtifact(
-    runPath,
-    "questions.md",
-    [
-      "# Author Questions",
-      "",
-      "These questions mark information the repository evidence cannot establish.",
-      "",
-      ...(questions.length === 0
-        ? [
-            "No additional questions were generated; review the draft before treating that as complete evidence.",
-          ]
-        : questions.map((question, index) => `${index + 1}. ${question}`)),
-      "",
-    ].join("\n"),
-  );
-}
-
-function availableEvidenceSourceIds(
-  source: AgentSource,
-  includeAuthorAnswers = false,
-): Set<string> {
-  return new Set([
-    ...source.files.map((file) => file.source_id),
-    ...(includeAuthorAnswers ? ["author:answers"] : []),
-  ]);
-}
-
-function allowedMarkdownUrls(
-  metadata: AgentPaperMetadata,
-  externalSources: string[],
-): Set<string> {
-  return new Set(
-    [metadata.repository_url, metadata.product_url, ...externalSources]
-      .filter((url): url is string => url !== undefined)
-      .map((url) => normalizeAnonymousHttpUrl(url, "draft link")),
-  );
-}
-
-function validateDraftLinks(
-  markdown: string,
-  allowedUrls: ReadonlySet<string>,
-): void {
-  let tokens: Token[];
-  try {
-    tokens = marked.lexer(markdown);
-  } catch {
-    throw new PaperbotError(
-      "agent draft Markdown could not be parsed for link validation",
-      ExitCode.validation,
-    );
-  }
-
-  marked.walkTokens(tokens, (token) => {
-    if (isRawHtmlToken(token)) {
-      throw new PaperbotError(
-        "agent draft contains raw HTML; use Markdown links and a host-reviewed figure instead",
-        ExitCode.validation,
-      );
-    }
-    if (isMarkdownUrlToken(token)) {
-      validateMarkdownUrl(token.href, allowedUrls);
-    }
-  });
-}
-
-function draftLinkDiagnostics(
-  markdown: string,
-  allowedUrls: ReadonlySet<string>,
-): string[] {
-  try {
-    validateDraftLinks(markdown, allowedUrls);
-    return [];
-  } catch (error) {
-    if (error instanceof PaperbotError) {
-      return [error.message];
-    }
-    throw error;
-  }
-}
-
-function isMarkdownUrlToken(
-  token: Token,
-): token is Tokens.Link | Tokens.Image | Tokens.Def {
-  return (
-    token.type === "link" || token.type === "image" || token.type === "def"
-  );
-}
-
-function isRawHtmlToken(token: Token): token is Tokens.HTML | Tokens.Tag {
-  return token.type === "html";
-}
-
-function validateMarkdownUrl(
-  target: string,
-  allowedUrls: ReadonlySet<string>,
-): void {
-  let normalized: string;
-  try {
-    normalized = normalizeAnonymousHttpUrl(target, "draft link");
-  } catch {
-    throw new PaperbotError(
-      `agent draft contains an unsupported Markdown link: ${target}`,
-      ExitCode.validation,
-    );
-  }
-  if (!allowedUrls.has(normalized)) {
-    throw new PaperbotError(
-      `agent draft links to an unprovided URL: ${normalized}`,
-      ExitCode.validation,
-    );
-  }
 }
 
 function completeMetadata(
@@ -748,54 +1038,6 @@ function completeMetadata(
   });
 }
 
-function createRunRecord(
-  options: AgentRunOptions,
-  model: string,
-  externalSources: string[],
-  dependencies: AgentRunnerDependencies,
-): AgentRunRecord {
-  const timestamp = now(dependencies).toISOString();
-  return {
-    schema_version: "1",
-    state: "initialized",
-    started_at: timestamp,
-    updated_at: timestamp,
-    agent: {
-      provider: "pi",
-      model,
-    },
-    input: {
-      repository: options.repository,
-      allow_remote_model: true,
-      external_sources: externalSources,
-      metadata: options.metadata,
-    },
-    artifacts: {},
-  };
-}
-
-function sourceRecord(source: AgentSource): AgentRunSourceRecord {
-  return {
-    kind: source.kind,
-    ...(source.canonical_url === undefined
-      ? {}
-      : { canonical_url: source.canonical_url }),
-    ...(source.scan_manifest.repository.source_url === undefined
-      ? {}
-      : { scan_source_url: source.scan_manifest.repository.source_url }),
-    resolved_revision: source.resolved_revision,
-    is_dirty: source.is_dirty,
-    retrieved_at: source.retrieved_at,
-  };
-}
-
-async function persistRunRecord(
-  runPath: string,
-  record: AgentRunRecord,
-): Promise<void> {
-  await writeJsonArtifact(runPath, "run.json", record);
-}
-
 function normalizeOptionalSourceUrl(value: string): string | undefined {
   try {
     return normalizeAnonymousHttpUrl(value, "source URL");
@@ -808,305 +1050,35 @@ function now(dependencies: AgentRunnerDependencies): Date {
   return (dependencies.now ?? (() => new Date()))();
 }
 
-function relativeArtifact(runPath: string, artifact: string): string {
-  const prefix = `${runPath}/`;
-  return artifact.startsWith(prefix) ? artifact.slice(prefix.length) : artifact;
-}
-
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return redactModelSecrets(message);
 }
 
-async function resolveExistingRun(runPath: string): Promise<string> {
-  const securedRunPath = await ensureRunDirectory(runPath);
-  const runRecordPath = artifactPath(securedRunPath, "run.json");
-  try {
-    await readArtifact(runRecordPath, "run record", MAX_RUN_RECORD_BYTES);
-  } catch {
-    throw new PaperbotError(
-      `agent run directory is not available: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  return securedRunPath;
+function remainingQuestionRounds(record: AgentRunRecord): number {
+  return MAX_AUTHOR_QUESTION_ROUNDS - record.workflow.question_rounds;
 }
 
-async function readRunRecord(runPath: string): Promise<AgentRunRecord> {
-  let value: unknown;
-  try {
-    value = JSON.parse(
-      await readArtifact(
-        artifactPath(runPath, "run.json"),
-        "run record",
-        MAX_RUN_RECORD_BYTES,
-      ),
-    ) as unknown;
-  } catch {
-    throw new PaperbotError(
-      `could not read agent run record: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  if (!isRunRecord(value)) {
-    throw new PaperbotError(
-      `agent run record is invalid: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  return value;
-}
-
-function isRunRecord(value: unknown): value is AgentRunRecord {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "schema_version" in value &&
-    value.schema_version === "1" &&
-    "input" in value &&
-    typeof value.input === "object" &&
-    value.input !== null &&
-    "agent" in value &&
-    typeof value.agent === "object" &&
-    value.agent !== null &&
-    "artifacts" in value &&
-    typeof value.artifacts === "object" &&
-    value.artifacts !== null
-  );
-}
-
-async function readArtifact(
-  path: string,
-  label: string,
-  maximumBytes: number,
-): Promise<string> {
-  let content: Buffer;
-  try {
-    const metadata = await lstat(path);
-    if (
-      !metadata.isFile() ||
-      metadata.isSymbolicLink() ||
-      metadata.size > maximumBytes
-    ) {
-      throw new Error("unsafe artifact");
-    }
-    content = await readFile(path);
-  } catch {
-    throw new PaperbotError(`could not read ${label}: ${path}`, ExitCode.io);
-  }
-  if (content.byteLength > maximumBytes) {
-    throw new PaperbotError(
-      `${label} exceeds its size limit: ${path}`,
-      ExitCode.io,
-    );
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(content);
-  } catch {
-    throw new PaperbotError(
-      `${label} is not valid UTF-8: ${path}`,
-      ExitCode.io,
-    );
-  }
-}
-
-function draftFromPaper(paper: string): DraftResponse {
-  const bodyStart = paper.indexOf("\n---\n");
-  if (bodyStart === -1) {
-    throw new PaperbotError("agent draft is missing front matter", ExitCode.io);
-  }
-  const markdown = paper
-    .slice(bodyStart + "\n---\n".length)
-    .replace(
-      /^\s*> \*\*Private research draft\.\*\*[\s\S]*?publication rights before submitting it\.\n\n/,
-      "",
-    );
-  return {
-    summary: "Existing draft summary is retained in front matter.",
-    topics: ["research_draft"],
-    markdown,
-    evidence: [],
-    questions: [],
-  };
-}
-
-async function readReviewArtifact(
+function runResult(
   runPath: string,
-  allowedSourceIds: ReadonlySet<string>,
-): Promise<ReviewResponse> {
-  let artifact: unknown;
-  try {
-    artifact = JSON.parse(
-      await readArtifact(
-        artifactPath(runPath, "review.json"),
-        "review",
-        MAX_REVIEW_BYTES,
-      ),
-    );
-  } catch {
-    throw invalidReviewArtifact(runPath);
-  }
-  if (!isStoredReviewArtifact(artifact)) {
-    throw invalidReviewArtifact(runPath);
-  }
-  try {
-    const review = parseReviewResponse(JSON.stringify(artifact));
-    validateReviewSourceIds(review, allowedSourceIds);
-    return review;
-  } catch {
-    throw invalidReviewArtifact(runPath);
-  }
-}
-
-function assertRestoredSourceMatchesRunRecord(
-  source: AgentSource,
   record: AgentRunRecord,
-  runPath: string,
-): void {
-  const recorded = readRunSourceRecord(record.source, runPath);
-  const canonicalUrl = normalizeStoredSourceUrl(
-    source.canonical_url,
-    "source canonical_url",
-    runPath,
-  );
-  const scanSourceUrl = normalizeStoredSourceUrl(
-    source.scan_manifest.repository.source_url,
-    "scan source_url",
-    runPath,
-  );
-
-  if (
-    recorded.kind !== source.kind ||
-    recorded.canonical_url !== canonicalUrl ||
-    recorded.scan_source_url !== scanSourceUrl ||
-    recorded.resolved_revision !== source.resolved_revision ||
-    recorded.is_dirty !== source.is_dirty ||
-    recorded.retrieved_at !== source.retrieved_at
-  ) {
-    throw new PaperbotError(
-      `agent source artifact does not match its run record: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-}
-
-function readRunSourceRecord(
-  value: unknown,
-  runPath: string,
-): AgentRunSourceRecord {
-  if (!isRecord(value)) {
-    throw new PaperbotError(
-      `agent run record is missing source metadata: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  if (
-    (value.kind !== "github" && value.kind !== "local") ||
-    typeof value.resolved_revision !== "string" ||
-    !SHA_PATTERN.test(value.resolved_revision) ||
-    typeof value.is_dirty !== "boolean" ||
-    typeof value.retrieved_at !== "string"
-  ) {
-    throw new PaperbotError(
-      `agent run record has invalid source metadata: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  const retrievedAt = readStoredTimestamp(value.retrieved_at, runPath);
+  validation: PaperValidationResult,
+  source: AgentSource,
+): AgentRunResult {
   return {
-    kind: value.kind,
-    ...(value.canonical_url === undefined
-      ? {}
-      : {
-          canonical_url: normalizeStoredSourceUrl(
-            value.canonical_url,
-            "run record canonical_url",
-            runPath,
-          ),
-        }),
-    ...(value.scan_source_url === undefined
-      ? {}
-      : {
-          scan_source_url: normalizeStoredSourceUrl(
-            value.scan_source_url,
-            "run record scan_source_url",
-            runPath,
-          ),
-        }),
-    resolved_revision: value.resolved_revision.toLowerCase(),
-    is_dirty: value.is_dirty,
-    retrieved_at: retrievedAt,
+    run_path: runPath,
+    state: record.state,
+    validation: {
+      valid: validation.report.valid,
+      diagnostics: validation.report.diagnostics.length,
+    },
+    questions: {
+      pending: record.workflow.pending_question_ids.length,
+      round: record.workflow.question_rounds,
+    },
+    source: {
+      resolved_revision: source.resolved_revision,
+      selected_file_count: source.files.length,
+    },
   };
-}
-
-function normalizeStoredSourceUrl(
-  value: unknown,
-  label: string,
-  runPath: string,
-): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  try {
-    return normalizeAnonymousHttpUrl(value, label);
-  } catch {
-    throw new PaperbotError(
-      `agent run source metadata has an invalid ${label}: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-}
-
-function readStoredTimestamp(value: string, runPath: string): string {
-  if (value.length > 64 || /[\u0000-\u001f\u007f]/.test(value)) {
-    throw new PaperbotError(
-      `agent run record has invalid source metadata: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.valueOf())) {
-    throw new PaperbotError(
-      `agent run record has invalid source metadata: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  return timestamp.toISOString();
-}
-
-function isStoredReviewArtifact(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    value.schema_version === "1" &&
-    typeof value.reviewed_at === "string" &&
-    value.reviewed_at.length <= 64 &&
-    !/[\u0000-\u001f\u007f]/.test(value.reviewed_at) &&
-    !Number.isNaN(new Date(value.reviewed_at).valueOf())
-  );
-}
-
-function invalidReviewArtifact(runPath: string): PaperbotError {
-  return new PaperbotError(
-    `agent review artifact is invalid: ${runPath}`,
-    ExitCode.io,
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function nextProposalName(runPath: string): Promise<string> {
-  for (let index = 1; index < 1_000; index += 1) {
-    const filename = `proposal-${index}.md`;
-    try {
-      await readFile(artifactPath(runPath, filename), "utf8");
-    } catch {
-      return filename;
-    }
-  }
-  throw new PaperbotError(
-    "agent run already has too many proposals",
-    ExitCode.io,
-  );
 }
