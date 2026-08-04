@@ -66,16 +66,23 @@ product-paper research, run:
 ```sh
 PAPERBOT_CMD agent select-trending \
   --output ./paperbot-runs/trending-YYYY-MM-DD \
+  --api-url https://api.prodxiv.example \
   --allow-remote-model \
   --format json
 ```
 
-The host writes `snapshot.json`, sends only its normalized public metadata to
-one tool-less Pi session, and accepts exactly ten unique candidates into
-`selection.json`. Treat the result as a research queue, not an endorsement or
-repository evidence. This command does not download repository contents,
-create paper runs, or publish. Do not turn the selection into a batch without
-separate user direction and the required author and product-status metadata.
+The default source is the exact UTC day's all-language daily observation in
+the prodxiv archive. Supply the API with `--api-url` or `PRODXIV_API_URL`. If
+that observation is unavailable, stop; never substitute direct GitHub
+scraping, a nearby date, or another source. For a reproducible or offline run,
+replace `--api-url` with `--snapshot <snapshot.json>` using a previously saved
+bare prodxiv snapshot. The host validates and writes `snapshot.json`, sends
+only its normalized public metadata to one tool-less Pi session, and accepts
+exactly ten unique candidates into `selection.json`. Treat the result as a
+research queue, not an endorsement or repository evidence. This command does
+not download repository contents, create paper runs, or publish. Do not turn
+the selection into a batch without separate user direction and the required
+author and product-status metadata.
 
 For a public GitHub repository, require the author to provide their paper
 identity and a product status rather than inferring either from contributors or

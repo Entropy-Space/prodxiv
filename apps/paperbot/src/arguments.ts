@@ -127,6 +127,8 @@ export interface AgentSelectTrendingArguments {
   action: "select-trending";
   output_path: string;
   allow_remote_model: boolean;
+  api_url?: string;
+  snapshot_path?: string;
   model?: string;
   format: OutputFormat;
 }
@@ -548,6 +550,8 @@ function parseAgentSelectTrendingArguments(
   args: string[],
 ): AgentSelectTrendingArguments | { command: "help" } {
   let output_path: string | undefined;
+  let api_url: string | undefined;
+  let snapshot_path: string | undefined;
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
@@ -571,6 +575,24 @@ function parseAgentSelectTrendingArguments(
     }
     if (argument.startsWith("--output=")) {
       output_path = requiredInlineValue(argument, "--output");
+      continue;
+    }
+    if (argument === "--api-url") {
+      api_url = requiredFollowingValue(args, index, "--api-url");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--api-url=")) {
+      api_url = requiredInlineValue(argument, "--api-url");
+      continue;
+    }
+    if (argument === "--snapshot") {
+      snapshot_path = requiredFollowingValue(args, index, "--snapshot");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--snapshot=")) {
+      snapshot_path = requiredInlineValue(argument, "--snapshot");
       continue;
     }
     if (argument === "--model") {
@@ -605,11 +627,18 @@ function parseAgentSelectTrendingArguments(
       "agent select-trending requires --allow-remote-model before the public trend snapshot is sent to a model",
     );
   }
+  if (api_url !== undefined && snapshot_path !== undefined) {
+    throw usageError(
+      "agent select-trending accepts either --snapshot or --api-url, not both",
+    );
+  }
   return {
     command: "agent",
     action: "select-trending",
     output_path,
     allow_remote_model,
+    ...(api_url === undefined ? {} : { api_url }),
+    ...(snapshot_path === undefined ? {} : { snapshot_path }),
     ...(model === undefined ? {} : { model }),
     format,
   };

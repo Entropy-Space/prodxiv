@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import type {
-  CollectionOptions,
-  TrendingEntry,
-  TrendingSnapshot,
-} from "@prodxiv/paperbot-source/github-trending";
+  ApiFetch,
+  GitHubTrendingEntry,
+  GitHubTrendingSnapshot,
+} from "@prodxiv/api-client";
+import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import {
   parseTrendSelectionResponse,
   runTrendSelection,
@@ -17,6 +17,7 @@ import {
 import type { ModelCompletion } from "../src/agent/types.ts";
 
 const workspaces: string[] = [];
+const archiveApiUrl = "https://api.prodxiv.example";
 
 afterEach(async () => {
   await Promise.all(
@@ -27,14 +28,14 @@ afterEach(async () => {
 });
 
 describe("runTrendSelection", () => {
-  test("captures today's all-language snapshot and writes a source-owned ranked selection", async () => {
+  test("loads today's archived all-language snapshot and writes an unambiguous ranked selection", async () => {
     const workspace = await createWorkspace();
     const outputPath = join(workspace, "trend-run");
     const snapshot = trendingSnapshot();
     const runtime = new FakeTrendRuntime([
-      selectionResponse(snapshot.entries.slice(0, 10)),
+      selectionResponse(snapshot.entries.slice(1, 11)),
     ]);
-    let collectionOptions: CollectionOptions | undefined;
+    let archiveRequest: string | undefined;
     const clock = fixedClock(
       "2026-08-04T01:02:03.456Z",
       "2026-08-04T01:02:04.789Z",
@@ -47,23 +48,23 @@ describe("runTrendSelection", () => {
         model: "deepseek-v4-flash",
       },
       {
-        collect_trending: async (options) => {
-          collectionOptions = options;
-          return { snapshots: [snapshot], failures: [] };
+        fetch: async (input, init) => {
+          archiveRequest = String(input);
+          expect(init).toBeUndefined();
+          return archiveResponse(snapshot);
         },
         create_runtime: (model) => {
           expect(model).toBe("deepseek-v4-flash");
           return runtime;
         },
+        env: { PRODXIV_API_URL: `${archiveApiUrl}/` },
         now: clock,
       },
     );
 
-    expect(collectionOptions).toEqual({
-      snapshot_date: "2026-08-04",
-      captured_at: "2026-08-04T01:02:03Z",
-      languages: [null],
-    });
+    expect(archiveRequest).toBe(
+      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily`,
+    );
     expect(runtime.started_inputs).toEqual([
       { role: "trend_selection", run_path: outputPath },
     ]);
@@ -95,11 +96,11 @@ describe("runTrendSelection", () => {
       },
     });
     expect(result.selection.selected_repositories).toHaveLength(10);
-    const firstCandidate = snapshot.entries[0]!;
+    const firstCandidate = snapshot.entries[1]!;
     expect(result.selection.selected_repositories[0]).toEqual({
-      rank: 1,
       ...firstCandidate,
-      repository_url: "https://github.com/example/repo-1",
+      rank: 1,
+      source_rank: 2,
       reason: "Candidate 1 merits deeper product-paper research.",
     });
 
@@ -134,12 +135,10 @@ describe("runTrendSelection", () => {
       {
         output_path: outputPath,
         allow_remote_model: true,
+        api_url: archiveApiUrl,
       },
       {
-        collect_trending: async () => ({
-          snapshots: [snapshot],
-          failures: [],
-        }),
+        fetch: archiveFetch(snapshot),
         create_runtime: () => runtime,
         now: fixedClock("2026-08-04T01:02:03Z", "2026-08-04T01:02:04Z"),
       },
@@ -183,11 +182,9 @@ describe("runTrendSelection", () => {
       runTrendSelection(
         { output_path: outputPath, allow_remote_model: true },
         {
-          collect_trending: async () => ({
-            snapshots: [snapshot],
-            failures: [],
-          }),
+          fetch: archiveFetch(snapshot),
           create_runtime: () => runtime,
+          env: { PRODXIV_API_URL: archiveApiUrl },
           now: fixedClock("2026-08-04T01:02:03Z"),
         },
       ),
@@ -215,14 +212,12 @@ describe("runTrendSelection", () => {
       runTrendSelection(
         { output_path: outputPath, allow_remote_model: true },
         {
-          collect_trending: async () => ({
-            snapshots: [snapshot],
-            failures: [],
-          }),
+          fetch: archiveFetch(snapshot),
           create_runtime: () => {
             runtimeCreated = true;
             return new FakeTrendRuntime([]);
           },
+          env: { PRODXIV_API_URL: archiveApiUrl },
           now: fixedClock("2026-08-04T01:02:03Z"),
         },
       ),
@@ -233,6 +228,153 @@ describe("runTrendSelection", () => {
     } satisfies Partial<PaperbotError>);
     expect(runtimeCreated).toBe(false);
     expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(snapshot);
+  });
+
+  test("uses an explicit snapshot file without contacting the archive", async () => {
+    const workspace = await createWorkspace();
+    const outputPath = join(workspace, "trend-run");
+    const snapshotPath = join(workspace, "archived-snapshot.json");
+    const snapshot = {
+      ...trendingSnapshot(),
+      snapshot_date: "2026-08-03",
+      captured_at: "2026-08-03T01:02:03Z",
+    };
+    await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+    const runtime = new FakeTrendRuntime([
+      selectionResponse(snapshot.entries.slice(0, 10)),
+    ]);
+    let archiveCalled = false;
+
+    const result = await runTrendSelection(
+      {
+        output_path: outputPath,
+        allow_remote_model: true,
+        snapshot_path: snapshotPath,
+      },
+      {
+        fetch: async () => {
+          archiveCalled = true;
+          return archiveResponse(snapshot);
+        },
+        create_runtime: () => runtime,
+        env: { PRODXIV_API_URL: archiveApiUrl },
+        now: fixedClock("2026-08-04T01:02:03Z", "2026-08-04T01:02:04Z"),
+      },
+    );
+
+    expect(archiveCalled).toBe(false);
+    expect(result.selection.snapshot.snapshot_date).toBe("2026-08-03");
+    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(snapshot);
+  });
+
+  test("fails clearly when today's archived snapshot is not available", async () => {
+    const workspace = await createWorkspace();
+    let runtimeCreated = false;
+
+    await expect(
+      runTrendSelection(
+        {
+          output_path: join(workspace, "trend-run"),
+          allow_remote_model: true,
+          api_url: archiveApiUrl,
+        },
+        {
+          fetch: async () => archiveResponse(undefined),
+          create_runtime: () => {
+            runtimeCreated = true;
+            return new FakeTrendRuntime([]);
+          },
+          now: fixedClock("2026-08-04T01:02:03Z"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.remote,
+      message:
+        "prodxiv has no all-language daily GitHub Trending snapshot for 2026-08-04; retry after archive ingestion or use --snapshot <path>",
+    } satisfies Partial<PaperbotError>);
+    expect(runtimeCreated).toBe(false);
+  });
+
+  test("rejects a nearby archived date instead of silently substituting it", async () => {
+    const workspace = await createWorkspace();
+    const previousSnapshot = {
+      ...trendingSnapshot(),
+      snapshot_date: "2026-08-03",
+      captured_at: "2026-08-03T01:02:03Z",
+    };
+
+    await expect(
+      runTrendSelection(
+        {
+          output_path: join(workspace, "trend-run"),
+          allow_remote_model: true,
+          api_url: archiveApiUrl,
+        },
+        {
+          fetch: archiveFetch(previousSnapshot),
+          now: fixedClock("2026-08-04T01:02:03Z"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.remote,
+      message:
+        "prodxiv returned snapshot 2026-08-03 when 2026-08-04 was requested",
+    } satisfies Partial<PaperbotError>);
+  });
+
+  test("requires an archive endpoint when no snapshot file is supplied", async () => {
+    const workspace = await createWorkspace();
+
+    await expect(
+      runTrendSelection(
+        {
+          output_path: join(workspace, "trend-run"),
+          allow_remote_model: true,
+        },
+        {
+          env: {},
+          now: fixedClock("2026-08-04T01:02:03Z"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.usage,
+      message:
+        "prodxiv API is not configured; pass --api-url, set PRODXIV_API_URL, or use --snapshot <path>",
+    } satisfies Partial<PaperbotError>);
+  });
+
+  test("rejects a non-all-language snapshot file before starting Pi", async () => {
+    const workspace = await createWorkspace();
+    const outputPath = join(workspace, "trend-run");
+    const snapshotPath = join(workspace, "rust.json");
+    await writeFile(
+      snapshotPath,
+      JSON.stringify({ ...trendingSnapshot(), language: "rust" }),
+      "utf8",
+    );
+    let runtimeCreated = false;
+
+    await expect(
+      runTrendSelection(
+        {
+          output_path: outputPath,
+          allow_remote_model: true,
+          snapshot_path: snapshotPath,
+        },
+        {
+          create_runtime: () => {
+            runtimeCreated = true;
+            return new FakeTrendRuntime([]);
+          },
+          now: fixedClock("2026-08-04T01:02:03Z"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.validation,
+      message:
+        "invalid trend snapshot: snapshot file must be an all-language daily snapshot",
+    } satisfies Partial<PaperbotError>);
+    expect(runtimeCreated).toBe(false);
   });
 });
 
@@ -297,7 +439,7 @@ async function createWorkspace(): Promise<string> {
   return workspace;
 }
 
-function trendingSnapshot(entryCount = 12): TrendingSnapshot {
+function trendingSnapshot(entryCount = 12): GitHubTrendingSnapshot {
   return {
     snapshot_date: "2026-08-04",
     captured_at: "2026-08-04T01:02:03Z",
@@ -308,8 +450,10 @@ function trendingSnapshot(entryCount = 12): TrendingSnapshot {
     source_url: "https://github.com/trending?since=daily",
     source_revision: `sha256:${"a".repeat(64)}`,
     entries: Array.from({ length: entryCount }, (_, index) => ({
+      rank: index + 1,
       repository_full_name: `example/repo-${index + 1}`,
       repository_node_id: null,
+      repository_url: `https://github.com/example/repo-${index + 1}`,
       description: `Candidate ${index + 1} description`,
       primary_language: index % 2 === 0 ? "Rust" : "TypeScript",
       stars: 1_000 + index,
@@ -319,7 +463,7 @@ function trendingSnapshot(entryCount = 12): TrendingSnapshot {
   };
 }
 
-function selectionResponse(entries: TrendingEntry[]): string {
+function selectionResponse(entries: GitHubTrendingEntry[]): string {
   return JSON.stringify({
     selected_repositories: entries.map((entry, index) => ({
       repository_full_name: entry.repository_full_name,
@@ -328,7 +472,7 @@ function selectionResponse(entries: TrendingEntry[]): string {
   });
 }
 
-function repositoryName(entry: TrendingEntry): string {
+function repositoryName(entry: GitHubTrendingEntry): string {
   return entry.repository_full_name;
 }
 
@@ -345,4 +489,19 @@ function fixedClock(...values: string[]): () => Date {
 
 async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
+}
+
+function archiveFetch(snapshot: GitHubTrendingSnapshot): ApiFetch {
+  return async () => archiveResponse(snapshot);
+}
+
+function archiveResponse(
+  snapshot: GitHubTrendingSnapshot | undefined,
+): Response {
+  return Response.json({
+    snapshot: snapshot ?? null,
+    previous_date: null,
+    next_date: null,
+    available_languages: [],
+  });
 }

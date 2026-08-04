@@ -59,7 +59,7 @@ Usage:
   paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
   paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
-  paperbot agent select-trending --output <run-directory> --allow-remote-model [--model <model>] [--format text|json]
+  paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
@@ -96,7 +96,8 @@ Options:
   --model <model>      Pi model for an agent workflow
   --concurrency <1-4>  Concurrent projects for an agent batch (default: 1)
   --allow-remote-model Allow a bounded public snapshot or source bundle to reach the model
-  --api-url <url>      Publishing API base URL
+  --api-url <url>      prodxiv API base URL for archive reads or publishing setup
+  --snapshot <path>    Use an archived trend snapshot file instead of the API
   --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin
   --product-id <id>    Attach a new paper to an existing product
@@ -307,6 +308,10 @@ export async function run(
         const result = await execute({
           output_path: parsed.output_path,
           allow_remote_model: parsed.allow_remote_model,
+          ...(parsed.api_url === undefined ? {} : { api_url: parsed.api_url }),
+          ...(parsed.snapshot_path === undefined
+            ? {}
+            : { snapshot_path: parsed.snapshot_path }),
           ...(parsed.model === undefined ? {} : { model: parsed.model }),
         });
         writeTrendSelectionResult(io, parsed.format, result);

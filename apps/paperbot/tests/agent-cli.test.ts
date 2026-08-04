@@ -70,6 +70,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
     },
     selected_repositories: Array.from({ length: 10 }, (_, index) => ({
       rank: index + 1,
+      source_rank: index + 2,
       repository_full_name: `example/repo-${index + 1}`,
       repository_node_id: null,
       description: `Candidate ${index + 1}`,
@@ -223,6 +224,8 @@ test("parses a consented daily trend selection", () => {
       "select-trending",
       "--output",
       "runs/trending-2026-08-04",
+      "--api-url",
+      "https://api.prodxiv.example",
       "--model=deepseek-v4-flash",
       "--allow-remote-model",
       "--format=json",
@@ -232,9 +235,48 @@ test("parses a consented daily trend selection", () => {
     action: "select-trending",
     output_path: "runs/trending-2026-08-04",
     allow_remote_model: true,
+    api_url: "https://api.prodxiv.example",
     model: "deepseek-v4-flash",
     format: "json",
   });
+});
+
+test("parses an offline daily trend selection snapshot", () => {
+  expect(
+    parseArguments([
+      "agent",
+      "select-trending",
+      "--output=runs/trending-2026-08-03",
+      "--snapshot",
+      "snapshots/2026-08-03.json",
+      "--allow-remote-model",
+    ]),
+  ).toEqual({
+    command: "agent",
+    action: "select-trending",
+    output_path: "runs/trending-2026-08-03",
+    allow_remote_model: true,
+    snapshot_path: "snapshots/2026-08-03.json",
+    format: "text",
+  });
+});
+
+test("rejects conflicting trend snapshot inputs", () => {
+  expect(() =>
+    parseArguments([
+      "agent",
+      "select-trending",
+      "--output",
+      "runs/trending",
+      "--snapshot",
+      "snapshot.json",
+      "--api-url",
+      "https://api.prodxiv.example",
+      "--allow-remote-model",
+    ]),
+  ).toThrow(
+    "agent select-trending accepts either --snapshot or --api-url, not both",
+  );
 });
 
 test("requires explicit remote-model consent before loading the agent runtime", async () => {
@@ -420,6 +462,8 @@ test("writes only the selection artifact to stdout in JSON mode", async () => {
       "--allow-remote-model",
       "--model",
       "deepseek-v4-flash",
+      "--snapshot",
+      "snapshots/2026-08-03.json",
       "--format",
       "json",
     ],
@@ -433,6 +477,7 @@ test("writes only the selection artifact to stdout in JSON mode", async () => {
         expect(input).toEqual({
           output_path: "runs/trending",
           allow_remote_model: true,
+          snapshot_path: "snapshots/2026-08-03.json",
           model: "deepseek-v4-flash",
         });
         return trendSelectionResult;

@@ -110,7 +110,7 @@ The workspace separates deterministic capabilities from the CLI shell:
   validation, draft scaffolding, and canonical paper validation.
 - `packages/paperbot-source` owns local Git inspection, safe repository file
   selection, shared file classification, and the read-only public GitHub
-  repository and Trending clients.
+  repository source client.
 
 Dependencies point toward the deterministic core:
 
@@ -289,16 +289,36 @@ run:
 ```sh
 bun run paperbot agent select-trending \
   --output ./paperbot-runs/trending-2026-08-04 \
+  --api-url https://api.prodxiv.example \
   --allow-remote-model \
   --model deepseek-v4-flash \
   --format json
 ```
 
-The host captures the all-language daily page once and labels it with the UTC
-date at capture time. It normalizes the public repository name, description,
-language, total stars, forks, and stars for the period, records a content
-revision, and writes `snapshot.json` before starting Pi. The standalone
-collector and this workflow share the same fetch and parsing implementation.
+The scheduled prodxiv collector, outside Paperbot, captures and normalizes
+GitHub Trending and ingests immutable observations into the prodxiv archive.
+By default Paperbot requests the exact current UTC date with `period=daily`
+and the all-language scope from that archive. `--api-url` selects the prodxiv
+API; `PRODXIV_API_URL` is used when the option is absent. If today's exact
+snapshot is unavailable, the command fails clearly. It never scrapes GitHub,
+selects a nearby date, or silently falls back to another source.
+
+For a reproducible or offline rerun, pass a previously saved bare prodxiv
+snapshot instead of an API URL:
+
+```sh
+bun run paperbot agent select-trending \
+  --output ./paperbot-runs/trending-2026-08-03-rerun \
+  --snapshot ./snapshots/trending-2026-08-03.json \
+  --allow-remote-model \
+  --format json
+```
+
+`--snapshot` and `--api-url` are mutually exclusive. A file input may describe
+an older date, but it must satisfy the prodxiv API snapshot contract and be an
+all-language daily observation with canonical, unique, sequentially ranked
+repositories. Paperbot bounds and validates either input, copies the normalized
+observation to the run's `snapshot.json`, and only then starts Pi.
 
 Paperbot then starts one separate, tool-less `trend_selection` Pi session. The
 session receives only the normalized snapshot; it cannot open repositories or
@@ -309,14 +329,15 @@ not the score. Repository names and descriptions are treated as untrusted
 data, and the model-authored reason is a research rationale rather than
 evidence about the repository.
 
-The host accepts only ten unique names from the captured candidates, rejects
+The host accepts only ten unique names from the archived candidates, rejects
 unknown fields and malformed reasons, and copies all repository metadata from
 the snapshot rather than trusting the model to repeat it. One correction turn
 is permitted in the same session. A valid run writes the versioned
-`selection.json` with snapshot provenance, model and session metadata, ranks,
-and reasons. `--format json` emits that same selection artifact on stdout;
-diagnostics stay on stderr. A captured snapshot remains available if fewer
-than ten candidates make selection impossible.
+`selection.json` with snapshot provenance, model and session metadata,
+selection `rank`, original `source_rank`, and reasons. `--format json` emits
+that same selection artifact on stdout; diagnostics stay on stderr. A
+validated snapshot remains available if fewer than ten candidates make
+selection impossible.
 
 This command does not download repository contents, start paper-drafting
 sessions, create a batch manifest, submit, or publish. Its ten results are a
