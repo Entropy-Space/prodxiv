@@ -2,7 +2,6 @@ import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
-  isGitHubTrendingSnapshot,
   ProdxivApiClient,
   ProdxivApiError,
   type ApiFetch,
@@ -143,7 +142,7 @@ function normalizeSnapshot(
   source: string,
   exitCode: ExitCodeValue = ExitCode.validation,
 ): GitHubTrendingSnapshot {
-  if (!isGitHubTrendingSnapshot(value)) {
+  if (!isSnapshotContract(value)) {
     throw invalidSnapshot(
       `${source} does not match the prodxiv snapshot contract`,
       exitCode,
@@ -294,6 +293,79 @@ function normalizeApiUrl(value: string | undefined): string {
     );
   }
   return url.toString().replace(/\/+$/, "");
+}
+
+function isSnapshotContract(value: unknown): value is GitHubTrendingSnapshot {
+  return (
+    isRecord(value) &&
+    isDateString(value.snapshot_date) &&
+    isOptionalString(value.captured_at) &&
+    (value.period === "daily" ||
+      value.period === "weekly" ||
+      value.period === "monthly") &&
+    isOptionalString(value.language) &&
+    isOptionalString(value.spoken_language) &&
+    isNonEmptyString(value.source_kind) &&
+    isNonEmptyString(value.source_url) &&
+    isNonEmptyString(value.source_revision) &&
+    Array.isArray(value.entries) &&
+    value.entries.every(isEntryContract)
+  );
+}
+
+function isEntryContract(value: unknown): value is GitHubTrendingEntry {
+  return (
+    isRecord(value) &&
+    Number.isSafeInteger(value.rank) &&
+    (value.rank as number) > 0 &&
+    isNonEmptyString(value.repository_full_name) &&
+    isOptionalString(value.repository_node_id) &&
+    isNonEmptyString(value.repository_url) &&
+    isOptionalString(value.description) &&
+    isOptionalString(value.primary_language) &&
+    isOptionalNonNegativeInteger(value.stars) &&
+    isOptionalNonNegativeInteger(value.forks) &&
+    isOptionalNonNegativeInteger(value.stars_in_period)
+  );
+}
+
+function isDateString(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.valueOf()) &&
+    date.getUTCFullYear() === Number(match[1]) &&
+    date.getUTCMonth() + 1 === Number(match[2]) &&
+    date.getUTCDate() === Number(match[3])
+  );
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalNonNegativeInteger(
+  value: unknown,
+): value is number | null | undefined {
+  return (
+    value === undefined ||
+    value === null ||
+    (Number.isSafeInteger(value) && (value as number) >= 0)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function invalidSnapshot(

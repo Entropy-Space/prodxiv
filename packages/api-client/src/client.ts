@@ -331,7 +331,7 @@ function githubTrending(response: Response, body: unknown): GitHubTrendingView {
   };
 }
 
-export function isGitHubTrendingSnapshot(
+function isGitHubTrendingSnapshot(
   value: unknown,
 ): value is GitHubTrendingSnapshot {
   return (
