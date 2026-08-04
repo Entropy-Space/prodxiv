@@ -25,6 +25,14 @@ export async function runCollector(
   ingestion_config: IngestionConfig,
 ): Promise<void> {
   const collected = await collectTrendingSnapshots(arguments_);
+  for (const snapshot of collected.snapshots) {
+    console.log(
+      `${snapshot.language ?? "all"}: captured ${snapshot.entries.length} entries`,
+    );
+  }
+  for (const failure of collected.failures) {
+    console.error(`${failure.language ?? "all"}: ${failure.message}`);
+  }
   if (arguments_.output_dir !== null) {
     await writeSnapshots(arguments_.output_dir, collected.snapshots);
   }

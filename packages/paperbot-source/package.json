@@ -5,13 +5,15 @@
   "version": "0.0.1",
   "exports": {
     ".": "./src/index.ts",
-    "./github": "./src/github-source.ts"
+    "./github": "./src/github-source.ts",
+    "./github-trending": "./src/github-trending.ts"
   },
   "scripts": {
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@prodxiv/paperbot-core": "workspace:*"
+    "@prodxiv/paperbot-core": "workspace:*",
+    "cheerio": "1.1.2"
   },
   "devDependencies": {
     "@types/bun": "1.3.13",

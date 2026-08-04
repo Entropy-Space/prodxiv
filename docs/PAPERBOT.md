@@ -110,7 +110,7 @@ The workspace separates deterministic capabilities from the CLI shell:
   validation, draft scaffolding, and canonical paper validation.
 - `packages/paperbot-source` owns local Git inspection, safe repository file
   selection, shared file classification, and the read-only public GitHub
-  source client.
+  repository and Trending clients.
 
 Dependencies point toward the deterministic core:
 
@@ -216,14 +216,15 @@ reading a small SHA-pinned UTF-8 source bundle. It does not clone the
 repository, run its code, install dependencies, or fetch
 arbitrary URLs.
 
-Pi runs with an in-memory credential store and exactly two private logical
-sessions: an evidence session and an author session. Their append-only session
-files live inside the mode-`0700` run directory and are mode `0600`; Paperbot
-records and verifies their IDs and SHA-256 digests before reopening the author
-session. Built-in tools, extensions, skills, prompt templates, themes, and
-repository context-file discovery remain disabled. The model receives
-host-built bundles; it cannot use a shell, read arbitrary files, browse the
-web, access environment variables, or call `publish`.
+An `agent run` paper workflow uses exactly two private logical sessions: an
+evidence session and an author session. Their append-only session files live
+inside the mode-`0700` run directory and are mode `0600`; Paperbot records and
+verifies their IDs and SHA-256 digests before reopening the author session.
+Every Pi workflow uses an in-memory credential store. Built-in tools,
+extensions, skills, prompt templates, themes, and repository context-file
+discovery remain disabled. The model receives host-built bundles; it cannot
+use a shell, read arbitrary files, browse the web, access environment
+variables, or call `publish`.
 
 The agent writes a new private run directory with:
 
@@ -279,6 +280,47 @@ link—not as evidence in the claim ledger. When related work needs external
 research, Paperbot records focused author questions rather than fabricating
 comparisons. The agent also omits `# Benchmarks` unless a future explicit
 reproducible benchmark input is added.
+
+### Daily GitHub Trending selection
+
+To create a bounded research queue from today's public GitHub Trending page,
+run:
+
+```sh
+bun run paperbot agent select-trending \
+  --output ./paperbot-runs/trending-2026-08-04 \
+  --allow-remote-model \
+  --model deepseek-v4-flash \
+  --format json
+```
+
+The host captures the all-language daily page once and labels it with the UTC
+date at capture time. It normalizes the public repository name, description,
+language, total stars, forks, and stars for the period, records a content
+revision, and writes `snapshot.json` before starting Pi. The standalone
+collector and this workflow share the same fetch and parsing implementation.
+
+Paperbot then starts one separate, tool-less `trend_selection` Pi session. The
+session receives only the normalized snapshot; it cannot open repositories or
+browse for more context. It ranks exactly ten candidates for potential
+product-paper research using distinct ideas, learning value, inspectable
+implementation, and diversity as selection signals. Popularity is context,
+not the score. Repository names and descriptions are treated as untrusted
+data, and the model-authored reason is a research rationale rather than
+evidence about the repository.
+
+The host accepts only ten unique names from the captured candidates, rejects
+unknown fields and malformed reasons, and copies all repository metadata from
+the snapshot rather than trusting the model to repeat it. One correction turn
+is permitted in the same session. A valid run writes the versioned
+`selection.json` with snapshot provenance, model and session metadata, ranks,
+and reasons. `--format json` emits that same selection artifact on stdout;
+diagnostics stay on stderr. A captured snapshot remains available if fewer
+than ten candidates make selection impossible.
+
+This command does not download repository contents, start paper-drafting
+sessions, create a batch manifest, submit, or publish. Its ten results are a
+research queue, not endorsements.
 
 ### Batch public repositories
 

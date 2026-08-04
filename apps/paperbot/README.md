@@ -19,6 +19,10 @@ bun run paperbot tools describe paper_validate
 bun run paperbot tools repo_scan . --format json > scan.json
 bun run paperbot tools paper_scaffold scan.json > paper.md
 bun run paperbot tools paper_validate paper.md --format json
+bun run paperbot agent select-trending \
+  --output ./paperbot-runs/trending-2026-08-04 \
+  --allow-remote-model \
+  --format json
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -77,6 +81,15 @@ the host checkpoints it as `awaiting_author`, and `agent resume --answers`
 reopens the same logical author session. Once the loop completes, Paperbot
 writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version.
+
+`agent select-trending` is a separate bounded research workflow. It captures
+the all-language daily GitHub Trending page using the UTC date, writes the
+normalized public source to `snapshot.json`, and sends only that snapshot to
+one tool-less Pi session. The host requires exactly ten unique candidates,
+copies their observed metadata from the snapshot, and writes a versioned
+`selection.json`; `--format json` also emits that object on stdout. The model
+cannot browse repositories, and the command does not draft or publish papers.
+The selection is a research queue, not an endorsement.
 
 `auth` creates a commented credential template if it does not exist and never
 overwrites it. `auth set` stores the API URL, optional public site URL, and

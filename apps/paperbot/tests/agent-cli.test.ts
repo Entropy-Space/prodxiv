@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { parseArguments } from "../src/arguments.ts";
 import type { AgentBatchResult } from "../src/agent/batch.ts";
 import type { AgentRunResult } from "../src/agent/types.ts";
+import type { TrendSelectionRunResult } from "../src/agent/trend-selection.ts";
 import { run } from "../src/cli.ts";
 
 const agentResult: AgentRunResult = {
@@ -38,6 +39,47 @@ const batchResult: AgentBatchResult = {
     },
     projects: [],
     summary: { total: 2, pending: 0, running: 0, succeeded: 2, failed: 0 },
+  },
+};
+
+const trendSelectionResult: TrendSelectionRunResult = {
+  output_path: "/tmp/paperbot-trending",
+  snapshot_path: "/tmp/paperbot-trending/snapshot.json",
+  selection_path: "/tmp/paperbot-trending/selection.json",
+  selection: {
+    schema_version: "1",
+    generated_at: "2026-08-04T01:02:04Z",
+    selection_policy: "product_paper_interest_v1",
+    snapshot: {
+      snapshot_date: "2026-08-04",
+      captured_at: "2026-08-04T01:02:03Z",
+      period: "daily",
+      language: null,
+      spoken_language: null,
+      source_kind: "direct_fetch",
+      source_url: "https://github.com/trending?since=daily",
+      source_revision: `sha256:${"a".repeat(64)}`,
+      candidate_count: 12,
+    },
+    agent: {
+      provider: "pi",
+      model: "deepseek-v4-flash",
+      session_id: "trend-session",
+      turn_count: 1,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+    selected_repositories: Array.from({ length: 10 }, (_, index) => ({
+      rank: index + 1,
+      repository_full_name: `example/repo-${index + 1}`,
+      repository_node_id: null,
+      description: `Candidate ${index + 1}`,
+      primary_language: index % 2 === 0 ? "Rust" : "TypeScript",
+      stars: 1_000 + index,
+      forks: 100 + index,
+      stars_in_period: 50 + index,
+      repository_url: `https://github.com/example/repo-${index + 1}`,
+      reason: `Candidate ${index + 1} merits deeper research.`,
+    })),
   },
 };
 
@@ -174,6 +216,27 @@ test("parses a consented agent batch with manifest defaults", () => {
   });
 });
 
+test("parses a consented daily trend selection", () => {
+  expect(
+    parseArguments([
+      "agent",
+      "select-trending",
+      "--output",
+      "runs/trending-2026-08-04",
+      "--model=deepseek-v4-flash",
+      "--allow-remote-model",
+      "--format=json",
+    ]),
+  ).toEqual({
+    command: "agent",
+    action: "select-trending",
+    output_path: "runs/trending-2026-08-04",
+    allow_remote_model: true,
+    model: "deepseek-v4-flash",
+    format: "json",
+  });
+});
+
 test("requires explicit remote-model consent before loading the agent runtime", async () => {
   const stderr: string[] = [];
 
@@ -215,6 +278,23 @@ test("requires explicit remote-model consent before starting a batch", async () 
   expect(exitCode).toBe(2);
   expect(stderr).toEqual([
     "paperbot: agent batch requires --allow-remote-model before source content is sent to a model",
+  ]);
+});
+
+test("requires explicit remote-model consent before selecting trends", async () => {
+  const stderr: string[] = [];
+
+  const exitCode = await run(
+    ["agent", "select-trending", "--output", "runs/trending"],
+    {
+      stdout: () => {},
+      stderr: (message) => stderr.push(message),
+    },
+  );
+
+  expect(exitCode).toBe(2);
+  expect(stderr).toEqual([
+    "paperbot: agent select-trending requires --allow-remote-model before the public trend snapshot is sent to a model",
   ]);
 });
 
@@ -324,6 +404,50 @@ test("dispatches an agent resume without a network runtime in tests", async () =
   expect(stdout[0]).toContain("Paperbot agent paper revision prepared");
   expect(stdout[0]).toContain("Author questions: 0 pending (round 0)");
   expect(stdout[0]).toContain("Publication: not attempted");
+});
+
+test("writes only the selection artifact to stdout in JSON mode", async () => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  let receivedOutputPath: string | undefined;
+
+  const exitCode = await run(
+    [
+      "agent",
+      "select-trending",
+      "--output",
+      "runs/trending",
+      "--allow-remote-model",
+      "--model",
+      "deepseek-v4-flash",
+      "--format",
+      "json",
+    ],
+    {
+      stdout: (message) => stdout.push(message),
+      stderr: (message) => stderr.push(message),
+    },
+    {
+      run_trend_selection: async (input) => {
+        receivedOutputPath = input.output_path;
+        expect(input).toEqual({
+          output_path: "runs/trending",
+          allow_remote_model: true,
+          model: "deepseek-v4-flash",
+        });
+        return trendSelectionResult;
+      },
+    },
+  );
+
+  expect(exitCode).toBe(0);
+  expect(receivedOutputPath).toBe("runs/trending");
+  expect(stdout).toEqual([
+    JSON.stringify(trendSelectionResult.selection, null, 2),
+  ]);
+  expect(stderr).toEqual([
+    "paperbot: selected 10 repositories in /tmp/paperbot-trending/selection.json",
+  ]);
 });
 
 test("dispatches an agent batch and uses a nonzero result for failed projects", async () => {

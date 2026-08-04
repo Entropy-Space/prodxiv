@@ -36,11 +36,16 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 
-export interface PiAuthoringRuntimeOptions {
+export type PiSessionRole = AgentSessionRole | "trend_selection";
+
+export interface PiAgentRuntimeOptions {
   model?: string;
   api_key?: string;
   base_url?: string;
+  system_prompt?: string;
 }
+
+export type PiAuthoringRuntimeOptions = PiAgentRuntimeOptions;
 
 export interface IsolatedPiSessionOptions {
   api_key: string;
@@ -49,28 +54,32 @@ export interface IsolatedPiSessionOptions {
   run_path: string;
   session_directory?: string;
   session_path?: string;
+  system_prompt?: string;
 }
 
 /**
  * Pi SDK adapter deliberately runs without Pi's built-in tools, local
  * credentials, extensions, skills, or context-file discovery. Paperbot creates
- * exactly one evidence session and one author session inside the private run
- * directory. The author session can be reopened after author answers arrive.
+ * private logical sessions inside the run directory. Paper drafting uses one
+ * evidence session and one resumable author session; other bounded workflows
+ * may supply their own isolated system prompt and role.
  */
-export class PiAuthoringRuntime implements AuthoringRuntime {
+export class PiAgentRuntime implements AuthoringRuntime {
   readonly provider = "pi";
   readonly model: string;
   private readonly apiKey?: string;
   private readonly baseUrl?: string;
+  private readonly systemPrompt?: string;
 
-  constructor(options: PiAuthoringRuntimeOptions = {}) {
+  constructor(options: PiAgentRuntimeOptions = {}) {
     this.model = options.model ?? DEFAULT_MODEL;
     this.apiKey = options.api_key;
     this.baseUrl = options.base_url;
+    this.systemPrompt = options.system_prompt;
   }
 
   async startSession(input: {
-    role: AgentSessionRole;
+    role: PiSessionRole;
     run_path: string;
     session_id?: string;
     session_path?: string;
@@ -97,6 +106,9 @@ export class PiAuthoringRuntime implements AuthoringRuntime {
         model: this.model,
         run_path: input.run_path,
         session_directory: sessionDirectory,
+        ...(this.systemPrompt === undefined
+          ? {}
+          : { system_prompt: this.systemPrompt }),
         ...(input.session_path === undefined
           ? {}
           : { session_path: input.session_path }),
@@ -117,6 +129,8 @@ export class PiAuthoringRuntime implements AuthoringRuntime {
     }
   }
 }
+
+export { PiAgentRuntime as PiAuthoringRuntime };
 
 export async function createIsolatedPiSession(
   options: IsolatedPiSessionOptions,
@@ -179,7 +193,7 @@ export async function createIsolatedPiSession(
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
-    systemPrompt: PAPERBOT_SYSTEM_PROMPT,
+    systemPrompt: options.system_prompt ?? PAPERBOT_SYSTEM_PROMPT,
   });
   await loader.reload();
   const sessionManager =

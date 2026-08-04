@@ -29,6 +29,7 @@ import {
   normalizeAgentMetadata,
   normalizeAnonymousHttpUrl,
   normalizeExternalSources,
+  normalizeModelName,
 } from "./input.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import {
@@ -965,16 +966,6 @@ function runtimeFor(
   return (
     dependencies.create_runtime?.(model) ?? new PiAuthoringRuntime({ model })
   );
-}
-
-function normalizeModelName(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9._/-]{1,200}$/.test(value)) {
-    throw new PaperbotError(
-      "agent model must contain only provider-safe identifier characters",
-      ExitCode.usage,
-    );
-  }
-  return value;
 }
 
 function completeMetadata(

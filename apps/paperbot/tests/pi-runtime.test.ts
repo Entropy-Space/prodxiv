@@ -11,6 +11,7 @@ import {
 } from "../src/agent/model-config.ts";
 import {
   createIsolatedPiSession,
+  PiAgentRuntime,
   PiAuthoringRuntime,
 } from "../src/agent/pi.ts";
 
@@ -61,9 +62,13 @@ test("uses a loopback model router without reading Pi user configuration", async
   }
 });
 
-test("allocates private persistent paths for the two logical session roles", async () => {
+test("allocates private persistent paths for each bounded workflow role", async () => {
   temporaryPath = await mkdtemp(join(tmpdir(), "paperbot-pi-"));
   const runtime = new PiAuthoringRuntime({ api_key: "test-deepseek-key" });
+  const trendRuntime = new PiAgentRuntime({
+    api_key: "test-deepseek-key",
+    system_prompt: "Select from the supplied trend snapshot only.",
+  });
 
   const evidence = await runtime.startSession({
     role: "evidence",
@@ -71,6 +76,10 @@ test("allocates private persistent paths for the two logical session roles", asy
   });
   const author = await runtime.startSession({
     role: "author",
+    run_path: temporaryPath,
+  });
+  const trend = await trendRuntime.startSession({
+    role: "trend_selection",
     run_path: temporaryPath,
   });
   try {
@@ -85,14 +94,26 @@ test("allocates private persistent paths for the two logical session roles", asy
         .session_path?.startsWith(join(temporaryPath, "sessions", "author")),
     ).toBe(true);
     expect(
+      trend
+        .snapshot()
+        .session_path?.startsWith(
+          join(temporaryPath, "sessions", "trend_selection"),
+        ),
+    ).toBe(true);
+    expect(
       (await stat(join(temporaryPath, "sessions", "evidence"))).mode & 0o777,
     ).toBe(0o700);
     expect(
       (await stat(join(temporaryPath, "sessions", "author"))).mode & 0o777,
     ).toBe(0o700);
+    expect(
+      (await stat(join(temporaryPath, "sessions", "trend_selection"))).mode &
+        0o777,
+    ).toBe(0o700);
   } finally {
     await evidence.dispose();
     await author.dispose();
+    await trend.dispose();
   }
 });
 
