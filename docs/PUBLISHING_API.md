@@ -207,11 +207,23 @@ The existing `sh scripts/vercel-api-ignore-build.sh` API setting remains
 supported as a compatibility wrapper. Do not use a shared root `vercel.json`
 because the two projects require different targets.
 
+Also enable Vercel's native **Skip deployment** setting for the Bun workspace
+when the project configuration supports it. Native skipping avoids allocating
+a deployment and concurrent-build slot. The custom ignored-build command is
+still required for the Rust API and for repository paths outside Vercel's Bun
+workspace graph; Vercel creates a canceled deployment record when that command
+exits successfully.
+
 The filter first compares against Vercel's previous deployment SHA. On the
 first preview for a new branch, it falls back to the merge base with
 `origin/main` when that ref is available and older than the deployment commit.
-It builds when neither range can be proven. This fail-open behavior avoids
-silently skipping a required deployment.
+Vercel uses shallow Git checkouts, so the filter fetches the missing previous
+commit or default-branch history from the existing `origin` before retrying the
+comparison. It builds when neither range can be proven or Git history cannot be
+hydrated. This fail-open behavior avoids silently skipping a required
+deployment. Changes to the ignored-build scripts themselves are control-plane
+changes and do not rebuild either application when their runtime inputs are
+unchanged.
 
 Set:
 

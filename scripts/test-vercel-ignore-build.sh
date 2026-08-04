@@ -80,8 +80,11 @@ expect_result() {
 }
 
 repository_root="$(git rev-parse --show-toplevel)"
-fixture="$(mktemp -d)"
-trap 'rm -rf "$fixture"' EXIT
+temporary_root="$(mktemp -d)"
+fixture="$temporary_root/fixture"
+remote="$temporary_root/remote.git"
+shallow_fixture="$temporary_root/shallow"
+trap 'rm -rf "$temporary_root"' EXIT
 
 mkdir -p \
   "$fixture/apps/paperbot" \
@@ -124,11 +127,24 @@ expect_skip "$fixture" web "" "$paperbot_commit"
 expect_skip "$fixture" api missing "$paperbot_commit"
 expect_skip_default_ref "$fixture" web "" "$paperbot_commit"
 
+git clone --quiet --bare "$fixture" "$remote"
+git clone --quiet --depth=1 --single-branch --branch feature \
+  "file://$remote" "$shallow_fixture"
+expect_skip "$shallow_fixture" api "$baseline" "$paperbot_commit"
+expect_skip_default_ref "$shallow_fixture" web "" "$paperbot_commit"
+
+echo "# filter-only change" >>"$fixture/scripts/vercel-ignore-build.sh"
+echo "# wrapper-only change" >>"$fixture/scripts/vercel-api-ignore-build.sh"
+commit_all "$fixture" "test: change deployment filters"
+filter_commit="$(git -C "$fixture" rev-parse HEAD)"
+expect_skip "$fixture" api "$paperbot_commit" "$filter_commit"
+expect_skip "$fixture" web "$paperbot_commit" "$filter_commit"
+
 echo "web-only" >"$fixture/apps/web/change.ts"
 commit_all "$fixture" "test: change website"
 web_commit="$(git -C "$fixture" rev-parse HEAD)"
-expect_skip "$fixture" api "$paperbot_commit" "$web_commit"
-expect_build "$fixture" web "$paperbot_commit" "$web_commit"
+expect_skip "$fixture" api "$filter_commit" "$web_commit"
+expect_build "$fixture" web "$filter_commit" "$web_commit"
 
 echo "{}" >"$fixture/schemas/paper.schema.json"
 commit_all "$fixture" "test: change shared web schema"
