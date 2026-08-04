@@ -297,15 +297,18 @@ bun run paperbot agent select-trending \
 The scheduled prodxiv collector, outside Paperbot, captures and normalizes
 GitHub Trending and ingests immutable observations into the prodxiv archive.
 By default Paperbot requests the exact current UTC date with `period=daily`
-and the all-language scope from the hosted prodxiv archive at
-`https://prodxiv-api.vercel.app/`. `--api-url` or a non-empty
-`PRODXIV_API_URL` overrides that endpoint for development or self-hosting. If
-today's exact snapshot is unavailable, the command fails clearly. It never
-scrapes GitHub, selects a nearby date, or silently falls back to another
-source.
+from the hosted prodxiv archive at `https://prodxiv-api.vercel.app/`. It first
+loads the unfiltered scope, reads that response's `available_languages`, and
+then downloads every advertised language-specific scope for the same day. All
+advertised scopes must load successfully; Paperbot never treats the
+unfiltered page as a union or silently returns a partial day. `--api-url` or a
+non-empty `PRODXIV_API_URL` overrides the endpoint for development or
+self-hosting. If today's exact snapshots are unavailable, the command fails
+clearly. It never scrapes GitHub, selects a nearby date, or silently falls back
+to another source.
 
-For a reproducible or offline rerun, pass a previously saved bare prodxiv
-snapshot instead of an API URL:
+For a reproducible or offline rerun, pass a previously saved Paperbot snapshot
+bundle instead of an API URL:
 
 ```sh
 bun run paperbot agent select-trending \
@@ -316,29 +319,38 @@ bun run paperbot agent select-trending \
 ```
 
 `--snapshot` and `--api-url` are mutually exclusive. A file input may describe
-an older date, but it must satisfy the prodxiv API snapshot contract and be an
-all-language daily observation with canonical, unique, sequentially ranked
-repositories. Paperbot bounds and validates either input, copies the normalized
-observation to the run's `snapshot.json`, and only then starts Pi.
+an older date. The preferred input is the schema-versioned `snapshot.json`
+all-scope bundle from an earlier run; every contained prodxiv scope must share
+the date and daily period, use no spoken-language filter, and contain canonical,
+unique, sequentially ranked repositories. Bare unfiltered prodxiv snapshots
+from earlier Paperbot runs remain accepted as single-scope inputs. Paperbot
+bounds and validates either form, writes the normalized bundle with every raw
+scope observation to the new run's `snapshot.json`, and only then starts Pi.
 
-Paperbot then starts one separate, tool-less `trend_selection` Pi session. The
-session receives only the normalized snapshot; it cannot open repositories or
-browse for more context. It ranks exactly ten candidates for potential
-product-paper research using distinct ideas, learning value, inspectable
-implementation, and diversity as selection signals. Popularity is context,
-not the score. Repository names and descriptions are treated as untrusted
-data, and the model-authored reason is a research rationale rather than
-evidence about the repository.
+Paperbot deduplicates repositories across scopes by case-insensitive canonical
+full name before starting one separate, tool-less `trend_selection` Pi session.
+The first appearance in deterministic scope-and-rank order supplies shared
+repository metadata. Each candidate also carries `source_appearances`, which
+preserves every scope language, source rank, and per-scope `stars_in_period`;
+the raw source snapshots remain intact in `snapshot.json`. The session receives
+only this normalized public candidate set and scope provenance. It cannot open
+repositories or browse for more context. It ranks exactly ten candidates for
+potential product-paper research using distinct ideas, learning value,
+inspectable implementation, and diversity as selection signals. Popularity
+and appearing in multiple scopes are context, not the score. Repository names
+and descriptions are treated as untrusted data, and the model-authored reason
+is a research rationale rather than evidence about the repository.
 
 The host accepts only ten unique names from the archived candidates, rejects
 unknown fields and malformed reasons, and copies all repository metadata from
 the snapshot rather than trusting the model to repeat it. One correction turn
 is permitted in the same session. A valid run writes the versioned
-`selection.json` with snapshot provenance, model and session metadata,
-selection `rank`, original `source_rank`, and reasons. `--format json` emits
-that same selection artifact on stdout; diagnostics stay on stderr. A
-validated snapshot remains available if fewer than ten candidates make
-selection impossible.
+`selection.json` with per-scope snapshot provenance, model and session
+metadata, selection `rank`, deterministic `candidate_rank`,
+`source_appearances`, and reasons. `--format json` emits that same selection
+artifact on stdout; diagnostics stay on stderr. A validated all-scope snapshot
+remains available if fewer than ten unique candidates make selection
+impossible.
 
 This command does not download repository contents, start paper-drafting
 sessions, create a batch manifest, submit, or publish. Its ten results are a

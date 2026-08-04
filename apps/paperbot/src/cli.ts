@@ -640,7 +640,7 @@ function writeTrendSelectionResult(
   io.stdout(
     [
       "Paperbot GitHub Trending selection",
-      `Snapshot: ${result.selection.snapshot.snapshot_date} (${result.selection.snapshot.candidate_count} candidates)`,
+      `Snapshot: ${result.selection.snapshot.snapshot_date} (${result.selection.snapshot.candidate_count} unique candidates across ${result.selection.snapshot.scope_count} ${result.selection.snapshot.scope_count === 1 ? "scope" : "scopes"})`,
       ...result.selection.selected_repositories.map(
         (repository) =>
           `${repository.rank}. ${repository.repository_full_name} — ${repository.reason}`,

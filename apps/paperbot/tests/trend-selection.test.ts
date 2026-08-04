@@ -14,6 +14,10 @@ import {
   runTrendSelection,
   type TrendSelectionRuntime,
 } from "../src/agent/trend-selection.ts";
+import {
+  createTrendCandidates,
+  type TrendSnapshotBundle,
+} from "../src/agent/trend-snapshot.ts";
 import type { ModelCompletion } from "../src/agent/types.ts";
 
 const workspaces: string[] = [];
@@ -28,14 +32,32 @@ afterEach(async () => {
 });
 
 describe("runTrendSelection", () => {
-  test("loads today's archived all-language snapshot and writes an unambiguous ranked selection", async () => {
+  test("loads every archived language scope and writes a deduplicated ranked selection", async () => {
     const workspace = await createWorkspace();
     const outputPath = join(workspace, "trend-run");
-    const snapshot = trendingSnapshot();
-    const runtime = new FakeTrendRuntime([
-      selectionResponse(snapshot.entries.slice(1, 11)),
+    const allEntries = trendingSnapshot(14).entries;
+    const baseSnapshot = {
+      ...trendingSnapshot(),
+      entries: allEntries.slice(0, 12),
+    };
+    const rustSnapshot = languageSnapshot("rust", [
+      allEntries[1]!,
+      allEntries[12]!,
     ]);
-    let archiveRequest: string | undefined;
+    const typescriptSnapshot = languageSnapshot("typescript", [
+      allEntries[1]!,
+      allEntries[13]!,
+    ]);
+    const snapshot = snapshotBundle(
+      baseSnapshot,
+      rustSnapshot,
+      typescriptSnapshot,
+    );
+    const candidates = createTrendCandidates(snapshot);
+    const runtime = new FakeTrendRuntime([
+      selectionResponse(candidates.slice(1, 11)),
+    ]);
+    const archiveRequests: string[] = [];
     const clock = fixedClock(
       "2026-08-04T01:02:03.456Z",
       "2026-08-04T01:02:04.789Z",
@@ -49,9 +71,17 @@ describe("runTrendSelection", () => {
       },
       {
         fetch: async (input, init) => {
-          archiveRequest = String(input);
+          const url = String(input);
+          archiveRequests.push(url);
           expect(init).toBeUndefined();
-          return archiveResponse(snapshot);
+          const language = new URL(url).searchParams.get("language");
+          const responseSnapshot = snapshot.scopes.find(
+            (scope) => (scope.language ?? null) === language,
+          );
+          return archiveResponse(
+            responseSnapshot,
+            language === null ? ["typescript", "rust"] : [],
+          );
         },
         create_runtime: (model) => {
           expect(model).toBe("deepseek-v4-flash");
@@ -62,15 +92,18 @@ describe("runTrendSelection", () => {
       },
     );
 
-    expect(archiveRequest).toBe(
+    expect(archiveRequests).toEqual([
       `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily`,
-    );
+      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily&language=rust`,
+      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily&language=typescript`,
+    ]);
     expect(runtime.started_inputs).toEqual([
       { role: "trend_selection", run_path: outputPath },
     ]);
     expect(runtime.prompts).toHaveLength(1);
     expect(runtime.prompts[0]).toContain("<paperbot_trending_candidates>");
-    expect(runtime.prompts[0]).toContain("example/repo-12");
+    expect(runtime.prompts[0]).toContain("example/repo-14");
+    expect(runtime.prompts[0]).toContain('"scope_language": "rust"');
     expect(runtime.prompts[0]).toContain("do not simply sort by popularity");
     expect(runtime.disposed).toBe(1);
 
@@ -84,7 +117,9 @@ describe("runTrendSelection", () => {
         selection_policy: "product_paper_interest_v1",
         snapshot: {
           snapshot_date: "2026-08-04",
-          candidate_count: 12,
+          scope_count: 3,
+          candidate_count: 14,
+          available_languages: ["rust", "typescript"],
         },
         agent: {
           provider: "fake-pi",
@@ -96,11 +131,10 @@ describe("runTrendSelection", () => {
       },
     });
     expect(result.selection.selected_repositories).toHaveLength(10);
-    const firstCandidate = snapshot.entries[1]!;
+    const firstCandidate = candidates[1]!;
     expect(result.selection.selected_repositories[0]).toEqual({
-      ...firstCandidate,
       rank: 1,
-      source_rank: 2,
+      ...firstCandidate,
       reason: "Candidate 1 merits deeper product-paper research.",
     });
 
@@ -224,10 +258,12 @@ describe("runTrendSelection", () => {
     ).rejects.toMatchObject({
       exit_code: ExitCode.remote,
       message:
-        "GitHub Trending returned 9 candidates; at least 10 are required",
+        "GitHub Trending returned 9 unique candidates across 1 scope; at least 10 are required",
     } satisfies Partial<PaperbotError>);
     expect(runtimeCreated).toBe(false);
-    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(snapshot);
+    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(
+      snapshotBundle(snapshot),
+    );
   });
 
   test("uses an explicit snapshot file without contacting the archive", async () => {
@@ -264,6 +300,58 @@ describe("runTrendSelection", () => {
 
     expect(archiveCalled).toBe(false);
     expect(result.selection.snapshot.snapshot_date).toBe("2026-08-03");
+    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(
+      snapshotBundle(snapshot),
+    );
+  });
+
+  test("replays a saved all-scope bundle without contacting the archive", async () => {
+    const workspace = await createWorkspace();
+    const outputPath = join(workspace, "trend-run");
+    const snapshotPath = join(workspace, "all-scopes.json");
+    const allEntries = trendingSnapshot(13).entries;
+    const baseSnapshot = {
+      ...trendingSnapshot(),
+      snapshot_date: "2026-08-03",
+      captured_at: "2026-08-03T01:02:03Z",
+      entries: allEntries.slice(0, 12),
+    };
+    const rustSnapshot = {
+      ...languageSnapshot("rust", [allEntries[0]!, allEntries[12]!]),
+      snapshot_date: "2026-08-03",
+      captured_at: "2026-08-03T01:02:04Z",
+    };
+    const snapshot = snapshotBundle(baseSnapshot, rustSnapshot);
+    const candidates = createTrendCandidates(snapshot);
+    await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+    const runtime = new FakeTrendRuntime([
+      selectionResponse(candidates.slice(0, 10)),
+    ]);
+    let archiveCalled = false;
+
+    const result = await runTrendSelection(
+      {
+        output_path: outputPath,
+        allow_remote_model: true,
+        snapshot_path: snapshotPath,
+      },
+      {
+        fetch: async () => {
+          archiveCalled = true;
+          return archiveResponse(undefined);
+        },
+        create_runtime: () => runtime,
+        now: fixedClock("2026-08-04T01:02:03Z", "2026-08-04T01:02:04Z"),
+      },
+    );
+
+    expect(archiveCalled).toBe(false);
+    expect(result.selection.snapshot).toMatchObject({
+      snapshot_date: "2026-08-03",
+      scope_count: 2,
+      candidate_count: 13,
+      available_languages: ["rust"],
+    });
     expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(snapshot);
   });
 
@@ -290,9 +378,44 @@ describe("runTrendSelection", () => {
     ).rejects.toMatchObject({
       exit_code: ExitCode.remote,
       message:
-        "prodxiv has no all-language daily GitHub Trending snapshot for 2026-08-04; retry after archive ingestion or use --snapshot <path>",
+        "prodxiv has no daily GitHub Trending snapshots for 2026-08-04; retry after archive ingestion or use --snapshot <path>",
     } satisfies Partial<PaperbotError>);
     expect(runtimeCreated).toBe(false);
+  });
+
+  test("fails the complete download when an advertised language scope is unavailable", async () => {
+    const workspace = await createWorkspace();
+    const baseSnapshot = trendingSnapshot();
+    const requestedLanguages: Array<string | null> = [];
+
+    await expect(
+      runTrendSelection(
+        {
+          output_path: join(workspace, "trend-run"),
+          allow_remote_model: true,
+          api_url: archiveApiUrl,
+        },
+        {
+          fetch: async (input) => {
+            const language = new URL(String(input)).searchParams.get(
+              "language",
+            );
+            requestedLanguages.push(language);
+            return archiveResponse(
+              language === null ? baseSnapshot : undefined,
+              language === null ? ["rust"] : [],
+            );
+          },
+          now: fixedClock("2026-08-04T01:02:03Z"),
+        },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: ExitCode.remote,
+      message: expect.stringContaining(
+        'advertised language scope "rust" is unavailable',
+      ),
+    } satisfies Partial<PaperbotError>);
+    expect(requestedLanguages).toEqual([null, "rust"]);
   });
 
   test("rejects a nearby archived date instead of silently substituting it", async () => {
@@ -380,14 +503,14 @@ describe("runTrendSelection", () => {
     ).rejects.toMatchObject({
       exit_code: ExitCode.validation,
       message:
-        "invalid trend snapshot: snapshot file must be an all-language daily snapshot",
+        "invalid trend snapshot: snapshot file must be an all-language daily snapshot or a Paperbot all-scope snapshot bundle",
     } satisfies Partial<PaperbotError>);
     expect(runtimeCreated).toBe(false);
   });
 });
 
 test("rejects control characters in model-authored selection reasons", () => {
-  const entries = trendingSnapshot().entries;
+  const entries = createTrendCandidates(snapshotBundle(trendingSnapshot()));
   const response = {
     selected_repositories: entries.slice(0, 10).map((entry, index) => ({
       repository_full_name: entry.repository_full_name,
@@ -471,7 +594,9 @@ function trendingSnapshot(entryCount = 12): GitHubTrendingSnapshot {
   };
 }
 
-function selectionResponse(entries: GitHubTrendingEntry[]): string {
+function selectionResponse(
+  entries: Array<{ repository_full_name: string }>,
+): string {
   return JSON.stringify({
     selected_repositories: entries.map((entry, index) => ({
       repository_full_name: entry.repository_full_name,
@@ -480,7 +605,7 @@ function selectionResponse(entries: GitHubTrendingEntry[]): string {
   });
 }
 
-function repositoryName(entry: GitHubTrendingEntry): string {
+function repositoryName(entry: { repository_full_name: string }): string {
   return entry.repository_full_name;
 }
 
@@ -505,11 +630,44 @@ function archiveFetch(snapshot: GitHubTrendingSnapshot): ApiFetch {
 
 function archiveResponse(
   snapshot: GitHubTrendingSnapshot | undefined,
+  availableLanguages: string[] = [],
 ): Response {
   return Response.json({
     snapshot: snapshot ?? null,
     previous_date: null,
     next_date: null,
-    available_languages: [],
+    available_languages: availableLanguages,
   });
+}
+
+function snapshotBundle(
+  ...scopes: GitHubTrendingSnapshot[]
+): TrendSnapshotBundle {
+  const baseScope = scopes.find((scope) => scope.language == null);
+  if (baseScope === undefined) {
+    throw new Error("test snapshot bundle requires an all-language scope");
+  }
+  return {
+    schema_version: "1",
+    snapshot_date: baseScope.snapshot_date,
+    period: "daily",
+    spoken_language: null,
+    scopes,
+  };
+}
+
+function languageSnapshot(
+  language: string,
+  entries: GitHubTrendingEntry[],
+): GitHubTrendingSnapshot {
+  return {
+    ...trendingSnapshot(0),
+    language,
+    source_url: `https://github.com/trending/${language}?since=daily`,
+    source_revision: `revision-${language}`,
+    entries: entries.map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    })),
+  };
 }

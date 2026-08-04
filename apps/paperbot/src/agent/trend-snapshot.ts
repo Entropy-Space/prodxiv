@@ -14,8 +14,15 @@ import {
   type ExitCode as ExitCodeValue,
 } from "@prodxiv/paperbot-core";
 
-const MAX_SNAPSHOT_BYTES = 256 * 1024;
-const MAX_SNAPSHOT_ENTRIES = 100;
+const MAX_SNAPSHOT_BUNDLE_BYTES = 2 * 1024 * 1024;
+const MAX_SOURCE_SNAPSHOT_BYTES = 256 * 1024;
+const MAX_SOURCE_SCOPES = 100;
+const MAX_ENTRIES_PER_SCOPE = 100;
+const MAX_TOTAL_ENTRIES = 5_000;
+const MAX_UNIQUE_CANDIDATES = 1_000;
+const MAX_SCOPE_CHARACTERS = 100;
+
+export const TREND_SNAPSHOT_SCHEMA_VERSION = "1";
 export const DEFAULT_PRODXIV_API_URL = "https://prodxiv-api.vercel.app/";
 
 export interface TrendSnapshotInputOptions {
@@ -28,11 +35,33 @@ export interface TrendSnapshotDependencies {
   fetch?: ApiFetch;
 }
 
+export interface TrendSnapshotBundle {
+  schema_version: typeof TREND_SNAPSHOT_SCHEMA_VERSION;
+  snapshot_date: string;
+  period: "daily";
+  spoken_language: null;
+  scopes: GitHubTrendingSnapshot[];
+}
+
+export interface TrendCandidateAppearance {
+  scope_language: string | null;
+  source_rank: number;
+  stars_in_period?: number | null;
+}
+
+export interface TrendCandidate extends Omit<
+  GitHubTrendingEntry,
+  "rank" | "stars_in_period"
+> {
+  candidate_rank: number;
+  source_appearances: TrendCandidateAppearance[];
+}
+
 export async function loadTrendSnapshot(
   options: TrendSnapshotInputOptions,
   snapshotDate: string,
   dependencies: TrendSnapshotDependencies,
-): Promise<GitHubTrendingSnapshot> {
+): Promise<TrendSnapshotBundle> {
   if (options.snapshot_path !== undefined) {
     if (options.api_url !== undefined) {
       throw new PaperbotError(
@@ -40,7 +69,7 @@ export async function loadTrendSnapshot(
         ExitCode.usage,
       );
     }
-    return normalizeSnapshot(
+    return normalizeSnapshotInput(
       await readSnapshotFile(options.snapshot_path),
       "snapshot file",
     );
@@ -55,9 +84,9 @@ export async function loadTrendSnapshot(
         ? DEFAULT_PRODXIV_API_URL
         : environmentApiUrl),
   );
-  let snapshot: GitHubTrendingSnapshot | undefined;
+  let snapshot: TrendSnapshotBundle | undefined;
   try {
-    snapshot = await loadArchivedSnapshot(
+    snapshot = await loadArchivedSnapshotBundle(
       {
         api_url: apiUrl,
         snapshot_date: snapshotDate,
@@ -76,40 +105,120 @@ export async function loadTrendSnapshot(
   }
   if (snapshot === undefined) {
     throw new PaperbotError(
-      `prodxiv has no all-language daily GitHub Trending snapshot for ${snapshotDate}; retry after archive ingestion or use --snapshot <path>`,
+      `prodxiv has no daily GitHub Trending snapshots for ${snapshotDate}; retry after archive ingestion or use --snapshot <path>`,
       ExitCode.remote,
     );
   }
-  const normalized = normalizeSnapshot(
-    snapshot,
-    "prodxiv archive",
-    ExitCode.remote,
-  );
-  if (normalized.snapshot_date !== snapshotDate) {
+  if (snapshot.snapshot_date !== snapshotDate) {
     throw new PaperbotError(
-      `prodxiv returned snapshot ${normalized.snapshot_date} when ${snapshotDate} was requested`,
+      `prodxiv returned snapshot ${snapshot.snapshot_date} when ${snapshotDate} was requested`,
       ExitCode.remote,
     );
   }
-  return normalized;
+  return snapshot;
 }
 
-async function loadArchivedSnapshot(
+export function createTrendCandidates(
+  snapshot: TrendSnapshotBundle,
+): TrendCandidate[] {
+  const candidates: TrendCandidate[] = [];
+  const candidatesByName = new Map<string, TrendCandidate>();
+
+  for (const scope of snapshot.scopes) {
+    for (const entry of scope.entries) {
+      const key = entry.repository_full_name.toLowerCase();
+      const appearance: TrendCandidateAppearance = {
+        scope_language: scope.language ?? null,
+        source_rank: entry.rank,
+        ...(entry.stars_in_period === undefined
+          ? {}
+          : { stars_in_period: entry.stars_in_period }),
+      };
+      const existing = candidatesByName.get(key);
+      if (existing !== undefined) {
+        existing.source_appearances.push(appearance);
+        continue;
+      }
+
+      const candidate: TrendCandidate = {
+        candidate_rank: candidates.length + 1,
+        repository_full_name: entry.repository_full_name,
+        ...(entry.repository_node_id === undefined
+          ? {}
+          : { repository_node_id: entry.repository_node_id }),
+        repository_url: entry.repository_url,
+        ...(entry.description === undefined
+          ? {}
+          : { description: entry.description }),
+        ...(entry.primary_language === undefined
+          ? {}
+          : { primary_language: entry.primary_language }),
+        ...(entry.stars === undefined ? {} : { stars: entry.stars }),
+        ...(entry.forks === undefined ? {} : { forks: entry.forks }),
+        source_appearances: [appearance],
+      };
+      candidates.push(candidate);
+      candidatesByName.set(key, candidate);
+    }
+  }
+
+  return candidates;
+}
+
+async function loadArchivedSnapshotBundle(
   input: {
     api_url: string;
     snapshot_date: string;
   },
   fetcher?: ApiFetch,
-): Promise<GitHubTrendingSnapshot | undefined> {
+): Promise<TrendSnapshotBundle | undefined> {
   const client = new ProdxivApiClient({
     api_url: input.api_url,
     ...(fetcher === undefined ? {} : { fetch: fetcher }),
   });
-  const view = await client.getGitHubTrending({
+  const baseView = await client.getGitHubTrending({
     date: input.snapshot_date,
     period: "daily",
   });
-  return view.snapshot;
+  if (baseView.snapshot === undefined) {
+    return undefined;
+  }
+
+  const availableLanguages = normalizeAvailableLanguages(
+    baseView.available_languages,
+  );
+  const languageSnapshots = await Promise.all(
+    availableLanguages.map(async (language) => {
+      const view = await client.getGitHubTrending({
+        date: input.snapshot_date,
+        period: "daily",
+        language,
+      });
+      if (view.snapshot === undefined) {
+        throw new Error(
+          `advertised language scope ${JSON.stringify(language)} is unavailable for ${input.snapshot_date}`,
+        );
+      }
+      if (view.snapshot.language !== language) {
+        throw new Error(
+          `archive returned language scope ${JSON.stringify(view.snapshot.language ?? null)} when ${JSON.stringify(language)} was requested`,
+        );
+      }
+      return view.snapshot;
+    }),
+  );
+
+  return normalizeSnapshotBundle(
+    {
+      schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
+      snapshot_date: baseView.snapshot.snapshot_date,
+      period: "daily",
+      spoken_language: null,
+      scopes: [baseView.snapshot, ...languageSnapshots],
+    },
+    "prodxiv archive",
+    ExitCode.remote,
+  );
 }
 
 async function readSnapshotFile(path: string): Promise<unknown> {
@@ -120,10 +229,10 @@ async function readSnapshotFile(path: string): Promise<unknown> {
     if (
       !metadata.isFile() ||
       metadata.isSymbolicLink() ||
-      metadata.size > MAX_SNAPSHOT_BYTES
+      metadata.size > MAX_SNAPSHOT_BUNDLE_BYTES
     ) {
       throw new Error(
-        `snapshot must be a regular file no larger than ${MAX_SNAPSHOT_BYTES} bytes`,
+        `snapshot must be a regular file no larger than ${MAX_SNAPSHOT_BUNDLE_BYTES} bytes`,
       );
     }
     serialized = await readFile(absolutePath, "utf8");
@@ -143,10 +252,139 @@ async function readSnapshotFile(path: string): Promise<unknown> {
   }
 }
 
-function normalizeSnapshot(
+function normalizeSnapshotInput(
   value: unknown,
   source: string,
   exitCode: ExitCodeValue = ExitCode.validation,
+): TrendSnapshotBundle {
+  if (isRecord(value) && Object.hasOwn(value, "scopes")) {
+    return normalizeSnapshotBundle(value, source, exitCode);
+  }
+
+  const snapshot = normalizeSourceSnapshot(value, source, exitCode);
+  if (
+    snapshot.period !== "daily" ||
+    snapshot.language != null ||
+    snapshot.spoken_language != null
+  ) {
+    throw invalidSnapshot(
+      `${source} must be an all-language daily snapshot or a Paperbot all-scope snapshot bundle`,
+      exitCode,
+    );
+  }
+  return {
+    schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
+    snapshot_date: snapshot.snapshot_date,
+    period: "daily",
+    spoken_language: null,
+    scopes: [snapshot],
+  };
+}
+
+function normalizeSnapshotBundle(
+  value: unknown,
+  source: string,
+  exitCode: ExitCodeValue,
+): TrendSnapshotBundle {
+  if (!isRecord(value)) {
+    throw invalidSnapshot(`${source} must be an object`, exitCode);
+  }
+  if (serializedBytes(value) > MAX_SNAPSHOT_BUNDLE_BYTES) {
+    throw invalidSnapshot(
+      `${source} exceeds the ${MAX_SNAPSHOT_BUNDLE_BYTES}-byte limit`,
+      exitCode,
+    );
+  }
+  if (value.schema_version !== TREND_SNAPSHOT_SCHEMA_VERSION) {
+    throw invalidSnapshot(
+      `${source} has an unsupported schema_version`,
+      exitCode,
+    );
+  }
+  if (!isDateString(value.snapshot_date)) {
+    throw invalidSnapshot(`${source} has an invalid snapshot_date`, exitCode);
+  }
+  if (value.period !== "daily" || value.spoken_language != null) {
+    throw invalidSnapshot(
+      `${source} must contain daily scopes without a spoken-language filter`,
+      exitCode,
+    );
+  }
+  if (
+    !Array.isArray(value.scopes) ||
+    value.scopes.length === 0 ||
+    value.scopes.length > MAX_SOURCE_SCOPES
+  ) {
+    throw invalidSnapshot(
+      `${source} must contain from 1 to ${MAX_SOURCE_SCOPES} scopes`,
+      exitCode,
+    );
+  }
+
+  const scopes = value.scopes.map((scope, index) =>
+    normalizeSourceSnapshot(scope, `${source} scope ${index + 1}`, exitCode),
+  );
+  const scopeNames = new Set<string>();
+  let totalEntries = 0;
+  let hasAllLanguageScope = false;
+  for (const scope of scopes) {
+    if (
+      scope.snapshot_date !== value.snapshot_date ||
+      scope.period !== "daily" ||
+      scope.spoken_language != null
+    ) {
+      throw invalidSnapshot(
+        `${source} scopes must share snapshot_date, daily period, and no spoken-language filter`,
+        exitCode,
+      );
+    }
+    const language = scope.language ?? null;
+    const key = language === null ? "\u0000all" : language.toLowerCase();
+    if (scopeNames.has(key)) {
+      throw invalidSnapshot(
+        `${source} contains duplicate language scopes`,
+        exitCode,
+      );
+    }
+    scopeNames.add(key);
+    hasAllLanguageScope ||= language === null;
+    totalEntries += scope.entries.length;
+  }
+  if (!hasAllLanguageScope) {
+    throw invalidSnapshot(
+      `${source} is missing the all-language scope`,
+      exitCode,
+    );
+  }
+  if (totalEntries > MAX_TOTAL_ENTRIES) {
+    throw invalidSnapshot(
+      `${source} contains more than ${MAX_TOTAL_ENTRIES} total entries`,
+      exitCode,
+    );
+  }
+
+  scopes.sort(compareScopes);
+  const normalized: TrendSnapshotBundle = {
+    schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
+    snapshot_date: value.snapshot_date,
+    period: "daily",
+    spoken_language: null,
+    scopes,
+  };
+  const candidateCount = createTrendCandidates(normalized).length;
+  if (candidateCount > MAX_UNIQUE_CANDIDATES) {
+    throw invalidSnapshot(
+      `${source} contains more than ${MAX_UNIQUE_CANDIDATES} unique candidates`,
+      exitCode,
+    );
+  }
+  return normalized;
+}
+
+function normalizeSourceSnapshot(
+  value: unknown,
+  source: string,
+  exitCode: ExitCodeValue,
 ): GitHubTrendingSnapshot {
   if (!isSnapshotContract(value)) {
     throw invalidSnapshot(
@@ -154,28 +392,15 @@ function normalizeSnapshot(
       exitCode,
     );
   }
-  if (
-    new TextEncoder().encode(JSON.stringify(value)).byteLength >
-    MAX_SNAPSHOT_BYTES
-  ) {
+  if (serializedBytes(value) > MAX_SOURCE_SNAPSHOT_BYTES) {
     throw invalidSnapshot(
-      `${source} exceeds the ${MAX_SNAPSHOT_BYTES}-byte limit`,
+      `${source} exceeds the ${MAX_SOURCE_SNAPSHOT_BYTES}-byte per-scope limit`,
       exitCode,
     );
   }
-  if (
-    value.period !== "daily" ||
-    value.language != null ||
-    value.spoken_language != null
-  ) {
+  if (value.entries.length > MAX_ENTRIES_PER_SCOPE) {
     throw invalidSnapshot(
-      `${source} must be an all-language daily snapshot`,
-      exitCode,
-    );
-  }
-  if (value.entries.length > MAX_SNAPSHOT_ENTRIES) {
-    throw invalidSnapshot(
-      `${source} contains more than ${MAX_SNAPSHOT_ENTRIES} candidates`,
+      `${source} contains more than ${MAX_ENTRIES_PER_SCOPE} entries`,
       exitCode,
     );
   }
@@ -185,7 +410,7 @@ function normalizeSnapshot(
     const expectedRank = index + 1;
     if (entry.rank !== expectedRank) {
       throw invalidSnapshot(
-        `${source} candidate ${expectedRank} has non-sequential rank ${entry.rank}`,
+        `${source} entry ${expectedRank} has non-sequential rank ${entry.rank}`,
         exitCode,
       );
     }
@@ -200,7 +425,7 @@ function normalizeSnapshot(
       )
     ) {
       throw invalidSnapshot(
-        `${source} candidate ${expectedRank} has an invalid repository_full_name`,
+        `${source} entry ${expectedRank} has an invalid repository_full_name`,
         exitCode,
       );
     }
@@ -215,7 +440,7 @@ function normalizeSnapshot(
     const expectedUrl = `https://github.com/${entry.repository_full_name}`;
     if (entry.repository_url !== expectedUrl) {
       throw invalidSnapshot(
-        `${source} candidate ${expectedRank} has a non-canonical repository_url`,
+        `${source} entry ${expectedRank} has a non-canonical repository_url`,
         exitCode,
       );
     }
@@ -228,10 +453,8 @@ function normalizeSnapshot(
       ? {}
       : { captured_at: value.captured_at }),
     period: value.period,
-    ...(value.language === undefined ? {} : { language: value.language }),
-    ...(value.spoken_language === undefined
-      ? {}
-      : { spoken_language: value.spoken_language }),
+    language: value.language ?? null,
+    spoken_language: value.spoken_language ?? null,
     source_kind: value.source_kind,
     source_url: value.source_url,
     source_revision: value.source_revision,
@@ -259,6 +482,33 @@ function normalizeEntry(entry: GitHubTrendingEntry): GitHubTrendingEntry {
       ? {}
       : { stars_in_period: entry.stars_in_period }),
   };
+}
+
+function normalizeAvailableLanguages(values: string[]): string[] {
+  if (values.length + 1 > MAX_SOURCE_SCOPES) {
+    throw new Error(
+      `archive advertised more than ${MAX_SOURCE_SCOPES - 1} language scopes`,
+    );
+  }
+  const languages: string[] = [];
+  const seen = new Set<string>();
+  for (const language of values) {
+    if (
+      language.length === 0 ||
+      language.length > MAX_SCOPE_CHARACTERS ||
+      language !== language.trim() ||
+      /[\u0000-\u001f\u007f]/.test(language)
+    ) {
+      throw new Error("archive advertised an invalid language scope");
+    }
+    const key = language.toLowerCase();
+    if (seen.has(key)) {
+      throw new Error("archive advertised duplicate language scopes");
+    }
+    seen.add(key);
+    languages.push(language);
+  }
+  return languages.sort(compareStrings);
 }
 
 function normalizeApiUrl(value: string): string {
@@ -309,8 +559,8 @@ function isSnapshotContract(value: unknown): value is GitHubTrendingSnapshot {
     (value.period === "daily" ||
       value.period === "weekly" ||
       value.period === "monthly") &&
-    isOptionalString(value.language) &&
-    isOptionalString(value.spoken_language) &&
+    isOptionalScope(value.language) &&
+    isOptionalScope(value.spoken_language) &&
     isNonEmptyString(value.source_kind) &&
     isNonEmptyString(value.source_url) &&
     isNonEmptyString(value.source_revision) &&
@@ -335,7 +585,7 @@ function isEntryContract(value: unknown): value is GitHubTrendingEntry {
   );
 }
 
-function isDateString(value: unknown): boolean {
+function isDateString(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
   }
@@ -360,6 +610,18 @@ function isOptionalString(value: unknown): value is string | null | undefined {
   return value === undefined || value === null || typeof value === "string";
 }
 
+function isOptionalScope(value: unknown): value is string | null | undefined {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= MAX_SCOPE_CHARACTERS &&
+      value === value.trim() &&
+      !/[\u0000-\u001f\u007f]/.test(value))
+  );
+}
+
 function isOptionalNonNegativeInteger(
   value: unknown,
 ): value is number | null | undefined {
@@ -368,6 +630,29 @@ function isOptionalNonNegativeInteger(
     value === null ||
     (Number.isSafeInteger(value) && (value as number) >= 0)
   );
+}
+
+function compareScopes(
+  left: GitHubTrendingSnapshot,
+  right: GitHubTrendingSnapshot,
+): number {
+  const leftLanguage = left.language ?? null;
+  const rightLanguage = right.language ?? null;
+  if (leftLanguage === null) {
+    return rightLanguage === null ? 0 : -1;
+  }
+  if (rightLanguage === null) {
+    return 1;
+  }
+  return compareStrings(leftLanguage, rightLanguage);
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function serializedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
