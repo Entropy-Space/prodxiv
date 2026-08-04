@@ -10,6 +10,7 @@ current_sha="${3:-${VERCEL_GIT_COMMIT_SHA:-HEAD}}"
 default_branch_refs="${PRODXIV_VERCEL_DEFAULT_BRANCH_REF:-origin/main main}"
 default_branch="${PRODXIV_VERCEL_DEFAULT_BRANCH:-main}"
 git_remote="${PRODXIV_VERCEL_GIT_REMOTE:-origin}"
+git_remote_url="${PRODXIV_VERCEL_GIT_REMOTE_URL:-}"
 
 repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "Git repository root is unavailable; building."
@@ -74,11 +75,23 @@ hydrate_git_history() {
   esac
   git check-ref-format --branch "$default_branch" >/dev/null 2>&1 || return 1
 
+  if [ -n "$git_remote_url" ]; then
+    case "$git_remote_url" in
+      https://* | file://*) git_fetch_source="$git_remote_url" ;;
+      *) return 1 ;;
+    esac
+  elif git remote get-url "$git_remote" >/dev/null 2>&1; then
+    git_fetch_source="$git_remote"
+  else
+    return 1
+  fi
+
   case "$previous_sha" in
     *[!0-9A-Fa-f]*) ;;
     *)
       if { [ "${#previous_sha}" -eq 40 ] || [ "${#previous_sha}" -eq 64 ]; } &&
-        git fetch --quiet --no-tags --depth=1 "$git_remote" "$previous_sha" \
+        git fetch --quiet --no-tags --depth=1 \
+          "$git_fetch_source" "$previous_sha" \
           >/dev/null 2>&1; then
         return 0
       fi
@@ -88,12 +101,12 @@ hydrate_git_history() {
   history_hydrated=false
   shallow_file="$(git rev-parse --git-path shallow 2>/dev/null)" || return 1
   if [ -f "$shallow_file" ]; then
-    if git fetch --quiet --no-tags --unshallow "$git_remote" \
+    if git fetch --quiet --no-tags --unshallow "$git_fetch_source" \
       >/dev/null 2>&1; then
       history_hydrated=true
     fi
   fi
-  if git fetch --quiet --no-tags "$git_remote" \
+  if git fetch --quiet --no-tags "$git_fetch_source" \
     "+refs/heads/$default_branch:refs/remotes/$git_remote/$default_branch" \
     >/dev/null 2>&1; then
     history_hydrated=true

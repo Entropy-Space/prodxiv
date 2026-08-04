@@ -217,12 +217,14 @@ The filter first compares against Vercel's previous deployment SHA. On the
 first preview for a new branch, it falls back to the merge base with
 `origin/main` when that ref is available and older than the deployment commit.
 Vercel uses shallow Git checkouts, so the filter fetches the missing previous
-commit or default-branch history from the existing `origin` before retrying the
-comparison. It builds when neither range can be proven or Git history cannot be
-hydrated. This fail-open behavior avoids silently skipping a required
-deployment. Changes to the ignored-build scripts and project-specific Vercel
-configuration are control-plane changes and do not rebuild either application
-when their runtime inputs are unchanged.
+commit or default-branch history before retrying the comparison. The checked-in
+commands provide the repository's canonical public HTTPS URL because a Vercel
+checkout may not retain a fetchable `origin`; local runs fall back to their
+configured Git remote. The filter builds when neither range can be proven or
+Git history cannot be hydrated. This fail-open behavior avoids silently
+skipping a required deployment. Changes to the ignored-build scripts and
+project-specific Vercel configuration are control-plane changes and do not
+rebuild either application when their runtime inputs are unchanged.
 
 Set:
 

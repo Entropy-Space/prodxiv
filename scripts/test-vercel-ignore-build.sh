@@ -81,6 +81,25 @@ expect_build_with_ref() {
   fi
 }
 
+expect_skip_with_remote_url() {
+  fixture_path="$1"
+  target="$2"
+  previous_sha="$3"
+  current_sha="$4"
+  remote_url="$5"
+  if ! (
+    cd "$fixture_path"
+    PRODXIV_VERCEL_GIT_REMOTE_URL="$remote_url" \
+      sh scripts/vercel-ignore-build.sh \
+      "$target" \
+      "$previous_sha" \
+      "$current_sha"
+  ); then
+    echo "Expected $target to skip after hydrating from the remote URL." >&2
+    exit 1
+  fi
+}
+
 expect_result() {
   expected="$1"
   fixture_path="$2"
@@ -112,6 +131,7 @@ temporary_root="$(mktemp -d)"
 fixture="$temporary_root/fixture"
 remote="$temporary_root/remote.git"
 shallow_fixture="$temporary_root/shallow"
+detached_fixture="$temporary_root/detached"
 trap 'rm -rf "$temporary_root"' EXIT
 
 mkdir -p \
@@ -174,6 +194,16 @@ git clone --quiet --depth=1 --single-branch --branch feature \
   "file://$remote" "$shallow_fixture"
 expect_skip "$shallow_fixture" api "$baseline" "$paperbot_commit"
 expect_skip_default_ref "$shallow_fixture" web "" "$paperbot_commit"
+
+git clone --quiet --depth=1 --single-branch --branch feature \
+  "file://$remote" "$detached_fixture"
+git -C "$detached_fixture" remote remove origin
+expect_skip_with_remote_url \
+  "$detached_fixture" \
+  api \
+  "" \
+  "$paperbot_commit" \
+  "file://$remote"
 
 echo "# filter-only change" >>"$fixture/scripts/vercel-ignore-build.sh"
 echo "# wrapper-only change" >>"$fixture/scripts/vercel-api-ignore-build.sh"
