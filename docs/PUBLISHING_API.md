@@ -197,15 +197,14 @@ The API deploys from the repository-root `Containerfile.vercel` as a separate
 Vercel project. Keep the Astro website on its native Vercel project; the local
 multi-target `Containerfile` is not the website's production artifact.
 
-Configure each Vercel project under **Settings → Build and Deployment →
-Ignored Build Step**:
-
-- `prodxiv-api`: `sh scripts/vercel-ignore-build.sh api`
-- `prodxiv-web`: `sh scripts/vercel-ignore-build.sh web`
-
-The existing `sh scripts/vercel-api-ignore-build.sh` API setting remains
-supported as a compatibility wrapper. Do not use a shared root `vercel.json`
-because the two projects require different targets.
+The ignored-build commands are checked into the project-specific Vercel
+configuration files. The repository-root `vercel.json` selects the API target,
+while `apps/web/vercel.json` selects the web target from that project's root
+directory. These files override the corresponding **Settings → Build and
+Deployment → Ignored Build Step** dashboard values, so a newly connected
+project does not silently build every repository commit. The existing
+`sh scripts/vercel-api-ignore-build.sh` API setting remains supported as a
+compatibility wrapper.
 
 Also enable Vercel's native **Skip deployment** setting for the Bun workspace
 when the project configuration supports it. Native skipping avoids allocating
@@ -221,9 +220,9 @@ Vercel uses shallow Git checkouts, so the filter fetches the missing previous
 commit or default-branch history from the existing `origin` before retrying the
 comparison. It builds when neither range can be proven or Git history cannot be
 hydrated. This fail-open behavior avoids silently skipping a required
-deployment. Changes to the ignored-build scripts themselves are control-plane
-changes and do not rebuild either application when their runtime inputs are
-unchanged.
+deployment. Changes to the ignored-build scripts and project-specific Vercel
+configuration are control-plane changes and do not rebuild either application
+when their runtime inputs are unchanged.
 
 Set:
 

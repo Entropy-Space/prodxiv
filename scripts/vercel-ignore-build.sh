@@ -126,6 +126,7 @@ case "$target" in
   web)
     git diff --quiet "$baseline_commit" "$current_commit" -- \
       apps/web \
+      ':(exclude)apps/web/vercel.json' \
       bun.lock \
       examples/papers \
       .npmrc \

@@ -17,6 +17,34 @@ expect_build() {
   expect_result build "$@"
 }
 
+expect_config_skip() {
+  fixture_path="$1"
+  project_root="$2"
+  config_path="$3"
+  previous_sha="$4"
+  current_sha="$5"
+  ignore_command="$(
+    node -e '
+      const fs = require("node:fs");
+      const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (typeof config.ignoreCommand !== "string") {
+        process.exit(1);
+      }
+      process.stdout.write(config.ignoreCommand);
+    ' "$config_path"
+  )"
+
+  if ! (
+    cd "$fixture_path/$project_root"
+    VERCEL_GIT_PREVIOUS_SHA="$previous_sha" \
+      VERCEL_GIT_COMMIT_SHA="$current_sha" \
+      sh -c "$ignore_command"
+  ); then
+    echo "Expected $config_path to configure a skipped deployment." >&2
+    exit 1
+  fi
+}
+
 expect_skip_default_ref() {
   fixture_path="$1"
   target="$2"
@@ -101,6 +129,8 @@ cp \
 cp \
   "$repository_root/scripts/vercel-ignore-build.sh" \
   "$fixture/scripts/vercel-ignore-build.sh"
+cp "$repository_root/vercel.json" "$fixture/vercel.json"
+cp "$repository_root/apps/web/vercel.json" "$fixture/apps/web/vercel.json"
 
 git -C "$fixture" init --quiet --initial-branch=main
 git -C "$fixture" config user.email "paperbot@example.invalid"
@@ -126,6 +156,18 @@ expect_skip "$fixture" api "" "$paperbot_commit"
 expect_skip "$fixture" web "" "$paperbot_commit"
 expect_skip "$fixture" api missing "$paperbot_commit"
 expect_skip_default_ref "$fixture" web "" "$paperbot_commit"
+expect_config_skip \
+  "$fixture" \
+  . \
+  "$fixture/vercel.json" \
+  "$baseline" \
+  "$paperbot_commit"
+expect_config_skip \
+  "$fixture" \
+  apps/web \
+  "$fixture/apps/web/vercel.json" \
+  "$baseline" \
+  "$paperbot_commit"
 
 git clone --quiet --bare "$fixture" "$remote"
 git clone --quiet --depth=1 --single-branch --branch feature \
@@ -140,11 +182,18 @@ filter_commit="$(git -C "$fixture" rev-parse HEAD)"
 expect_skip "$fixture" api "$paperbot_commit" "$filter_commit"
 expect_skip "$fixture" web "$paperbot_commit" "$filter_commit"
 
+echo " " >>"$fixture/vercel.json"
+echo " " >>"$fixture/apps/web/vercel.json"
+commit_all "$fixture" "test: change deployment configuration"
+config_commit="$(git -C "$fixture" rev-parse HEAD)"
+expect_skip "$fixture" api "$filter_commit" "$config_commit"
+expect_skip "$fixture" web "$filter_commit" "$config_commit"
+
 echo "web-only" >"$fixture/apps/web/change.ts"
 commit_all "$fixture" "test: change website"
 web_commit="$(git -C "$fixture" rev-parse HEAD)"
-expect_skip "$fixture" api "$filter_commit" "$web_commit"
-expect_build "$fixture" web "$filter_commit" "$web_commit"
+expect_skip "$fixture" api "$config_commit" "$web_commit"
+expect_build "$fixture" web "$config_commit" "$web_commit"
 
 echo "{}" >"$fixture/schemas/paper.schema.json"
 commit_all "$fixture" "test: change shared web schema"
