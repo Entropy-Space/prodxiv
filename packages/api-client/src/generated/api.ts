@@ -134,12 +134,13 @@ export interface components {
       available_languages: string[];
       next_date?: string | null;
       previous_date?: string | null;
-      snapshot?: null | components["schemas"]["GitHubTrendingSnapshotResponse"];
+      requested_language: string;
+      snapshots: components["schemas"]["GitHubTrendingSnapshotResponse"][];
     };
     GitHubTrendingSnapshotResponse: {
       captured_at?: string | null;
       entries: components["schemas"]["GitHubTrendingEntryResponse"][];
-      language?: string | null;
+      language: string;
       period: string;
       snapshot_date: string;
       source_kind: string;
@@ -165,7 +166,7 @@ export interface components {
     IngestGitHubTrendingRequest: {
       captured_at?: string | null;
       entries: components["schemas"]["IngestGitHubTrendingEntry"][];
-      language?: string | null;
+      language: string;
       period: string;
       snapshot_date: string;
       source_kind: string;
@@ -272,7 +273,7 @@ export interface operations {
         period?: string;
         /** @description Exact snapshot date in YYYY-MM-DD form; defaults to latest */
         date?: string;
-        /** @description Exact GitHub Trending language scope */
+        /** @description any for the unfiltered scope, all for every stored scope, or a concrete language slug; defaults to any */
         language?: string;
         /** @description Exact GitHub Trending spoken-language scope */
         spoken_language?: string;
@@ -283,7 +284,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Latest imported snapshot for the requested scope */
+      /** @description Latest imported snapshots for the requested language selector */
       200: {
         headers: {
           [name: string]: unknown;

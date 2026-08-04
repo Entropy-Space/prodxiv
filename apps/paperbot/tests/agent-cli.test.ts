@@ -54,6 +54,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
       schema_version: "1",
       snapshot_date: "2026-08-04",
       period: "daily",
+      language: "any",
       spoken_language: null,
       scope_count: 1,
       candidate_count: 12,
@@ -63,7 +64,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
           snapshot_date: "2026-08-04",
           captured_at: "2026-08-04T01:02:03Z",
           period: "daily",
-          language: null,
+          language: "any",
           spoken_language: null,
           source_kind: "direct_fetch",
           source_url: "https://github.com/trending?since=daily",
@@ -91,7 +92,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
       repository_url: `https://github.com/example/repo-${index + 1}`,
       source_appearances: [
         {
-          scope_language: null,
+          scope_language: "any",
           source_rank: index + 2,
           stars_in_period: 50 + index,
         },

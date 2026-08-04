@@ -74,14 +74,7 @@ describe("runTrendSelection", () => {
           const url = String(input);
           archiveRequests.push(url);
           expect(init).toBeUndefined();
-          const language = new URL(url).searchParams.get("language");
-          const responseSnapshot = snapshot.scopes.find(
-            (scope) => (scope.language ?? null) === language,
-          );
-          return archiveResponse(
-            responseSnapshot,
-            language === null ? ["typescript", "rust"] : [],
-          );
+          return archiveResponse(snapshot.scopes);
         },
         create_runtime: (model) => {
           expect(model).toBe("deepseek-v4-flash");
@@ -93,9 +86,7 @@ describe("runTrendSelection", () => {
     );
 
     expect(archiveRequests).toEqual([
-      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily`,
-      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily&language=rust`,
-      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily&language=typescript`,
+      `${archiveApiUrl}/v1/github/trending?date=2026-08-04&period=daily&language=all`,
     ]);
     expect(runtime.started_inputs).toEqual([
       { role: "trend_selection", run_path: outputPath },
@@ -117,6 +108,7 @@ describe("runTrendSelection", () => {
         selection_policy: "product_paper_interest_v1",
         snapshot: {
           snapshot_date: "2026-08-04",
+          language: "all",
           scope_count: 3,
           candidate_count: 14,
           available_languages: ["rust", "typescript"],
@@ -266,7 +258,7 @@ describe("runTrendSelection", () => {
     );
   });
 
-  test("uses an explicit snapshot file without contacting the archive", async () => {
+  test("normalizes a legacy unfiltered snapshot file without contacting the archive", async () => {
     const workspace = await createWorkspace();
     const outputPath = join(workspace, "trend-run");
     const snapshotPath = join(workspace, "archived-snapshot.json");
@@ -275,7 +267,11 @@ describe("runTrendSelection", () => {
       snapshot_date: "2026-08-03",
       captured_at: "2026-08-03T01:02:03Z",
     };
-    await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+    await writeFile(
+      snapshotPath,
+      JSON.stringify({ ...snapshot, language: null }),
+      "utf8",
+    );
     const runtime = new FakeTrendRuntime([
       selectionResponse(snapshot.entries.slice(0, 10)),
     ]);
@@ -300,9 +296,10 @@ describe("runTrendSelection", () => {
 
     expect(archiveCalled).toBe(false);
     expect(result.selection.snapshot.snapshot_date).toBe("2026-08-03");
-    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual(
-      snapshotBundle(snapshot),
-    );
+    expect(await readJson(join(outputPath, "snapshot.json"))).toEqual({
+      ...snapshotBundle(snapshot),
+      language: "any",
+    });
   });
 
   test("replays a saved all-scope bundle without contacting the archive", async () => {
@@ -383,10 +380,9 @@ describe("runTrendSelection", () => {
     expect(runtimeCreated).toBe(false);
   });
 
-  test("fails the complete download when an advertised language scope is unavailable", async () => {
+  test("rejects an all-scope response that omits the any scope", async () => {
     const workspace = await createWorkspace();
-    const baseSnapshot = trendingSnapshot();
-    const requestedLanguages: Array<string | null> = [];
+    const requestedLanguages: string[] = [];
 
     await expect(
       runTrendSelection(
@@ -400,22 +396,17 @@ describe("runTrendSelection", () => {
             const language = new URL(String(input)).searchParams.get(
               "language",
             );
-            requestedLanguages.push(language);
-            return archiveResponse(
-              language === null ? baseSnapshot : undefined,
-              language === null ? ["rust"] : [],
-            );
+            requestedLanguages.push(language ?? "");
+            return archiveResponse([languageSnapshot("rust", [])]);
           },
           now: fixedClock("2026-08-04T01:02:03Z"),
         },
       ),
     ).rejects.toMatchObject({
       exit_code: ExitCode.remote,
-      message: expect.stringContaining(
-        'advertised language scope "rust" is unavailable',
-      ),
+      message: expect.stringContaining("is missing the unfiltered any scope"),
     } satisfies Partial<PaperbotError>);
-    expect(requestedLanguages).toEqual([null, "rust"]);
+    expect(requestedLanguages).toEqual(["all"]);
   });
 
   test("rejects a nearby archived date instead of silently substituting it", async () => {
@@ -470,11 +461,11 @@ describe("runTrendSelection", () => {
     );
 
     expect(archiveRequest).toBe(
-      "https://prodxiv-api.vercel.app/v1/github/trending?date=2026-08-04&period=daily",
+      "https://prodxiv-api.vercel.app/v1/github/trending?date=2026-08-04&period=daily&language=all",
     );
   });
 
-  test("rejects a non-all-language snapshot file before starting Pi", async () => {
+  test("rejects a concrete-language snapshot file before starting Pi", async () => {
     const workspace = await createWorkspace();
     const outputPath = join(workspace, "trend-run");
     const snapshotPath = join(workspace, "rust.json");
@@ -503,7 +494,7 @@ describe("runTrendSelection", () => {
     ).rejects.toMatchObject({
       exit_code: ExitCode.validation,
       message:
-        "invalid trend snapshot: snapshot file must be an all-language daily snapshot or a Paperbot all-scope snapshot bundle",
+        "invalid trend snapshot: snapshot file must be an unfiltered daily snapshot with language any or a Paperbot snapshot bundle",
     } satisfies Partial<PaperbotError>);
     expect(runtimeCreated).toBe(false);
   });
@@ -575,7 +566,7 @@ function trendingSnapshot(entryCount = 12): GitHubTrendingSnapshot {
     snapshot_date: "2026-08-04",
     captured_at: "2026-08-04T01:02:03Z",
     period: "daily",
-    language: null,
+    language: "any",
     spoken_language: null,
     source_kind: "direct_fetch",
     source_url: "https://github.com/trending?since=daily",
@@ -629,28 +620,33 @@ function archiveFetch(snapshot: GitHubTrendingSnapshot): ApiFetch {
 }
 
 function archiveResponse(
-  snapshot: GitHubTrendingSnapshot | undefined,
-  availableLanguages: string[] = [],
+  input: GitHubTrendingSnapshot | GitHubTrendingSnapshot[] | undefined,
 ): Response {
+  const snapshots =
+    input === undefined ? [] : Array.isArray(input) ? input : [input];
   return Response.json({
-    snapshot: snapshot ?? null,
+    requested_language: "all",
+    snapshots,
     previous_date: null,
     next_date: null,
-    available_languages: availableLanguages,
+    available_languages: snapshots.flatMap((snapshot) =>
+      snapshot.language === "any" ? [] : [snapshot.language],
+    ),
   });
 }
 
 function snapshotBundle(
   ...scopes: GitHubTrendingSnapshot[]
 ): TrendSnapshotBundle {
-  const baseScope = scopes.find((scope) => scope.language == null);
+  const baseScope = scopes.find((scope) => scope.language === "any");
   if (baseScope === undefined) {
-    throw new Error("test snapshot bundle requires an all-language scope");
+    throw new Error("test snapshot bundle requires an any scope");
   }
   return {
     schema_version: "1",
     snapshot_date: baseScope.snapshot_date,
     period: "daily",
+    language: "all",
     spoken_language: null,
     scopes,
   };

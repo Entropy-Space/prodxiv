@@ -20,9 +20,10 @@ use prodxiv_domain::{
     ValidationReport, canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
-    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, NewGitHubTrendingEntry,
-    NewGitHubTrendingSnapshot, PostgresStorage, PublicationCursor, PublicationPage, PublishOutcome,
-    StorageError, TrendingImportOutcome, is_valid_idempotency_key,
+    GITHUB_TRENDING_ANY_LANGUAGE, GitHubTrendingEntry, GitHubTrendingLanguageScope,
+    GitHubTrendingLanguageSelector, GitHubTrendingSnapshot, GitHubTrendingView,
+    NewGitHubTrendingEntry, NewGitHubTrendingSnapshot, PostgresStorage, PublicationCursor,
+    PublicationPage, PublishOutcome, StorageError, TrendingImportOutcome, is_valid_idempotency_key,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -203,7 +204,7 @@ pub trait PublicationStore: Send + Sync {
     async fn github_trending_view(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageSelector,
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<GitHubTrendingView, StoreError>;
@@ -261,7 +262,7 @@ impl PublicationStore for PostgresStorage {
     async fn github_trending_view(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageSelector,
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<GitHubTrendingView, StoreError> {
@@ -321,7 +322,8 @@ impl From<StorageError> for StoreError {
             | StorageError::InvalidIdempotencyKey
             | StorageError::CorruptRevision(_)
             | StorageError::TrendingSerialization(_)
-            | StorageError::CorruptTrendingRank(_) => {
+            | StorageError::CorruptTrendingRank(_)
+            | StorageError::CorruptTrendingLanguageScope(_) => {
                 tracing::error!(error = %error, "publication storage operation failed");
                 Self::Internal
             }
@@ -350,8 +352,7 @@ pub struct IngestGitHubTrendingRequest {
     #[serde(default)]
     pub captured_at: Option<String>,
     pub period: String,
-    #[serde(default)]
-    pub language: Option<String>,
+    pub language: String,
     #[serde(default)]
     pub spoken_language: Option<String>,
     pub source_kind: String,
@@ -378,19 +379,23 @@ pub struct IngestGitHubTrendingEntry {
     pub stars_in_period: Option<i64>,
 }
 
-impl From<IngestGitHubTrendingRequest> for NewGitHubTrendingSnapshot {
-    fn from(snapshot: IngestGitHubTrendingRequest) -> Self {
-        Self {
+impl TryFrom<IngestGitHubTrendingRequest> for NewGitHubTrendingSnapshot {
+    type Error = &'static str;
+
+    fn try_from(snapshot: IngestGitHubTrendingRequest) -> Result<Self, Self::Error> {
+        let language = GitHubTrendingLanguageScope::parse(&snapshot.language)
+            .ok_or("language must be any or a concrete language slug; all is query-only")?;
+        Ok(Self {
             snapshot_date: snapshot.snapshot_date,
             captured_at: snapshot.captured_at,
             period: snapshot.period,
-            language: snapshot.language,
+            language,
             spoken_language: snapshot.spoken_language,
             source_kind: snapshot.source_kind,
             source_url: snapshot.source_url,
             source_revision: snapshot.source_revision,
             entries: snapshot.entries.into_iter().map(Into::into).collect(),
-        }
+        })
     }
 }
 
@@ -498,7 +503,8 @@ pub struct PaperListResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GitHubTrendingResponse {
-    pub snapshot: Option<GitHubTrendingSnapshotResponse>,
+    pub requested_language: String,
+    pub snapshots: Vec<GitHubTrendingSnapshotResponse>,
     pub previous_date: Option<String>,
     pub next_date: Option<String>,
     pub available_languages: Vec<String>,
@@ -509,7 +515,7 @@ pub struct GitHubTrendingSnapshotResponse {
     pub snapshot_date: String,
     pub captured_at: Option<String>,
     pub period: String,
-    pub language: Option<String>,
+    pub language: String,
     pub spoken_language: Option<String>,
     pub source_kind: String,
     pub source_url: String,
@@ -536,7 +542,7 @@ impl From<GitHubTrendingSnapshot> for GitHubTrendingSnapshotResponse {
             snapshot_date: snapshot.snapshot_date,
             captured_at: snapshot.captured_at,
             period: snapshot.period,
-            language: snapshot.language,
+            language: snapshot.language.as_str().to_owned(),
             spoken_language: snapshot.spoken_language,
             source_kind: snapshot.source_kind,
             source_url: snapshot.source_url,
@@ -633,9 +639,16 @@ async fn ingest_github_trending_snapshot(
             error.body_text(),
         )
     })?;
+    let snapshot = NewGitHubTrendingSnapshot::try_from(payload).map_err(|message| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "trending.snapshot_invalid",
+            message,
+        )
+    })?;
     let outcome = state
         .store
-        .ingest_github_trending_snapshot(payload.into(), actor, idempotency_key)
+        .ingest_github_trending_snapshot(snapshot, actor, idempotency_key)
         .await
         .map_err(trending_store_error)?;
     let status = if outcome.inserted {
@@ -659,11 +672,11 @@ async fn ingest_github_trending_snapshot(
     params(
       ("period" = Option<String>, Query, description = "daily, weekly, or monthly; defaults to daily"),
       ("date" = Option<String>, Query, description = "Exact snapshot date in YYYY-MM-DD form; defaults to latest"),
-      ("language" = Option<String>, Query, description = "Exact GitHub Trending language scope"),
+      ("language" = Option<String>, Query, description = "any for the unfiltered scope, all for every stored scope, or a concrete language slug; defaults to any"),
       ("spoken_language" = Option<String>, Query, description = "Exact GitHub Trending spoken-language scope")
     ),
     responses(
-      (status = 200, description = "Latest imported snapshot for the requested scope", body = GitHubTrendingResponse),
+      (status = 200, description = "Latest imported snapshots for the requested language selector", body = GitHubTrendingResponse),
       (status = 400, description = "Trending scope is invalid", body = ErrorResponse),
       (status = 500, description = "Reading failed", body = ErrorResponse)
     )
@@ -680,7 +693,16 @@ async fn get_github_trending(
             "period must be daily, weekly, or monthly",
         ));
     }
-    let language = normalized_scope(query.language.as_deref());
+    let requested_language = normalized_scope(query.language.as_deref())
+        .unwrap_or(GITHUB_TRENDING_ANY_LANGUAGE)
+        .to_ascii_lowercase();
+    let language = GitHubTrendingLanguageSelector::parse(&requested_language).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_trending_language",
+            "language must be any, all, or a concrete language slug",
+        )
+    })?;
     let spoken_language = normalized_scope(query.spoken_language.as_deref());
     let snapshot_date = normalized_scope(query.date.as_deref());
     if snapshot_date.is_some_and(|value| !is_iso_date(value)) {
@@ -692,11 +714,12 @@ async fn get_github_trending(
     }
     let view = state
         .store
-        .github_trending_view(period, language, spoken_language, snapshot_date)
+        .github_trending_view(period, &language, spoken_language, snapshot_date)
         .await
         .map_err(store_error)?;
     Ok(Json(GitHubTrendingResponse {
-        snapshot: view.snapshot.map(Into::into),
+        requested_language: language.as_str().to_owned(),
+        snapshots: view.snapshots.into_iter().map(Into::into).collect(),
         previous_date: view.previous_date,
         next_date: view.next_date,
         available_languages: view.available_languages,

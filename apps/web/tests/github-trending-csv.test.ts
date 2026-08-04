@@ -47,7 +47,7 @@ describe("buildGitHubTrendingCsv", () => {
         snapshot_date: "2026-07-29",
         captured_at: null,
         period: "daily",
-        language: null,
+        language: "any",
         spoken_language: null,
         source_kind: "github_trending",
         source_url: "https://github.com/trending",

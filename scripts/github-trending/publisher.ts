@@ -7,7 +7,7 @@ export interface IngestionConfig {
 }
 
 export interface IngestionFailure {
-  language: string | null;
+  language: string;
   message: string;
 }
 
@@ -78,11 +78,11 @@ export async function publishTrendingSnapshots(
       const response = await publishSnapshot(snapshot, config, fetcher);
       published_count += 1;
       console.log(
-        `${snapshot.language ?? "all"}: ${response.inserted ? "ingested" : "already present"} snapshot ${response.snapshot_id}`,
+        `${snapshot.language}: ${response.inserted ? "ingested" : "already present"} snapshot ${response.snapshot_id}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`${snapshot.language ?? "all"}: ${message}`);
+      console.error(`${snapshot.language}: ${message}`);
       failures.push({ language: snapshot.language, message });
     }
   }
@@ -92,10 +92,10 @@ export async function publishTrendingSnapshots(
 
 export function snapshotIdempotencyKey(snapshot: TrendingSnapshot): string {
   const scope = snapshot.language
-    ?.replaceAll("#", "-sharp")
+    .replaceAll("#", "-sharp")
     .replaceAll("+", "-plus");
   const revision = snapshot.source_revision.replace(/^sha256:/, "");
-  const key = `github-trending:${snapshot.snapshot_date}:${scope ?? "all"}:${revision}`;
+  const key = `github-trending:${snapshot.snapshot_date}:${scope}:${revision}`;
   if (key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
     throw new Error("snapshot cannot produce a valid idempotency key");
   }

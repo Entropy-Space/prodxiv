@@ -83,14 +83,16 @@ writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version.
 
 `agent select-trending` is a separate bounded research workflow. By default it
-requests the exact UTC day's unfiltered daily snapshot from the hosted prodxiv
-archive at `https://prodxiv-api.vercel.app/`, then downloads every language
-scope advertised for that day. `--api-url` or a non-empty `PRODXIV_API_URL`
+requests the exact UTC date with `period=daily&language=all` from the hosted
+prodxiv archive at `https://prodxiv-api.vercel.app/`. One response contains the
+unfiltered `any` scope plus every stored concrete language scope for that day.
+`--api-url` or a non-empty `PRODXIV_API_URL`
 overrides that endpoint for development or self-hosting. It never scrapes
-GitHub, silently omits an advertised scope, or falls back to a different
-source. `--snapshot <snapshot.json>` uses a previously saved Paperbot all-scope
-bundle instead, including an older date for an offline reproducible run; bare
-legacy unfiltered prodxiv snapshots remain accepted as single-scope inputs.
+GitHub, accepts an aggregate response without the `any` scope, or falls back to
+a different source. `--snapshot <snapshot.json>` uses a previously saved Paperbot
+`language=all` bundle instead, including an older date for an offline
+reproducible run; bare legacy unfiltered prodxiv snapshots remain accepted as
+single-scope inputs and normalize `language: null` to `any` at the file boundary.
 Paperbot writes every normalized source scope to `snapshot.json`, deduplicates
 repositories by canonical full name for the tool-less Pi session, and retains
 each candidate's deterministic `candidate_rank` plus all `source_appearances`

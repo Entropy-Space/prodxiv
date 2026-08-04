@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   collectTrendingSnapshots,
+  defaultLanguages,
   parseTrendingHtml,
   snapshotFileName,
   TrendingParseError,
@@ -52,7 +53,11 @@ describe("GitHub Trending collector", () => {
     expect(trendingUrl("c++")).toBe(
       "https://github.com/trending/c%2B%2B?since=daily",
     );
-    expect(snapshotFileName(null)).toBe("all.json");
+    expect(trendingUrl("any")).toBe("https://github.com/trending?since=daily");
+    expect(() => trendingUrl("all")).toThrow(
+      "snapshot language must be any or a concrete",
+    );
+    expect(snapshotFileName("any")).toBe("any.json");
     expect(snapshotFileName("c#")).toBe("c-sharp.json");
     expect(snapshotFileName("c++")).toBe("c-plus-plus.json");
   });
@@ -66,7 +71,7 @@ describe("GitHub Trending collector", () => {
       {
         snapshot_date: "2026-07-30",
         captured_at: "2026-07-30T02:17:00Z",
-        languages: [null, "rust"],
+        languages: ["any", "rust"],
       },
       fetcher,
     );
@@ -90,6 +95,38 @@ describe("GitHub Trending collector", () => {
     ]);
 
     expect(arguments_.languages).toEqual(["c#"]);
+    expect(
+      parseArguments([
+        "--snapshot-date",
+        "2026-07-30",
+        "--captured-at",
+        "2026-07-30T02:17:00Z",
+        "--language",
+        "any",
+      ]).languages,
+    ).toEqual(["any"]);
+    expect(
+      parseArguments([
+        "--snapshot-date",
+        "2026-07-30",
+        "--captured-at",
+        "2026-07-30T02:17:00Z",
+        "--language",
+        "all",
+      ]).languages,
+    ).toEqual(["any", ...defaultLanguages]);
+    expect(() =>
+      parseArguments([
+        "--snapshot-date",
+        "2026-07-30",
+        "--captured-at",
+        "2026-07-30T02:17:00Z",
+        "--language",
+        "all",
+        "--language",
+        "rust",
+      ]),
+    ).toThrow("cannot be combined");
     expect(() =>
       parseArguments([
         "--snapshot-date",

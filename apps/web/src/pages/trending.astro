@@ -9,7 +9,16 @@ const period =
   periodParameter === "weekly" || periodParameter === "monthly"
     ? periodParameter
     : "daily";
-const language = Astro.url.searchParams.get("language")?.trim() || undefined;
+const languageParameter = Astro.url.searchParams
+  .get("language")
+  ?.trim()
+  .toLowerCase();
+const language =
+  languageParameter !== undefined &&
+  languageParameter !== "all" &&
+  /^[a-z0-9#+.-]+$/.test(languageParameter)
+    ? languageParameter
+    : "any";
 const date = Astro.url.searchParams.get("date")?.trim() || undefined;
 const result = await readGitHubTrending({
   api_url: import.meta.env.PRODXIV_API_URL,
@@ -18,11 +27,11 @@ const result = await readGitHubTrending({
   language,
 });
 const view = result.ok ? result.view : undefined;
-const snapshot = view?.snapshot;
+const snapshot = view?.snapshots[0];
 const selectedDate = snapshot?.snapshot_date ?? date;
 const availableLanguages = Array.from(
   new Set([
-    ...(language === undefined ? [] : [language]),
+    ...(language === "any" ? [] : [language]),
     ...(view?.available_languages ?? []),
   ]),
 );
@@ -130,8 +139,8 @@ Astro.response.headers.set(
 
     <nav class="language-tabs" aria-label="Programming language">
       <a
-        href={trendingUrl({ date: selectedDate })}
-        aria-current={language === undefined ? "page" : undefined}>All</a
+        href={trendingUrl({ date: selectedDate, language: "any" })}
+        aria-current={language === "any" ? "page" : undefined}>Any language</a
       >
       {
         availableLanguages.map((availableLanguage) => (
@@ -183,7 +192,11 @@ Astro.response.headers.set(
             </div>
             <div>
               <dt>Scope</dt>
-              <dd>{snapshot.language ?? "All languages"}</dd>
+              <dd>
+                {snapshot.language === "any"
+                  ? "Any language"
+                  : snapshot.language}
+              </dd>
             </div>
             <div>
               <dt>Source</dt>

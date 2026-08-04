@@ -297,11 +297,11 @@ bun run paperbot agent select-trending \
 The scheduled prodxiv collector, outside Paperbot, captures and normalizes
 GitHub Trending and ingests immutable observations into the prodxiv archive.
 By default Paperbot requests the exact current UTC date with `period=daily`
-from the hosted prodxiv archive at `https://prodxiv-api.vercel.app/`. It first
-loads the unfiltered scope, reads that response's `available_languages`, and
-then downloads every advertised language-specific scope for the same day. All
-advertised scopes must load successfully; Paperbot never treats the
-unfiltered page as a union or silently returns a partial day. `--api-url` or a
+and `language=all` from the hosted prodxiv archive at
+`https://prodxiv-api.vercel.app/`. The API returns the unfiltered `any` scope
+and every stored concrete language scope for that day in one response.
+Paperbot requires the `any` scope and never treats it as a union or silently
+returns a partial response. `--api-url` or a
 non-empty `PRODXIV_API_URL` overrides the endpoint for development or
 self-hosting. If today's exact snapshots are unavailable, the command fails
 clearly. It never scrapes GitHub, selects a nearby date, or silently falls back
@@ -320,10 +320,12 @@ bun run paperbot agent select-trending \
 
 `--snapshot` and `--api-url` are mutually exclusive. A file input may describe
 an older date. The preferred input is the schema-versioned `snapshot.json`
-all-scope bundle from an earlier run; every contained prodxiv scope must share
-the date and daily period, use no spoken-language filter, and contain canonical,
-unique, sequentially ranked repositories. Bare unfiltered prodxiv snapshots
-from earlier Paperbot runs remain accepted as single-scope inputs. Paperbot
+bundle from an earlier run. Its top-level `language` is `all` or `any`, while
+each contained scope uses `any` or a concrete language slug. Every scope must
+share the date and daily period, use no spoken-language filter, and contain
+canonical, unique, sequentially ranked repositories. Bare unfiltered prodxiv
+snapshots from earlier Paperbot runs remain accepted as single-scope inputs;
+legacy `language: null` is normalized to `any` at this file boundary. Paperbot
 bounds and validates either form, writes the normalized bundle with every raw
 scope observation to the new run's `snapshot.json`, and only then starts Pi.
 
@@ -348,7 +350,7 @@ is permitted in the same session. A valid run writes the versioned
 `selection.json` with per-scope snapshot provenance, model and session
 metadata, selection `rank`, deterministic `candidate_rank`,
 `source_appearances`, and reasons. `--format json` emits that same selection
-artifact on stdout; diagnostics stay on stderr. A validated all-scope snapshot
+artifact on stdout; diagnostics stay on stderr. A validated `language=all` snapshot
 remains available if fewer than ten unique candidates make selection
 impossible.
 

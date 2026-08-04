@@ -1,17 +1,19 @@
 //! PostgreSQL persistence for immutable prodxiv publications.
 
+use std::collections::HashMap;
+
 use prodxiv_domain::{
     PaperDocument, PaperMetadata, PublicationIdentity, PublicationPreparationError, PublishedPaper,
     PublishedPaperSummary, canonicalize_product_id, encode_paper_id_suffix, prepare_publication,
     product_id_from_paper_id,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{
     PgPool, Row,
     migrate::{MigrateError, Migrator},
-    postgres::PgPoolOptions,
+    postgres::{PgPoolOptions, PgRow},
     types::Json,
 };
 use thiserror::Error;
@@ -41,6 +43,111 @@ pub struct PublicationPage {
     pub next_cursor: Option<PublicationCursor>,
 }
 
+pub const GITHUB_TRENDING_ANY_LANGUAGE: &str = "any";
+pub const GITHUB_TRENDING_ALL_LANGUAGES: &str = "all";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHubTrendingLanguageScope {
+    Any,
+    Language(String),
+}
+
+impl GitHubTrendingLanguageScope {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        if value == GITHUB_TRENDING_ANY_LANGUAGE {
+            return Some(Self::Any);
+        }
+        if !is_valid_language_slug(value) || value == GITHUB_TRENDING_ALL_LANGUAGES {
+            return None;
+        }
+        Some(Self::Language(value.to_owned()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Any => GITHUB_TRENDING_ANY_LANGUAGE,
+            Self::Language(language) => language,
+        }
+    }
+
+    fn database_value(&self) -> Option<&str> {
+        match self {
+            Self::Any => None,
+            Self::Language(language) => Some(language),
+        }
+    }
+
+    fn from_database(value: Option<String>) -> Result<Self, StorageError> {
+        match value {
+            None => Ok(Self::Any),
+            Some(language) => Self::parse(&language)
+                .filter(|scope| !matches!(scope, Self::Any))
+                .ok_or(StorageError::CorruptTrendingLanguageScope(language)),
+        }
+    }
+}
+
+impl Serialize for GitHubTrendingLanguageScope {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubTrendingLanguageScope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| D::Error::custom("invalid language scope"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHubTrendingLanguageSelector {
+    Any,
+    All,
+    Language(String),
+}
+
+impl GitHubTrendingLanguageSelector {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            GITHUB_TRENDING_ANY_LANGUAGE => Some(Self::Any),
+            GITHUB_TRENDING_ALL_LANGUAGES => Some(Self::All),
+            language if is_valid_language_slug(language) => {
+                Some(Self::Language(language.to_owned()))
+            }
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Any => GITHUB_TRENDING_ANY_LANGUAGE,
+            Self::All => GITHUB_TRENDING_ALL_LANGUAGES,
+            Self::Language(language) => language,
+        }
+    }
+
+    fn exact_scope(&self) -> Option<GitHubTrendingLanguageScope> {
+        match self {
+            Self::Any => Some(GitHubTrendingLanguageScope::Any),
+            Self::All => None,
+            Self::Language(language) => {
+                Some(GitHubTrendingLanguageScope::Language(language.clone()))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewGitHubTrendingSnapshot {
@@ -48,8 +155,7 @@ pub struct NewGitHubTrendingSnapshot {
     #[serde(default)]
     pub captured_at: Option<String>,
     pub period: String,
-    #[serde(default)]
-    pub language: Option<String>,
+    pub language: GitHubTrendingLanguageScope,
     #[serde(default)]
     pub spoken_language: Option<String>,
     pub source_kind: String,
@@ -88,7 +194,7 @@ pub struct GitHubTrendingSnapshot {
     pub snapshot_date: String,
     pub captured_at: Option<String>,
     pub period: String,
-    pub language: Option<String>,
+    pub language: GitHubTrendingLanguageScope,
     pub spoken_language: Option<String>,
     pub source_kind: String,
     pub source_url: String,
@@ -110,7 +216,7 @@ pub struct GitHubTrendingEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubTrendingView {
-    pub snapshot: Option<GitHubTrendingSnapshot>,
+    pub snapshots: Vec<GitHubTrendingSnapshot>,
     pub previous_date: Option<String>,
     pub next_date: Option<String>,
     pub available_languages: Vec<String>,
@@ -666,7 +772,7 @@ impl PostgresStorage {
         .bind(&snapshot.snapshot_date)
         .bind(&snapshot.captured_at)
         .bind(&snapshot.period)
-        .bind(&snapshot.language)
+        .bind(snapshot.language.database_value())
         .bind(&snapshot.spoken_language)
         .bind(&snapshot.source_kind)
         .bind(&snapshot.source_url)
@@ -695,7 +801,7 @@ impl PostgresStorage {
             .bind(&snapshot.snapshot_date)
             .bind(&snapshot.captured_at)
             .bind(&snapshot.period)
-            .bind(&snapshot.language)
+            .bind(snapshot.language.database_value())
             .bind(&snapshot.spoken_language)
             .bind(&snapshot.source_kind)
             .bind(&snapshot.source_url)
@@ -773,14 +879,14 @@ impl PostgresStorage {
     pub async fn latest_github_trending(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageScope,
         spoken_language: Option<&str>,
     ) -> Result<Option<GitHubTrendingSnapshot>, StorageError> {
         self.github_trending_snapshot(period, language, spoken_language, None)
             .await
     }
 
-    /// Returns one snapshot plus navigation derived from imported history.
+    /// Returns matching snapshots plus navigation derived from imported history.
     ///
     /// # Errors
     ///
@@ -788,52 +894,107 @@ impl PostgresStorage {
     pub async fn github_trending_view(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageSelector,
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<GitHubTrendingView, StorageError> {
-        let snapshot = self
-            .github_trending_snapshot(period, language, spoken_language, snapshot_date)
-            .await?;
-        let anchor_date = snapshot
+        let exact_scope = language.exact_scope();
+        let exact_snapshot = if let Some(scope) = exact_scope.as_ref() {
+            self.github_trending_snapshot(period, scope, spoken_language, snapshot_date)
+                .await?
+        } else {
+            None
+        };
+        let latest_all_date = if language == &GitHubTrendingLanguageSelector::All
+            && exact_snapshot.is_none()
+            && snapshot_date.is_none()
+        {
+            sqlx::query_scalar::<_, Option<String>>(
+                r#"
+                SELECT max(snapshot_date)::text
+                FROM github_trending_snapshots
+                WHERE period = $1
+                  AND spoken_language IS NOT DISTINCT FROM $2
+                "#,
+            )
+            .bind(period)
+            .bind(spoken_language)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            None
+        };
+        let anchor_date = exact_snapshot
             .as_ref()
             .map(|value| value.snapshot_date.as_str())
-            .or(snapshot_date);
+            .or(snapshot_date)
+            .or(latest_all_date.as_deref());
         let Some(anchor_date) = anchor_date else {
             return Ok(GitHubTrendingView {
-                snapshot,
+                snapshots: Vec::new(),
                 previous_date: None,
                 next_date: None,
                 available_languages: Vec::new(),
             });
         };
-        let navigation = sqlx::query(
-            r#"
-            SELECT
-              (
-                SELECT max(snapshot_date)::text
-                FROM github_trending_snapshots
-                WHERE period = $1
-                  AND language IS NOT DISTINCT FROM $2
-                  AND spoken_language IS NOT DISTINCT FROM $3
-                  AND snapshot_date < $4::date
-              ) AS previous_date,
-              (
-                SELECT min(snapshot_date)::text
-                FROM github_trending_snapshots
-                WHERE period = $1
-                  AND language IS NOT DISTINCT FROM $2
-                  AND spoken_language IS NOT DISTINCT FROM $3
-                  AND snapshot_date > $4::date
-              ) AS next_date
-            "#,
-        )
-        .bind(period)
-        .bind(language)
-        .bind(spoken_language)
-        .bind(anchor_date)
-        .fetch_one(&self.pool)
-        .await?;
+        let navigation = if language == &GitHubTrendingLanguageSelector::All {
+            sqlx::query(
+                r#"
+                SELECT
+                  (
+                    SELECT max(snapshot_date)::text
+                    FROM github_trending_snapshots
+                    WHERE period = $1
+                      AND spoken_language IS NOT DISTINCT FROM $2
+                      AND snapshot_date < $3::date
+                  ) AS previous_date,
+                  (
+                    SELECT min(snapshot_date)::text
+                    FROM github_trending_snapshots
+                    WHERE period = $1
+                      AND spoken_language IS NOT DISTINCT FROM $2
+                      AND snapshot_date > $3::date
+                  ) AS next_date
+                "#,
+            )
+            .bind(period)
+            .bind(spoken_language)
+            .bind(anchor_date)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            let database_language = exact_scope
+                .as_ref()
+                .expect("non-all selectors have an exact scope")
+                .database_value();
+            sqlx::query(
+                r#"
+                SELECT
+                  (
+                    SELECT max(snapshot_date)::text
+                    FROM github_trending_snapshots
+                    WHERE period = $1
+                      AND language IS NOT DISTINCT FROM $2
+                      AND spoken_language IS NOT DISTINCT FROM $3
+                      AND snapshot_date < $4::date
+                  ) AS previous_date,
+                  (
+                    SELECT min(snapshot_date)::text
+                    FROM github_trending_snapshots
+                    WHERE period = $1
+                      AND language IS NOT DISTINCT FROM $2
+                      AND spoken_language IS NOT DISTINCT FROM $3
+                      AND snapshot_date > $4::date
+                  ) AS next_date
+                "#,
+            )
+            .bind(period)
+            .bind(database_language)
+            .bind(spoken_language)
+            .bind(anchor_date)
+            .fetch_one(&self.pool)
+            .await?
+        };
         let language_rows = sqlx::query(
             r#"
             SELECT DISTINCT language
@@ -852,11 +1013,22 @@ impl PostgresStorage {
         .await?;
         let available_languages = language_rows
             .into_iter()
-            .map(|row| row.try_get("language"))
-            .collect::<Result<Vec<String>, sqlx::Error>>()?;
+            .map(|row| {
+                let language: String = row.try_get("language")?;
+                let scope = GitHubTrendingLanguageScope::from_database(Some(language))?;
+                Ok(scope.as_str().to_owned())
+            })
+            .collect::<Result<Vec<String>, StorageError>>()?;
+
+        let snapshots = if language == &GitHubTrendingLanguageSelector::All {
+            self.github_trending_snapshots_for_date(period, spoken_language, anchor_date)
+                .await?
+        } else {
+            exact_snapshot.into_iter().collect()
+        };
 
         Ok(GitHubTrendingView {
-            snapshot,
+            snapshots,
             previous_date: navigation.try_get("previous_date")?,
             next_date: navigation.try_get("next_date")?,
             available_languages,
@@ -866,7 +1038,7 @@ impl PostgresStorage {
     async fn github_trending_snapshot(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageScope,
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<Option<GitHubTrendingSnapshot>, StorageError> {
@@ -892,7 +1064,7 @@ impl PostgresStorage {
             "#,
         )
         .bind(period)
-        .bind(language)
+        .bind(language.database_value())
         .bind(spoken_language)
         .bind(snapshot_date)
         .fetch_optional(&self.pool)
@@ -921,40 +1093,125 @@ impl PostgresStorage {
         .fetch_all(&self.pool)
         .await?;
         let entries = entry_rows
-            .into_iter()
-            .map(|entry| {
-                let rank: i32 = entry.try_get("rank")?;
-                Ok(GitHubTrendingEntry {
-                    rank: u32::try_from(rank)
-                        .map_err(|_| StorageError::CorruptTrendingRank(rank))?,
-                    repository_full_name: entry.try_get("repository_full_name")?,
-                    repository_node_id: entry.try_get("repository_node_id")?,
-                    description: entry.try_get("description")?,
-                    primary_language: entry.try_get("primary_language")?,
-                    stars: entry.try_get("stars")?,
-                    forks: entry.try_get("forks")?,
-                    stars_in_period: entry.try_get("stars_in_period")?,
-                })
-            })
+            .iter()
+            .map(decode_github_trending_entry)
             .collect::<Result<Vec<_>, StorageError>>()?;
 
-        Ok(Some(GitHubTrendingSnapshot {
-            snapshot_date: row.try_get("snapshot_date")?,
-            captured_at: row.try_get("captured_at")?,
-            period: row.try_get("period")?,
-            language: row.try_get("language")?,
-            spoken_language: row.try_get("spoken_language")?,
-            source_kind: row.try_get("source_kind")?,
-            source_url: row.try_get("source_url")?,
-            source_revision: row.try_get("source_revision")?,
-            entries,
-        }))
+        Ok(Some(decode_github_trending_snapshot(&row, entries)?))
+    }
+
+    async fn github_trending_snapshots_for_date(
+        &self,
+        period: &str,
+        spoken_language: Option<&str>,
+        snapshot_date: &str,
+    ) -> Result<Vec<GitHubTrendingSnapshot>, StorageError> {
+        let snapshot_rows = sqlx::query(
+            r#"
+            SELECT DISTINCT ON (language)
+              snapshot_id,
+              snapshot_date::text AS snapshot_date,
+              captured_at::text AS captured_at,
+              period,
+              language,
+              spoken_language,
+              source_kind,
+              source_url,
+              source_revision
+            FROM github_trending_snapshots
+            WHERE period = $1
+              AND spoken_language IS NOT DISTINCT FROM $2
+              AND snapshot_date = $3::date
+            ORDER BY language NULLS FIRST, created_at DESC, snapshot_id DESC
+            "#,
+        )
+        .bind(period)
+        .bind(spoken_language)
+        .bind(snapshot_date)
+        .fetch_all(&self.pool)
+        .await?;
+        if snapshot_rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let snapshot_ids = snapshot_rows
+            .iter()
+            .map(|row| row.try_get("snapshot_id"))
+            .collect::<Result<Vec<i64>, sqlx::Error>>()?;
+        let entry_rows = sqlx::query(
+            r#"
+            SELECT
+              snapshot_id,
+              rank,
+              repository_full_name,
+              repository_node_id,
+              description,
+              primary_language,
+              stars,
+              forks,
+              stars_in_period
+            FROM github_trending_entries
+            WHERE snapshot_id = ANY($1)
+            ORDER BY snapshot_id, rank
+            "#,
+        )
+        .bind(&snapshot_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut entries_by_snapshot = HashMap::<i64, Vec<GitHubTrendingEntry>>::new();
+        for row in &entry_rows {
+            entries_by_snapshot
+                .entry(row.try_get("snapshot_id")?)
+                .or_default()
+                .push(decode_github_trending_entry(row)?);
+        }
+
+        snapshot_rows
+            .iter()
+            .map(|row| {
+                let snapshot_id = row.try_get("snapshot_id")?;
+                decode_github_trending_snapshot(
+                    row,
+                    entries_by_snapshot.remove(&snapshot_id).unwrap_or_default(),
+                )
+            })
+            .collect()
     }
 
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
+}
+
+fn decode_github_trending_snapshot(
+    row: &PgRow,
+    entries: Vec<GitHubTrendingEntry>,
+) -> Result<GitHubTrendingSnapshot, StorageError> {
+    Ok(GitHubTrendingSnapshot {
+        snapshot_date: row.try_get("snapshot_date")?,
+        captured_at: row.try_get("captured_at")?,
+        period: row.try_get("period")?,
+        language: GitHubTrendingLanguageScope::from_database(row.try_get("language")?)?,
+        spoken_language: row.try_get("spoken_language")?,
+        source_kind: row.try_get("source_kind")?,
+        source_url: row.try_get("source_url")?,
+        source_revision: row.try_get("source_revision")?,
+        entries,
+    })
+}
+
+fn decode_github_trending_entry(row: &PgRow) -> Result<GitHubTrendingEntry, StorageError> {
+    let rank: i32 = row.try_get("rank")?;
+    Ok(GitHubTrendingEntry {
+        rank: u32::try_from(rank).map_err(|_| StorageError::CorruptTrendingRank(rank))?,
+        repository_full_name: row.try_get("repository_full_name")?,
+        repository_node_id: row.try_get("repository_node_id")?,
+        description: row.try_get("description")?,
+        primary_language: row.try_get("primary_language")?,
+        stars: row.try_get("stars")?,
+        forks: row.try_get("forks")?,
+        stars_in_period: row.try_get("stars_in_period")?,
+    })
 }
 
 fn trending_request_sha256(snapshot: &NewGitHubTrendingSnapshot) -> Result<String, StorageError> {
@@ -992,6 +1249,8 @@ pub enum StorageError {
     TrendingSerialization(#[from] serde_json::Error),
     #[error("stored GitHub Trending rank {0} is invalid")]
     CorruptTrendingRank(i32),
+    #[error("stored GitHub Trending language scope {0} is invalid")]
+    CorruptTrendingLanguageScope(String),
 }
 
 fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<(), StorageError> {
@@ -1027,17 +1286,26 @@ fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<()
             "source_url and source_revision are required",
         ));
     }
+    if matches!(
+        &snapshot.language,
+        GitHubTrendingLanguageScope::Language(scope)
+            if !is_valid_language_slug(scope)
+                || matches!(
+                    scope.as_str(),
+                    GITHUB_TRENDING_ANY_LANGUAGE | GITHUB_TRENDING_ALL_LANGUAGES
+                )
+    ) {
+        return Err(StorageError::InvalidTrendingSnapshot(
+            "language must be any or a concrete language slug; all is query-only",
+        ));
+    }
     if snapshot
-        .language
+        .spoken_language
         .as_deref()
         .is_some_and(|scope| scope.trim().is_empty() || scope.chars().any(char::is_whitespace))
-        || snapshot
-            .spoken_language
-            .as_deref()
-            .is_some_and(|scope| scope.trim().is_empty() || scope.chars().any(char::is_whitespace))
     {
         return Err(StorageError::InvalidTrendingSnapshot(
-            "language scopes must not be empty or contain whitespace",
+            "spoken-language scope must not be empty or contain whitespace",
         ));
     }
     if snapshot.entries.len() > 100 {
@@ -1112,6 +1380,16 @@ fn validate_trending_snapshot(snapshot: &NewGitHubTrendingSnapshot) -> Result<()
         }
     }
     Ok(())
+}
+
+fn is_valid_language_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 100
+        && value.bytes().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, b'#' | b'+' | b'.' | b'-')
+        })
 }
 
 fn is_iso_date(value: &str) -> bool {

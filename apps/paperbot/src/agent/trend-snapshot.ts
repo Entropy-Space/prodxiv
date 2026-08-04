@@ -39,12 +39,13 @@ export interface TrendSnapshotBundle {
   schema_version: typeof TREND_SNAPSHOT_SCHEMA_VERSION;
   snapshot_date: string;
   period: "daily";
+  language: "all" | "any";
   spoken_language: null;
   scopes: GitHubTrendingSnapshot[];
 }
 
 export interface TrendCandidateAppearance {
-  scope_language: string | null;
+  scope_language: string;
   source_rank: number;
   stars_in_period?: number | null;
 }
@@ -128,7 +129,7 @@ export function createTrendCandidates(
     for (const entry of scope.entries) {
       const key = entry.repository_full_name.toLowerCase();
       const appearance: TrendCandidateAppearance = {
-        scope_language: scope.language ?? null,
+        scope_language: scope.language,
         source_rank: entry.rank,
         ...(entry.stars_in_period === undefined
           ? {}
@@ -176,45 +177,24 @@ async function loadArchivedSnapshotBundle(
     api_url: input.api_url,
     ...(fetcher === undefined ? {} : { fetch: fetcher }),
   });
-  const baseView = await client.getGitHubTrending({
+  const view = await client.getGitHubTrending({
     date: input.snapshot_date,
     period: "daily",
+    language: "all",
   });
-  if (baseView.snapshot === undefined) {
+  const firstSnapshot = view.snapshots[0];
+  if (firstSnapshot === undefined) {
     return undefined;
   }
-
-  const availableLanguages = normalizeAvailableLanguages(
-    baseView.available_languages,
-  );
-  const languageSnapshots = await Promise.all(
-    availableLanguages.map(async (language) => {
-      const view = await client.getGitHubTrending({
-        date: input.snapshot_date,
-        period: "daily",
-        language,
-      });
-      if (view.snapshot === undefined) {
-        throw new Error(
-          `advertised language scope ${JSON.stringify(language)} is unavailable for ${input.snapshot_date}`,
-        );
-      }
-      if (view.snapshot.language !== language) {
-        throw new Error(
-          `archive returned language scope ${JSON.stringify(view.snapshot.language ?? null)} when ${JSON.stringify(language)} was requested`,
-        );
-      }
-      return view.snapshot;
-    }),
-  );
 
   return normalizeSnapshotBundle(
     {
       schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
-      snapshot_date: baseView.snapshot.snapshot_date,
+      snapshot_date: firstSnapshot.snapshot_date,
       period: "daily",
+      language: "all",
       spoken_language: null,
-      scopes: [baseView.snapshot, ...languageSnapshots],
+      scopes: view.snapshots,
     },
     "prodxiv archive",
     ExitCode.remote,
@@ -264,11 +244,11 @@ function normalizeSnapshotInput(
   const snapshot = normalizeSourceSnapshot(value, source, exitCode);
   if (
     snapshot.period !== "daily" ||
-    snapshot.language != null ||
+    snapshot.language !== "any" ||
     snapshot.spoken_language != null
   ) {
     throw invalidSnapshot(
-      `${source} must be an all-language daily snapshot or a Paperbot all-scope snapshot bundle`,
+      `${source} must be an unfiltered daily snapshot with language any or a Paperbot snapshot bundle`,
       exitCode,
     );
   }
@@ -276,6 +256,7 @@ function normalizeSnapshotInput(
     schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
     snapshot_date: snapshot.snapshot_date,
     period: "daily",
+    language: "any",
     spoken_language: null,
     scopes: [snapshot],
   };
@@ -304,6 +285,10 @@ function normalizeSnapshotBundle(
   if (!isDateString(value.snapshot_date)) {
     throw invalidSnapshot(`${source} has an invalid snapshot_date`, exitCode);
   }
+  const language = value.language === undefined ? "all" : value.language;
+  if (language !== "all" && language !== "any") {
+    throw invalidSnapshot(`${source} language must be all or any`, exitCode);
+  }
   if (value.period !== "daily" || value.spoken_language != null) {
     throw invalidSnapshot(
       `${source} must contain daily scopes without a spoken-language filter`,
@@ -326,7 +311,7 @@ function normalizeSnapshotBundle(
   );
   const scopeNames = new Set<string>();
   let totalEntries = 0;
-  let hasAllLanguageScope = false;
+  let hasAnyLanguageScope = false;
   for (const scope of scopes) {
     if (
       scope.snapshot_date !== value.snapshot_date ||
@@ -338,8 +323,8 @@ function normalizeSnapshotBundle(
         exitCode,
       );
     }
-    const language = scope.language ?? null;
-    const key = language === null ? "\u0000all" : language.toLowerCase();
+    const scopeLanguage = scope.language;
+    const key = scopeLanguage.toLowerCase();
     if (scopeNames.has(key)) {
       throw invalidSnapshot(
         `${source} contains duplicate language scopes`,
@@ -347,12 +332,21 @@ function normalizeSnapshotBundle(
       );
     }
     scopeNames.add(key);
-    hasAllLanguageScope ||= language === null;
+    hasAnyLanguageScope ||= scopeLanguage === "any";
     totalEntries += scope.entries.length;
   }
-  if (!hasAllLanguageScope) {
+  if (!hasAnyLanguageScope) {
     throw invalidSnapshot(
-      `${source} is missing the all-language scope`,
+      `${source} is missing the unfiltered any scope`,
+      exitCode,
+    );
+  }
+  if (
+    language === "any" &&
+    (scopes.length !== 1 || scopes[0]?.language !== "any")
+  ) {
+    throw invalidSnapshot(
+      `${source} with language any must contain only the unfiltered any scope`,
       exitCode,
     );
   }
@@ -368,6 +362,7 @@ function normalizeSnapshotBundle(
     schema_version: TREND_SNAPSHOT_SCHEMA_VERSION,
     snapshot_date: value.snapshot_date,
     period: "daily",
+    language,
     spoken_language: null,
     scopes,
   };
@@ -453,7 +448,7 @@ function normalizeSourceSnapshot(
       ? {}
       : { captured_at: value.captured_at }),
     period: value.period,
-    language: value.language ?? null,
+    language: value.language ?? "any",
     spoken_language: value.spoken_language ?? null,
     source_kind: value.source_kind,
     source_url: value.source_url,
@@ -482,33 +477,6 @@ function normalizeEntry(entry: GitHubTrendingEntry): GitHubTrendingEntry {
       ? {}
       : { stars_in_period: entry.stars_in_period }),
   };
-}
-
-function normalizeAvailableLanguages(values: string[]): string[] {
-  if (values.length + 1 > MAX_SOURCE_SCOPES) {
-    throw new Error(
-      `archive advertised more than ${MAX_SOURCE_SCOPES - 1} language scopes`,
-    );
-  }
-  const languages: string[] = [];
-  const seen = new Set<string>();
-  for (const language of values) {
-    if (
-      language.length === 0 ||
-      language.length > MAX_SCOPE_CHARACTERS ||
-      language !== language.trim() ||
-      /[\u0000-\u001f\u007f]/.test(language)
-    ) {
-      throw new Error("archive advertised an invalid language scope");
-    }
-    const key = language.toLowerCase();
-    if (seen.has(key)) {
-      throw new Error("archive advertised duplicate language scopes");
-    }
-    seen.add(key);
-    languages.push(language);
-  }
-  return languages.sort(compareStrings);
 }
 
 function normalizeApiUrl(value: string): string {
@@ -551,7 +519,11 @@ function normalizeApiUrl(value: string): string {
   return url.toString().replace(/\/+$/, "");
 }
 
-function isSnapshotContract(value: unknown): value is GitHubTrendingSnapshot {
+type SnapshotInputContract = Omit<GitHubTrendingSnapshot, "language"> & {
+  language?: string | null;
+};
+
+function isSnapshotContract(value: unknown): value is SnapshotInputContract {
   return (
     isRecord(value) &&
     isDateString(value.snapshot_date) &&
@@ -560,6 +532,7 @@ function isSnapshotContract(value: unknown): value is GitHubTrendingSnapshot {
       value.period === "weekly" ||
       value.period === "monthly") &&
     isOptionalScope(value.language) &&
+    value.language !== "all" &&
     isOptionalScope(value.spoken_language) &&
     isNonEmptyString(value.source_kind) &&
     isNonEmptyString(value.source_url) &&
@@ -636,15 +609,13 @@ function compareScopes(
   left: GitHubTrendingSnapshot,
   right: GitHubTrendingSnapshot,
 ): number {
-  const leftLanguage = left.language ?? null;
-  const rightLanguage = right.language ?? null;
-  if (leftLanguage === null) {
-    return rightLanguage === null ? 0 : -1;
+  if (left.language === "any") {
+    return right.language === "any" ? 0 : -1;
   }
-  if (rightLanguage === null) {
+  if (right.language === "any") {
     return 1;
   }
-  return compareStrings(leftLanguage, rightLanguage);
+  return compareStrings(left.language, right.language);
 }
 
 function compareStrings(left: string, right: string): number {

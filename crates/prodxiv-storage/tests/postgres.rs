@@ -1,7 +1,10 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use prodxiv_domain::PaperDocument;
-use prodxiv_storage::{NewGitHubTrendingSnapshot, PostgresStorage, StorageError};
+use prodxiv_storage::{
+    GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector, NewGitHubTrendingSnapshot,
+    PostgresStorage, StorageError,
+};
 use sqlx::PgPool;
 
 fn repository_root() -> &'static Path {
@@ -371,6 +374,14 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
     .expect("ingestion actor should be audited");
     assert_eq!(actor, "github_actions");
 
+    let stored_language: Option<String> =
+        sqlx::query_scalar("SELECT language FROM github_trending_snapshots WHERE snapshot_id = $1")
+            .bind(first.snapshot_id)
+            .fetch_one(&pool)
+            .await
+            .expect("unfiltered language scope should be readable");
+    assert_eq!(stored_language, None, "any remains SQL NULL at rest");
+
     let mut later_capture = snapshot.clone();
     later_capture.captured_at = Some("2026-07-29T23:59:00Z".to_owned());
     let semantic_replay = storage
@@ -396,7 +407,7 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
     assert!(matches!(conflict, Err(StorageError::IdempotencyConflict)));
 
     let stored = storage
-        .latest_github_trending("daily", None, None)
+        .latest_github_trending("daily", &GitHubTrendingLanguageScope::Any, None)
         .await
         .expect("Trending snapshot should be readable")
         .expect("Trending snapshot should exist");
@@ -419,14 +430,14 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
         .await
         .expect("next snapshot should import");
     let mut rust = snapshot.clone();
-    rust.language = Some("rust".to_owned());
+    rust.language = GitHubTrendingLanguageScope::Language("rust".to_owned());
     rust.source_revision = "rust".to_owned();
     storage
         .import_github_trending_snapshot(&rust)
         .await
         .expect("language snapshot should import");
     let mut empty = snapshot.clone();
-    empty.language = Some("raku".to_owned());
+    empty.language = GitHubTrendingLanguageScope::Language("raku".to_owned());
     empty.source_revision = "empty-raku".to_owned();
     empty.entries.clear();
     let empty_outcome = storage
@@ -436,12 +447,38 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
     assert_eq!(empty_outcome.entry_count, 0);
 
     let view = storage
-        .github_trending_view("daily", None, None, Some("2026-07-29"))
+        .github_trending_view(
+            "daily",
+            &GitHubTrendingLanguageSelector::Any,
+            None,
+            Some("2026-07-29"),
+        )
         .await
         .expect("Trending navigation should be readable");
+    assert_eq!(view.snapshots.len(), 1);
+    assert_eq!(view.snapshots[0].language, GitHubTrendingLanguageScope::Any);
     assert_eq!(view.previous_date.as_deref(), Some("2026-07-28"));
     assert_eq!(view.next_date.as_deref(), Some("2026-07-30"));
     assert_eq!(view.available_languages, ["raku", "rust"]);
+
+    let all_view = storage
+        .github_trending_view(
+            "daily",
+            &GitHubTrendingLanguageSelector::All,
+            None,
+            Some("2026-07-29"),
+        )
+        .await
+        .expect("all Trending scopes should be readable");
+    assert_eq!(all_view.snapshots.len(), 3);
+    assert_eq!(
+        all_view
+            .snapshots
+            .iter()
+            .map(|snapshot| snapshot.language.as_str())
+            .collect::<Vec<_>>(),
+        ["any", "raku", "rust"]
+    );
 
     let update = sqlx::query("UPDATE github_trending_entries SET rank = 2 WHERE snapshot_id = $1")
         .bind(first.snapshot_id)

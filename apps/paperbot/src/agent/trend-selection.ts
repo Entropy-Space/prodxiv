@@ -66,6 +66,7 @@ export interface TrendSelectionSnapshot {
   schema_version: TrendSnapshotBundle["schema_version"];
   snapshot_date: string;
   period: "daily";
+  language: TrendSnapshotBundle["language"];
   spoken_language: null;
   scope_count: number;
   candidate_count: number;
@@ -361,11 +362,12 @@ function createSnapshotSummary(
     schema_version: snapshot.schema_version,
     snapshot_date: snapshot.snapshot_date,
     period: snapshot.period,
+    language: snapshot.language,
     spoken_language: snapshot.spoken_language,
     scope_count: snapshot.scopes.length,
     candidate_count: candidateCount,
     available_languages: snapshot.scopes.flatMap((scope) =>
-      scope.language == null ? [] : [scope.language],
+      scope.language === "any" ? [] : [scope.language],
     ),
     scopes: snapshot.scopes.map((scope) => {
       const { entries, ...metadata } = scope;

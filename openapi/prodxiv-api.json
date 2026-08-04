@@ -54,7 +54,7 @@
           {
             "name": "language",
             "in": "query",
-            "description": "Exact GitHub Trending language scope",
+            "description": "any for the unfiltered scope, all for every stored scope, or a concrete language slug; defaults to any",
             "required": false,
             "schema": {
               "type": "string"
@@ -72,7 +72,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Latest imported snapshot for the requested scope",
+            "description": "Latest imported snapshots for the requested language selector",
             "content": {
               "application/json": {
                 "schema": {
@@ -643,6 +643,8 @@
       "GitHubTrendingResponse": {
         "type": "object",
         "required": [
+          "requested_language",
+          "snapshots",
           "available_languages"
         ],
         "properties": {
@@ -664,15 +666,14 @@
               "null"
             ]
           },
-          "snapshot": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/GitHubTrendingSnapshotResponse"
-              }
-            ]
+          "requested_language": {
+            "type": "string"
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubTrendingSnapshotResponse"
+            }
           }
         }
       },
@@ -681,6 +682,7 @@
         "required": [
           "snapshot_date",
           "period",
+          "language",
           "source_kind",
           "source_url",
           "source_revision",
@@ -700,10 +702,7 @@
             }
           },
           "language": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "period": {
             "type": "string"
@@ -795,6 +794,7 @@
         "required": [
           "snapshot_date",
           "period",
+          "language",
           "source_kind",
           "source_url",
           "source_revision",
@@ -814,10 +814,7 @@
             }
           },
           "language": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "period": {
             "type": "string"
