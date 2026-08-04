@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -61,6 +61,41 @@ test("uses a loopback model router without reading Pi user configuration", async
   }
 });
 
+test("allocates private persistent paths for the two logical session roles", async () => {
+  temporaryPath = await mkdtemp(join(tmpdir(), "paperbot-pi-"));
+  const runtime = new PiAuthoringRuntime({ api_key: "test-deepseek-key" });
+
+  const evidence = await runtime.startSession({
+    role: "evidence",
+    run_path: temporaryPath,
+  });
+  const author = await runtime.startSession({
+    role: "author",
+    run_path: temporaryPath,
+  });
+  try {
+    expect(
+      evidence
+        .snapshot()
+        .session_path?.startsWith(join(temporaryPath, "sessions", "evidence")),
+    ).toBe(true);
+    expect(
+      author
+        .snapshot()
+        .session_path?.startsWith(join(temporaryPath, "sessions", "author")),
+    ).toBe(true);
+    expect(
+      (await stat(join(temporaryPath, "sessions", "evidence"))).mode & 0o777,
+    ).toBe(0o700);
+    expect(
+      (await stat(join(temporaryPath, "sessions", "author"))).mode & 0o777,
+    ).toBe(0o700);
+  } finally {
+    await evidence.dispose();
+    await author.dispose();
+  }
+});
+
 test("allows a keyless loopback router but rejects unsafe model endpoints", () => {
   expect(
     resolvePiConnection({ base_url: "http://127.0.0.1:4141/v1" }, {}),
@@ -105,7 +140,7 @@ test("does not create a session or expose a missing DeepSeek key", async () => {
   const runtime = new PiAuthoringRuntime({ api_key: "" });
 
   await expect(
-    runtime.complete({ prompt: "draft", run_path: "/not-used" }),
+    runtime.startSession({ role: "author", run_path: "/not-used" }),
   ).rejects.toEqual(
     expect.objectContaining({
       exit_code: 6,

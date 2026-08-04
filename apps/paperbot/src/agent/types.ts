@@ -1,16 +1,21 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 
-export const AGENT_RUN_SCHEMA_VERSION = "1";
+export const AGENT_RUN_SCHEMA_VERSION = "2";
 
 export type EvidenceKind = "repository" | "external" | "author" | "inference";
-export type ReviewSeverity = "error" | "warning" | "question";
+export type EvidenceStatus =
+  "source_verified" | "qualified_inference" | "author_supplied";
 export type AgentRunState =
   | "initialized"
-  | "source_ready"
-  | "drafted"
-  | "reviewed"
+  | "inputs_ready"
+  | "evidence_ready"
+  | "evidence_validated"
+  | "authoring"
+  | "awaiting_author"
   | "needs_author_review"
   | "failed";
+export type AuthorPhase = "drafting" | "reviewing";
+export type AgentSessionRole = "evidence" | "author";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -49,33 +54,62 @@ export interface AgentSource {
   scan_manifest: ScanManifest;
 }
 
-export interface EvidenceItem {
+export interface EvidenceCandidate {
   claim: string;
   evidence_kind: EvidenceKind;
   source_id: string;
+  excerpt: string;
   confidence: "high" | "medium" | "low";
   note?: string;
 }
 
-export interface ReviewIssue {
-  severity: ReviewSeverity;
-  section: string;
-  message: string;
+export interface EvidenceLocator {
+  path: string;
+  line_start: number;
+  line_end: number;
+}
+
+export interface EvidenceItem extends EvidenceCandidate {
+  evidence_id: string;
+  excerpt_sha256: string;
+  locator: EvidenceLocator;
+  status: EvidenceStatus;
+}
+
+export interface EvidenceConflict {
+  description: string;
   source_ids: string[];
 }
 
-export interface DraftResponse {
-  summary: string;
-  topics: string[];
-  markdown: string;
-  evidence: EvidenceItem[];
+export interface EvidenceResponse {
+  evidence: EvidenceCandidate[];
+  contradictions: EvidenceConflict[];
+  unknowns: string[];
   questions: string[];
 }
 
-export interface ReviewResponse {
-  issues: ReviewIssue[];
-  questions: string[];
+export interface AuthorQuestion {
+  question_id: string;
+  question: string;
+  reason: string;
+  evidence_ids: string[];
 }
+
+export interface AskQuestionsResponse {
+  action: "ask_questions";
+  questions: Omit<AuthorQuestion, "question_id">[];
+}
+
+export interface DraftResponse {
+  action: "submit_draft";
+  summary: string;
+  topics: string[];
+  markdown: string;
+  evidence_ids: string[];
+  unresolved_questions: string[];
+}
+
+export type AuthoringResponse = AskQuestionsResponse | DraftResponse;
 
 export interface ModelCompletion {
   final_text: string;
@@ -86,13 +120,42 @@ export interface ModelCompletion {
   };
 }
 
+export interface ModelSessionSnapshot {
+  session_id: string;
+  session_path?: string;
+}
+
+export interface AuthoringSession {
+  complete(input: { prompt: string }): Promise<ModelCompletion>;
+  snapshot(): ModelSessionSnapshot;
+  dispose(): void | Promise<void>;
+}
+
 export interface AuthoringRuntime {
   readonly provider: string;
   readonly model: string;
-  complete(input: {
-    prompt: string;
+  startSession(input: {
+    role: AgentSessionRole;
     run_path: string;
-  }): Promise<ModelCompletion>;
+    session_id?: string;
+    session_path?: string;
+  }): Promise<AuthoringSession>;
+}
+
+export interface AgentSessionRecord {
+  session_id: string;
+  artifact?: string;
+  artifact_sha256?: string;
+  turn_count: number;
+}
+
+export interface AgentWorkflowRecord {
+  author_phase: AuthorPhase;
+  question_rounds: number;
+  draft_revision: number;
+  repair_attempts: number;
+  current_draft?: string;
+  pending_question_ids: string[];
 }
 
 export interface AgentRunRecord {
@@ -108,16 +171,26 @@ export interface AgentRunRecord {
     metadata: AgentPaperMetadata;
   };
   source?: AgentRunSourceRecord;
+  sessions: {
+    evidence?: AgentSessionRecord;
+    author?: AgentSessionRecord;
+  };
+  workflow: AgentWorkflowRecord;
   artifacts: {
     source?: string;
     scan?: string;
+    evidence_candidates?: string;
+    evidence_analysis?: string;
     evidence?: string;
     draft?: string;
+    drafts?: string[];
+    paper?: string;
     questions?: string;
-    review?: string;
+    answers?: string[];
     validation?: string;
   };
   draft_sha256?: string;
+  paper_sha256?: string;
   error?: {
     message: string;
   };
@@ -138,6 +211,10 @@ export interface AgentRunResult {
   validation: {
     valid: boolean;
     diagnostics: number;
+  };
+  questions: {
+    pending: number;
+    round: number;
   };
   source: {
     resolved_revision: string;

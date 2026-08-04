@@ -12,6 +12,10 @@ const agentResult: AgentRunResult = {
     valid: true,
     diagnostics: 0,
   },
+  questions: {
+    pending: 0,
+    round: 0,
+  },
   source: {
     resolved_revision: "abc123",
     selected_file_count: 12,
@@ -260,6 +264,36 @@ test("writes only the agent result to stdout in JSON mode", async () => {
   ]);
 });
 
+test("reports a validated author-question checkpoint as a successful run", async () => {
+  const stdout: string[] = [];
+  const awaitingResult: AgentRunResult = {
+    ...agentResult,
+    state: "awaiting_author",
+    questions: { pending: 3, round: 1 },
+  };
+
+  const exitCode = await run(
+    [
+      "agent",
+      "run",
+      "https://github.com/different-ai/openwork",
+      "--output",
+      "runs/openwork",
+      "--author",
+      "Research Team",
+      "--status",
+      "concept",
+      "--allow-remote-model",
+    ],
+    { stdout: (message) => stdout.push(message), stderr: () => {} },
+    { run_agent: async () => awaitingResult },
+  );
+
+  expect(exitCode).toBe(0);
+  expect(stdout[0]).toContain("waiting for author answers");
+  expect(stdout[0]).toContain("Author questions: 3 pending (round 1)");
+});
+
 test("dispatches an agent resume without a network runtime in tests", async () => {
   const stdout: string[] = [];
   let receivedAnswersPath: string | undefined;
@@ -287,7 +321,8 @@ test("dispatches an agent resume without a network runtime in tests", async () =
 
   expect(exitCode).toBe(0);
   expect(receivedAnswersPath).toBe("answers.md");
-  expect(stdout[0]).toContain("Paperbot agent revision proposal prepared");
+  expect(stdout[0]).toContain("Paperbot agent paper revision prepared");
+  expect(stdout[0]).toContain("Author questions: 0 pending (round 0)");
   expect(stdout[0]).toContain("Publication: not attempted");
 });
 

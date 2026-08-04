@@ -78,14 +78,22 @@ canonical public GitHub URL. For GitHub it resolves an exact source revision
 without cloning or executing repository code. It has no shell, filesystem,
 browser, credential, or publish tools.
 
-The run ends with private artifacts including `draft.md`, `evidence.jsonl`,
-`questions.md`, `review.json`, and `validation.json`. It always stops at
-author review. Do not use `publish` unless the author separately and explicitly
-approves the exact reviewed paper.
+The run uses exactly two private logical Pi sessions. The evidence session
+extracts exact repository excerpts into `evidence.jsonl`; after host integrity
+validation, the author session drafts and revises from that ledger. The author
+session may emit a bounded `ask_questions` protocol event, but that event is
+not a public deterministic tool. Private artifacts include `draft.md`,
+`drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
+`validation.json`, and—when the interview is complete—`paper.md`. The workflow
+always stops at author review. Do not use `publish` unless the author separately
+and explicitly approves the exact reviewed paper.
 
 Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
---allow-remote-model` to create a numbered proposal from author answers. It
-preserves `draft.md`; the author decides whether to incorporate the proposal.
+--allow-remote-model` only when the run is in `awaiting_author`. It copies the
+answers into the private run, appends author evidence, and reopens the same
+logical author session. It preserves the editable `draft.md`, writes immutable
+accepted checkpoints, and either asks another bounded round or produces
+`paper.md` for author review.
 
 For multiple public repositories, use a private versioned JSON manifest and
 the batch command:

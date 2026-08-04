@@ -69,6 +69,15 @@ prose, and it never writes or overwrites a paper file. Missing author metadata
 and narrative content remain visibly incomplete for the Agent Skill and author
 to resolve.
 
+`agent run` is the optional model-assisted workflow. It creates one isolated
+Pi evidence session, verifies exact repository excerpts into `evidence.jsonl`,
+then creates one separate author session that drafts and self-reviews from that
+validated ledger. The author session can emit a bounded `ask_questions` event;
+the host checkpoints it as `awaiting_author`, and `agent resume --answers`
+reopens the same logical author session. Once the loop completes, Paperbot
+writes `paper.md` and stops at `needs_author_review`. It never publishes, and
+independent final evidence review is not part of this version.
+
 `auth` creates a commented credential template if it does not exist and never
 overwrites it. `auth set` stores the API URL, optional public site URL, and
 publishing token in

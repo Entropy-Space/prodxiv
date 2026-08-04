@@ -551,15 +551,18 @@ function writeAgentResult(
 
   io.stdout(
     [
-      action === "run"
-        ? "Paperbot agent draft prepared"
-        : "Paperbot agent revision proposal prepared",
+      result.state === "awaiting_author"
+        ? "Paperbot agent is waiting for author answers"
+        : action === "run"
+          ? "Paperbot agent paper prepared"
+          : "Paperbot agent paper revision prepared",
       `Run: ${result.run_path}`,
       `State: ${result.state}`,
       `Validation: ${result.validation.valid ? "passed" : "needs author attention"} (${result.validation.diagnostics} diagnostics)`,
+      `Author questions: ${result.questions.pending} pending (round ${result.questions.round})`,
       `Source revision: ${result.source.resolved_revision}`,
       `Selected files: ${result.source.selected_file_count}`,
-      "Publication: not attempted. Review the draft, evidence, and author questions before any submission.",
+      "Publication: not attempted. Review paper.md or answer the pending questions before any submission.",
     ].join("\n"),
   );
 }
