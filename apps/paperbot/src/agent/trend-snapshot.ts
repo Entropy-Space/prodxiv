@@ -16,6 +16,7 @@ import {
 
 const MAX_SNAPSHOT_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_ENTRIES = 100;
+export const DEFAULT_PRODXIV_API_URL = "https://prodxiv-api.vercel.app/";
 
 export interface TrendSnapshotInputOptions {
   api_url?: string;
@@ -45,9 +46,14 @@ export async function loadTrendSnapshot(
     );
   }
 
+  const environmentApiUrl = (
+    dependencies.env ?? process.env
+  ).PRODXIV_API_URL?.trim();
   const apiUrl = normalizeApiUrl(
     options.api_url ??
-      (dependencies.env ?? process.env).PRODXIV_API_URL?.trim(),
+      (environmentApiUrl === undefined || environmentApiUrl.length === 0
+        ? DEFAULT_PRODXIV_API_URL
+        : environmentApiUrl),
   );
   let snapshot: GitHubTrendingSnapshot | undefined;
   try {
@@ -255,10 +261,10 @@ function normalizeEntry(entry: GitHubTrendingEntry): GitHubTrendingEntry {
   };
 }
 
-function normalizeApiUrl(value: string | undefined): string {
-  if (value === undefined || value.length === 0) {
+function normalizeApiUrl(value: string): string {
+  if (value.length === 0) {
     throw new PaperbotError(
-      "prodxiv API is not configured; pass --api-url, set PRODXIV_API_URL, or use --snapshot <path>",
+      "prodxiv API URL must not be empty",
       ExitCode.usage,
     );
   }

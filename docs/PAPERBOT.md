@@ -289,7 +289,6 @@ run:
 ```sh
 bun run paperbot agent select-trending \
   --output ./paperbot-runs/trending-2026-08-04 \
-  --api-url https://api.prodxiv.example \
   --allow-remote-model \
   --model deepseek-v4-flash \
   --format json
@@ -298,10 +297,12 @@ bun run paperbot agent select-trending \
 The scheduled prodxiv collector, outside Paperbot, captures and normalizes
 GitHub Trending and ingests immutable observations into the prodxiv archive.
 By default Paperbot requests the exact current UTC date with `period=daily`
-and the all-language scope from that archive. `--api-url` selects the prodxiv
-API; `PRODXIV_API_URL` is used when the option is absent. If today's exact
-snapshot is unavailable, the command fails clearly. It never scrapes GitHub,
-selects a nearby date, or silently falls back to another source.
+and the all-language scope from the hosted prodxiv archive at
+`https://prodxiv-api.vercel.app/`. `--api-url` or a non-empty
+`PRODXIV_API_URL` overrides that endpoint for development or self-hosting. If
+today's exact snapshot is unavailable, the command fails clearly. It never
+scrapes GitHub, selects a nearby date, or silently falls back to another
+source.
 
 For a reproducible or offline rerun, pass a previously saved bare prodxiv
 snapshot instead of an API URL:

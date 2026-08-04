@@ -96,7 +96,7 @@ Options:
   --model <model>      Pi model for an agent workflow
   --concurrency <1-4>  Concurrent projects for an agent batch (default: 1)
   --allow-remote-model Allow a bounded public snapshot or source bundle to reach the model
-  --api-url <url>      prodxiv API base URL for archive reads or publishing setup
+  --api-url <url>      Override the hosted archive API, or configure publishing
   --snapshot <path>    Use an archived trend snapshot file instead of the API
   --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin

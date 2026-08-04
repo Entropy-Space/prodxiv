@@ -21,7 +21,6 @@ bun run paperbot tools paper_scaffold scan.json > paper.md
 bun run paperbot tools paper_validate paper.md --format json
 bun run paperbot agent select-trending \
   --output ./paperbot-runs/trending-2026-08-04 \
-  --api-url https://api.prodxiv.example \
   --allow-remote-model \
   --format json
 bun run paperbot auth
@@ -84,11 +83,13 @@ writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version.
 
 `agent select-trending` is a separate bounded research workflow. By default it
-requests the exact UTC day's all-language daily snapshot from the prodxiv
-archive using `--api-url` or `PRODXIV_API_URL`; it never scrapes GitHub or
-silently falls back to a different source. `--snapshot <snapshot.json>` uses a
-previously saved prodxiv snapshot instead, including an older date for an
-offline reproducible run. Paperbot writes the validated input to
+requests the exact UTC day's all-language daily snapshot from the hosted
+prodxiv archive at `https://prodxiv-api.vercel.app/`. `--api-url` or a
+non-empty `PRODXIV_API_URL` overrides that endpoint for development or
+self-hosting. It never scrapes GitHub or silently falls back to a different
+source. `--snapshot <snapshot.json>` uses a previously saved prodxiv snapshot
+instead, including an older date for an offline reproducible run. Paperbot
+writes the validated input to
 `snapshot.json` and sends only that public metadata to one tool-less Pi
 session. The host requires exactly ten unique candidates, preserves each
 candidate's archive order as `source_rank`, and writes the model's selection

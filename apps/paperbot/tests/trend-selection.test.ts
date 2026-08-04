@@ -322,25 +322,33 @@ describe("runTrendSelection", () => {
     } satisfies Partial<PaperbotError>);
   });
 
-  test("requires an archive endpoint when no snapshot file is supplied", async () => {
+  test("uses the hosted prodxiv API when no archive endpoint is configured", async () => {
     const workspace = await createWorkspace();
+    const snapshot = trendingSnapshot();
+    const runtime = new FakeTrendRuntime([
+      selectionResponse(snapshot.entries.slice(0, 10)),
+    ]);
+    let archiveRequest: string | undefined;
 
-    await expect(
-      runTrendSelection(
-        {
-          output_path: join(workspace, "trend-run"),
-          allow_remote_model: true,
+    await runTrendSelection(
+      {
+        output_path: join(workspace, "trend-run"),
+        allow_remote_model: true,
+      },
+      {
+        env: { PRODXIV_API_URL: "   " },
+        fetch: async (input) => {
+          archiveRequest = String(input);
+          return archiveResponse(snapshot);
         },
-        {
-          env: {},
-          now: fixedClock("2026-08-04T01:02:03Z"),
-        },
-      ),
-    ).rejects.toMatchObject({
-      exit_code: ExitCode.usage,
-      message:
-        "prodxiv API is not configured; pass --api-url, set PRODXIV_API_URL, or use --snapshot <path>",
-    } satisfies Partial<PaperbotError>);
+        create_runtime: () => runtime,
+        now: fixedClock("2026-08-04T01:02:03Z", "2026-08-04T01:02:04Z"),
+      },
+    );
+
+    expect(archiveRequest).toBe(
+      "https://prodxiv-api.vercel.app/v1/github/trending?date=2026-08-04&period=daily",
+    );
   });
 
   test("rejects a non-all-language snapshot file before starting Pi", async () => {

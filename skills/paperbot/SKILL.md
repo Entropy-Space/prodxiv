@@ -66,17 +66,17 @@ product-paper research, run:
 ```sh
 PAPERBOT_CMD agent select-trending \
   --output ./paperbot-runs/trending-YYYY-MM-DD \
-  --api-url https://api.prodxiv.example \
   --allow-remote-model \
   --format json
 ```
 
-The default source is the exact UTC day's all-language daily observation in
-the prodxiv archive. Supply the API with `--api-url` or `PRODXIV_API_URL`. If
-that observation is unavailable, stop; never substitute direct GitHub
-scraping, a nearby date, or another source. For a reproducible or offline run,
-replace `--api-url` with `--snapshot <snapshot.json>` using a previously saved
-bare prodxiv snapshot. The host validates and writes `snapshot.json`, sends
+The default source is the exact UTC day's all-language daily observation at
+`https://prodxiv-api.vercel.app/`. Override it with `--api-url` or a non-empty
+`PRODXIV_API_URL` only for development or self-hosting. If that observation is
+unavailable, stop; never substitute direct GitHub scraping, a nearby date, or
+another source. For a reproducible or offline run, add
+`--snapshot <snapshot.json>` using a previously saved bare prodxiv snapshot.
+The host validates and writes `snapshot.json`, sends
 only its normalized public metadata to one tool-less Pi session, and accepts
 exactly ten unique candidates into `selection.json`. Treat the result as a
 research queue, not an endorsement or repository evidence. This command does
