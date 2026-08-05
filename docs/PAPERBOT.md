@@ -191,16 +191,29 @@ public GitHub repository URL:
 ```sh
 bun run paperbot agent run https://github.com/different-ai/openwork \
   --output ./paperbot-runs/openwork \
-  --author "prodxiv research" \
-  --status public_beta \
   --allow-remote-model \
   --model deepseek-v4-flash
 ```
 
-`--author` identifies the paper author, not a repository contributor. Paperbot
-will not infer authorship from GitHub. `--status` is also deliberate author
-metadata: code and a repository URL do not reliably establish a product's
-release status.
+For a public GitHub source, Paperbot uses the repository owner as the default
+organization author, represented by a namespaced ID such as `github:owner`.
+It never inspects commits, contributors, or commit email addresses to derive
+authorship. Repeatable `--author` values replace that default with explicit
+person authors.
+
+Paperbot also snapshots up to ten public GitHub releases and their bounded
+release notes. A stable release deterministically supports `launched`; when no
+stable release exists, a GitHub prerelease or an explicitly marked alpha,
+beta, preview, or release candidate supports `public_beta`. No supporting
+release leaves status as `unknown` and `unverified`. `--status` overrides this
+inference with an explicit declaration. Paperbot does not infer `concept`,
+`private_beta`, or `discontinued` from repository activity. Local repository
+analysis remains network-free: it may use a GitHub origin for owner attribution
+but leaves status unknown unless `--status` is supplied.
+
+Every generated paper records `paperbot` plus the requested model as its agent
+writer. Agent-only papers omit `communication_email`; that optional field is
+reserved for papers with a credited human writer and is never inferred.
 
 `--allow-remote-model` is required even for a public source and a loopback
 model router. It confirms that the bounded selected source bundle may be sent
@@ -236,13 +249,14 @@ The agent writes a new private run directory with:
   bounded workflow counters, session records, artifact paths, and draft/paper
   SHA-256 values;
 - `source.json`, `scan.json`, and `source/` — the bounded private source
-  snapshot and original scan inventory;
+  snapshot, original scan inventory, repository-owner context, and any bounded
+  GitHub release metadata and notes used for status inference;
 - `evidence-candidates/`, `evidence-analysis.json`, and `evidence.jsonl` — the
   evidence session's candidate checkpoints, unresolved analysis, and the
-  integrity-validated claim ledger. Each repository item has an
-  `evidence_id`, exact excerpt and digest, source ID, line locator, confidence,
-  and status. Supplied external URLs remain reference-only until their
-  contents are explicitly snapshotted;
+  integrity-validated claim ledger. Each repository or snapshotted
+  release-note item has an `evidence_id`, exact excerpt and digest, source ID,
+  line locator, confidence, and status. Supplied external URLs remain
+  reference-only until their contents are explicitly snapshotted;
 - `sessions/evidence/` and `sessions/author/` — the two private Pi-native JSONL
   conversations referenced and integrity-bound by `run.json`;
 - `draft.md` and `drafts/` — the editable first draft and immutable accepted
@@ -273,8 +287,8 @@ When no questions remain, Paperbot writes `paper.md` and ends in
 checkpoint but no `paper.md` yet. Neither state submits or publishes. If a
 model response or restored artifact fails validation, Paperbot fails closed
 without replacing an accepted checkpoint. Run schema version 1 used the old
-multi-session draft/review protocol and is deliberately not resumable as a
-schema-version-2 conversation.
+multi-session draft/review protocol, version 2 predates structured attribution
+and release provenance, and neither is resumable as a schema-version-3 run.
 
 The initial agent has no general web-search or page-fetch capability. Use
 `--source <public-url>` only to provide a citeable URL; it is not fetched and
@@ -381,29 +395,26 @@ with one anonymous canonical GitHub repository per project:
     {
       "repository_url": "https://github.com/huggingface/speech-to-speech",
       "title": "Speech-to-Speech research draft",
-      "product_name": "Speech-to-Speech",
-      "authors": ["prodxiv research"],
-      "status": "public_beta"
+      "product_name": "Speech-to-Speech"
     }
   ]
 }
 ```
 
-Run it with explicit batch defaults when each project does not set its own
-paper author or product status:
+Run it directly to use per-repository owner attribution and release-based
+status inference:
 
 ```sh
 bun run paperbot agent batch ./projects.json \
   --output ./paperbot-runs/trending \
-  --author "prodxiv research" \
-  --status public_beta \
   --allow-remote-model \
   --model deepseek-v4-flash \
   --concurrency 2
 ```
 
-Project-level `authors` and `status` override command defaults; Paperbot
-never fills either in from GitHub. A batch supports up to 100 repositories and
+Project-level `authors` and `status` override optional command defaults. When
+they are absent, each project uses its GitHub owner and release snapshot. A
+batch supports up to 100 repositories and
 one to four concurrent runs. It creates one isolated child directory per
 repository plus an incrementally updated `batch.json` report. One project
 failure does not stop other projects, but the command exits nonzero if any

@@ -104,7 +104,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
   },
 };
 
-test("parses a complete Pi agent run without inferring author metadata", () => {
+test("parses explicit author and status overrides", () => {
   expect(
     parseArguments([
       "agent",
@@ -154,6 +154,26 @@ test("parses a complete Pi agent run without inferring author metadata", () => {
     model: "deepseek-v4-flash",
     format: "json",
   });
+});
+
+test("accepts an agent run with inferred GitHub metadata", () => {
+  expect(
+    parseArguments([
+      "agent",
+      "run",
+      "https://github.com/example/product",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+    ]),
+  ).toEqual(
+    expect.objectContaining({
+      metadata: {
+        title: "product research draft",
+        product_name: "product",
+      },
+    }),
+  );
 });
 
 test("uses a repository identifier only as an explicit draft default", () => {

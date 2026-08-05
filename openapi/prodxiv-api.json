@@ -484,6 +484,22 @@
               "null"
             ]
           },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AuthorKind"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -495,6 +511,13 @@
           }
         },
         "additionalProperties": false
+      },
+      "AuthorKind": {
+        "type": "string",
+        "enum": [
+          "person",
+          "organization"
+        ]
       },
       "Diagnostic": {
         "type": "object",
@@ -877,6 +900,12 @@
               "$ref": "#/components/schemas/Author"
             }
           },
+          "communication_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "license": {
             "type": [
               "string",
@@ -940,7 +969,7 @@
             ]
           },
           "status": {
-            "$ref": "#/components/schemas/ProductStatus"
+            "$ref": "#/components/schemas/PaperStatus"
           },
           "summary": {
             "type": "string"
@@ -961,6 +990,12 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "writers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperWriter"
+            }
           }
         },
         "additionalProperties": false
@@ -997,6 +1032,38 @@
           "release"
         ]
       },
+      "PaperStatus": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ProductStatus"
+          },
+          {
+            "$ref": "#/components/schemas/ProductStatusObservation"
+          }
+        ]
+      },
+      "PaperWriter": {
+        "type": "object",
+        "required": [
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/WriterKind"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ProductRelationship": {
         "type": "object",
         "required": [
@@ -1017,12 +1084,73 @@
       "ProductStatus": {
         "type": "string",
         "enum": [
+          "unknown",
           "concept",
           "private_beta",
           "public_beta",
           "launched",
           "discontinued"
         ]
+      },
+      "ProductStatusEvidence": {
+        "type": "object",
+        "required": [
+          "kind",
+          "url"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ProductStatusEvidenceKind"
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProductStatusEvidenceKind": {
+        "type": "string",
+        "enum": [
+          "github_release"
+        ]
+      },
+      "ProductStatusObservation": {
+        "type": "object",
+        "required": [
+          "value",
+          "determination",
+          "confidence"
+        ],
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/StatusConfidence"
+          },
+          "determination": {
+            "$ref": "#/components/schemas/StatusDetermination"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductStatusEvidence"
+            }
+          },
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "$ref": "#/components/schemas/ProductStatus"
+          }
+        },
+        "additionalProperties": false
       },
       "PublishPaperRequest": {
         "type": "object",
@@ -1121,6 +1249,29 @@
           "built_on",
           "alternative_to",
           "supersedes"
+        ]
+      },
+      "StatusConfidence": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ]
+      },
+      "StatusDetermination": {
+        "type": "string",
+        "enum": [
+          "declared",
+          "inferred",
+          "unverified"
+        ]
+      },
+      "WriterKind": {
+        "type": "string",
+        "enum": [
+          "human",
+          "agent"
         ]
       }
     },

@@ -56,9 +56,9 @@ Usage:
   paperbot tools repo_scan [repository] [--exclude <glob>] [--include <glob>] [--format text|json]
   paperbot tools paper_scaffold <scan.json> [--title <title>] [--format text|json]
   paperbot tools paper_validate <paper.md> [--profile draft|submission|publication] [--format text|json]
-  paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
+  paperbot agent run <repository> --output <run-directory> --allow-remote-model [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
-  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
+  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
   paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
@@ -89,8 +89,8 @@ Options:
   --output <path>      Write a new draft without overwriting existing work
   --title <title>      Set the initial draft title
   --profile <profile>  Validation profile: draft (default), submission, or publication
-  --author <name>      Declare a paper author; repeatable for agent runs
-  --status <status>    Product status for an agent run or batch default
+  --author <name>      Override the default GitHub repository-owner author; repeatable
+  --status <status>    Override release-based product status inference
   --source <url>       Supply a citeable public URL; Paperbot does not fetch it
   --ref <ref>          Request a GitHub revision for an agent run
   --model <model>      Pi model for an agent workflow

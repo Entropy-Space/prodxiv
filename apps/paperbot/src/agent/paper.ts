@@ -29,15 +29,48 @@ export function renderPaper(
   draft: Pick<DraftResponse, "summary" | "topics" | "markdown">,
 ): string {
   const frontMatter = [
-    'schema_version: "1"',
+    'schema_version: "2"',
     `title: ${JSON.stringify(metadata.title)}`,
     `product_name: ${JSON.stringify(metadata.product_name)}`,
     "scope:",
     "  kind: product",
     `summary: ${JSON.stringify(draft.summary.trim())}`,
     "authors:",
-    ...metadata.authors.map((author) => `  - name: ${JSON.stringify(author)}`),
-    `status: ${JSON.stringify(metadata.status)}`,
+    ...metadata.authors.flatMap((author) => [
+      ...(author.id === undefined
+        ? ["  - kind: " + JSON.stringify(author.kind)]
+        : [
+            `  - id: ${JSON.stringify(author.id)}`,
+            `    kind: ${JSON.stringify(author.kind)}`,
+          ]),
+      `    name: ${JSON.stringify(author.name)}`,
+      ...(author.url === undefined
+        ? []
+        : [`    url: ${JSON.stringify(author.url)}`]),
+    ]),
+    "writers:",
+    ...metadata.writers.flatMap((writer) => [
+      `  - kind: ${JSON.stringify(writer.kind)}`,
+      `    name: ${JSON.stringify(writer.name)}`,
+      `    model: ${JSON.stringify(writer.model)}`,
+    ]),
+    "status:",
+    `  value: ${JSON.stringify(metadata.status.value)}`,
+    `  determination: ${JSON.stringify(metadata.status.determination)}`,
+    `  confidence: ${JSON.stringify(metadata.status.confidence)}`,
+    ...(metadata.status.observed_at === undefined
+      ? []
+      : [`  observed_at: ${JSON.stringify(metadata.status.observed_at)}`]),
+    ...(metadata.status.evidence === undefined
+      ? []
+      : [
+          "  evidence:",
+          ...metadata.status.evidence.flatMap((evidence) => [
+            `    - kind: ${JSON.stringify(evidence.kind)}`,
+            `      url: ${JSON.stringify(evidence.url)}`,
+            `      tag: ${JSON.stringify(evidence.tag)}`,
+          ]),
+        ]),
     "topics:",
     ...draft.topics.map((topic) => `  - ${JSON.stringify(topic)}`),
     ...(metadata.product_url === undefined
@@ -48,8 +81,8 @@ export function renderPaper(
       : [`repository_url: ${JSON.stringify(metadata.repository_url)}`]),
   ].join("\n");
   const notice = [
-    "> **Private research draft.** This paper was generated from bounded repository and author evidence and has not been reviewed or endorsed by the product maintainers.",
-    "> Confirm factual claims, product status, author attribution, related-work comparisons, and publication rights before submitting it.",
+    "> **Private research draft.** This paper was generated from bounded repository, release, and author evidence and has not been reviewed or endorsed by the repository owner.",
+    "> Repository-owner attribution and inferred product status must be confirmed together with factual claims, related-work comparisons, and publication rights before submission.",
   ].join("\n");
   return `---\n${frontMatter}\n---\n\n${notice}\n\n${draft.markdown.trim()}\n`;
 }
@@ -165,7 +198,12 @@ function allowedMarkdownUrls(
   externalSources: string[],
 ): Set<string> {
   return new Set(
-    [metadata.repository_url, metadata.product_url, ...externalSources]
+    [
+      metadata.repository_url,
+      metadata.product_url,
+      ...(metadata.status.evidence ?? []).map((item) => item.url),
+      ...externalSources,
+    ]
       .filter((url): url is string => url !== undefined)
       .map((url) => normalizeAnonymousHttpUrl(url, "draft link")),
   );

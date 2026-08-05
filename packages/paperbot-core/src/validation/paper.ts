@@ -74,12 +74,23 @@ export function validatePaperRules(
 
   validateRequiredText(metadata, diagnostics);
   validateAuthors(metadata, diagnostics);
+  validateWritersAndContact(metadata, diagnostics);
+  validateStatus(metadata, diagnostics);
   validateTopics(metadata, diagnostics);
   validatePublicationValues(metadata, diagnostics);
   validateUrls(metadata, diagnostics);
   validateScope(metadata.scope, diagnostics);
 
   if (profile === "submission") {
+    if (metadata.schema_version === "1") {
+      diagnostics.push(
+        diagnostic(
+          "submission.current_schema_required",
+          "metadata.schema_version",
+          "schema version 1 papers remain readable but new submissions must use schema version 2",
+        ),
+      );
+    }
     for (const field of validation_policy.paper.submission_forbidden_metadata) {
       if (metadata[field] !== undefined && metadata[field] !== null) {
         diagnostics.push(submissionForbiddenDiagnostic(field));
@@ -214,6 +225,27 @@ function validateAuthors(
     if (!isRecord(author)) {
       return;
     }
+    if (metadata.schema_version === "2" && author.kind == null) {
+      diagnostics.push(
+        diagnostic(
+          "authors.kind_required",
+          `metadata.authors[${index}].kind`,
+          "schema version 2 authors must identify whether they are a person or organization",
+        ),
+      );
+    }
+    if (
+      typeof author.id === "string" &&
+      !/^[a-z][a-z0-9_-]*:[^\s:][^\s]*$/.test(author.id)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "authors.invalid_id",
+          `metadata.authors[${index}].id`,
+          "author IDs must use a namespaced value such as `github:owner`",
+        ),
+      );
+    }
     if (typeof author.name === "string" && author.name.trim().length === 0) {
       diagnostics.push(
         diagnostic(
@@ -233,6 +265,199 @@ function validateAuthors(
       );
     }
   });
+}
+
+function validateWritersAndContact(
+  metadata: Record<string, unknown>,
+  diagnostics: Diagnostic[],
+): void {
+  if (metadata.schema_version === "1") {
+    if (Array.isArray(metadata.writers) && metadata.writers.length > 0) {
+      diagnostics.push(
+        diagnostic(
+          "schema.v1_writers_forbidden",
+          "metadata.writers",
+          "writers require paper schema version 2",
+        ),
+      );
+    }
+    if (metadata.communication_email != null) {
+      diagnostics.push(
+        diagnostic(
+          "schema.v1_communication_email_forbidden",
+          "metadata.communication_email",
+          "communication_email requires paper schema version 2",
+        ),
+      );
+    }
+    return;
+  }
+  if (metadata.schema_version !== "2") {
+    return;
+  }
+  if (!Array.isArray(metadata.writers) || metadata.writers.length === 0) {
+    diagnostics.push(
+      diagnostic(
+        "writers.required",
+        "metadata.writers",
+        "schema version 2 papers require at least one writer",
+      ),
+    );
+    return;
+  }
+  metadata.writers.forEach((writer, index) => {
+    if (!isRecord(writer)) {
+      return;
+    }
+    if (writer.kind === "human" && writer.model != null) {
+      diagnostics.push(
+        diagnostic(
+          "writers.human_model_forbidden",
+          `metadata.writers[${index}].model`,
+          "human writers must not specify a model",
+        ),
+      );
+    }
+    if (
+      writer.kind === "agent" &&
+      (typeof writer.model !== "string" || writer.model.trim().length === 0)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "writers.agent_model_required",
+          `metadata.writers[${index}].model`,
+          "agent writers must identify their model",
+        ),
+      );
+    }
+  });
+  if (
+    metadata.communication_email != null &&
+    !metadata.writers.some(
+      (writer) => isRecord(writer) && writer.kind === "human",
+    )
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "communication_email.human_writer_required",
+        "metadata.communication_email",
+        "communication_email is available only when a human writer is credited",
+      ),
+    );
+  }
+}
+
+function validateStatus(
+  metadata: Record<string, unknown>,
+  diagnostics: Diagnostic[],
+): void {
+  if (metadata.schema_version === "1") {
+    if (metadata.status === "unknown") {
+      diagnostics.push(
+        diagnostic(
+          "status.v1_unknown_forbidden",
+          "metadata.status",
+          "unknown status requires paper schema version 2",
+        ),
+      );
+    } else if (isRecord(metadata.status)) {
+      diagnostics.push(
+        diagnostic(
+          "status.v1_scalar_required",
+          "metadata.status",
+          "schema version 1 status must be a scalar value",
+        ),
+      );
+    }
+    return;
+  }
+  if (metadata.schema_version !== "2") {
+    return;
+  }
+  if (!isRecord(metadata.status)) {
+    diagnostics.push(
+      diagnostic(
+        "status.v2_observation_required",
+        "metadata.status",
+        "schema version 2 status must include its determination and confidence",
+      ),
+    );
+    return;
+  }
+  const status = metadata.status;
+  if (
+    (status.value === "unknown") !==
+    (status.determination === "unverified")
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "status.invalid_unverified_value",
+        "metadata.status",
+        "unknown status and unverified determination must be used together",
+      ),
+    );
+  }
+  if (status.determination === "inferred") {
+    if (!Array.isArray(status.evidence) || status.evidence.length === 0) {
+      diagnostics.push(
+        diagnostic(
+          "status.inferred_evidence_required",
+          "metadata.status.evidence",
+          "inferred status requires at least one evidence reference",
+        ),
+      );
+    }
+    if (typeof status.observed_at !== "string") {
+      diagnostics.push(
+        diagnostic(
+          "status.inferred_observed_at_required",
+          "metadata.status.observed_at",
+          "inferred status requires an observation timestamp",
+        ),
+      );
+    }
+  }
+  if (
+    typeof status.observed_at === "string" &&
+    !isUtcTimestamp(status.observed_at)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "status.invalid_observed_at",
+        "metadata.status.observed_at",
+        "status observation timestamps must use UTC RFC 3339 notation",
+      ),
+    );
+  }
+  if (Array.isArray(status.evidence)) {
+    const urls = new Set<string>();
+    status.evidence.forEach((item, index) => {
+      if (!isRecord(item)) {
+        return;
+      }
+      if (typeof item.url === "string") {
+        if (!isHttpUrl(item.url)) {
+          diagnostics.push(
+            diagnostic(
+              "value.invalid_url",
+              `metadata.status.evidence[${index}].url`,
+              "URL must be an absolute HTTP or HTTPS URL",
+            ),
+          );
+        }
+        if (urls.has(item.url)) {
+          diagnostics.push(
+            diagnostic(
+              "status.duplicate_evidence",
+              `metadata.status.evidence[${index}].url`,
+              "status evidence URLs must be unique",
+            ),
+          );
+        }
+        urls.add(item.url);
+      }
+    });
+  }
 }
 
 function validateTopics(
@@ -412,6 +637,17 @@ function isIsoDate(value: string): boolean {
     31,
   ][month];
   return maximumDay !== undefined && day >= 1 && day <= maximumDay;
+}
+
+function isUtcTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) {
+    return false;
+  }
+  const timestamp = new Date(value);
+  return (
+    !Number.isNaN(timestamp.valueOf()) &&
+    timestamp.toISOString().slice(0, 19) === value.slice(0, 19)
+  );
 }
 
 function isLevelOneHeading(token: Token): token is Tokens.Heading {

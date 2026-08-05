@@ -144,14 +144,18 @@ function isFileExistsError(error: unknown): error is NodeJS.ErrnoException {
 function renderDraft(scan: ScanManifest, title?: string): string {
   const productName = title ?? "";
   const frontMatter = [
-    'schema_version: "1"',
+    'schema_version: "2"',
     `title: ${JSON.stringify(productName)}`,
     `product_name: ${JSON.stringify(productName)}`,
     "scope:",
     '  kind: "product"',
     'summary: ""',
     "authors: []",
-    'status: "concept"',
+    "writers: []",
+    "status:",
+    '  value: "unknown"',
+    '  determination: "unverified"',
+    '  confidence: "low"',
     "topics: []",
   ].join("\n");
   const sections = SECTION_PROMPTS.map(

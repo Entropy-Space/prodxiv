@@ -18,6 +18,11 @@ const GITHUB_API_VERSION = "2022-11-28";
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const MAX_REPOSITORY_NAME_LENGTH = 100;
 const MAX_REF_LENGTH = 255;
+const MAX_RELEASE_COUNT = 10;
+const MAX_RELEASE_RESPONSE_BYTES = 512 * 1024;
+const MAX_RELEASE_NOTES_BYTES = 16 * 1024;
+const UNSAFE_TEXT_CONTROL_PATTERN =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 const AGENT_INSTRUCTION_FILENAMES = new Set([
   "agents.md",
@@ -130,6 +135,27 @@ export interface GitHubSourceResult {
   homepage_url?: string;
   files: GitHubSourceFile[];
   selection: GitHubSourceSelection;
+}
+
+export interface GitHubRelease {
+  tag_name: string;
+  name?: string;
+  prerelease: boolean;
+  published_at: string;
+  url: string;
+  notes?: string;
+  notes_sha256?: string;
+  notes_truncated?: boolean;
+}
+
+export interface GitHubReleaseSnapshot {
+  canonical_url: string;
+  retrieved_at: string;
+  releases: GitHubRelease[];
+}
+
+export interface FetchGitHubReleasesOptions extends GitHubSourceClientOptions {
+  repository_url: string;
 }
 
 export interface InspectGitHubRepositoryOptions extends GitHubSourceClientOptions {
@@ -408,6 +434,60 @@ export async function fetchGitHubSource(
   }
 
   return fetchGitHubSourceFiles(snapshot, selection, options);
+}
+
+/**
+ * Captures a bounded snapshot of public GitHub release metadata and notes.
+ * Draft releases are intentionally excluded because anonymous callers cannot
+ * observe them consistently. The snapshot is suitable for deterministic
+ * status inference and exact-excerpt evidence validation.
+ */
+export async function fetchGitHubReleases(
+  options: FetchGitHubReleasesOptions,
+): Promise<GitHubReleaseSnapshot> {
+  const repository = canonicalizeGitHubRepositoryUrl(options.repository_url);
+  const fetch = options.fetch ?? defaultFetch;
+  const value = await readJson(
+    fetch,
+    `${repositoryApiUrl(repository)}/releases?per_page=${MAX_RELEASE_COUNT}&page=1`,
+    "release snapshot",
+    MAX_RELEASE_RESPONSE_BYTES,
+  );
+  if (!Array.isArray(value) || value.length > MAX_RELEASE_COUNT) {
+    throw new GitHubSourceError(
+      "invalid_github_response",
+      "GitHub release response was not a bounded array",
+    );
+  }
+
+  const releases = value
+    .map((release, index) => parseRelease(release, repository, index))
+    .filter((release): release is GitHubRelease => release !== undefined)
+    .sort(
+      (left, right) =>
+        right.published_at.localeCompare(left.published_at) ||
+        left.tag_name.localeCompare(right.tag_name),
+    );
+  const tags = new Set<string>();
+  const urls = new Set<string>();
+  for (const release of releases) {
+    const tag = release.tag_name.toLowerCase();
+    const url = release.url.toLowerCase();
+    if (tags.has(tag) || urls.has(url)) {
+      throw new GitHubSourceError(
+        "invalid_github_response",
+        "GitHub release response contained duplicate releases",
+      );
+    }
+    tags.add(tag);
+    urls.add(url);
+  }
+
+  return {
+    canonical_url: repository.canonical_url,
+    retrieved_at: (options.now ?? (() => new Date()))().toISOString(),
+    releases,
+  };
 }
 
 async function selectDefaultGitHubSourcePathsWithReadmeLinks(
@@ -1001,6 +1081,144 @@ function validateRepositoryMetadata(value: unknown): string {
     );
   }
   return validateRef(value.default_branch);
+}
+
+function parseRelease(
+  value: unknown,
+  repository: CanonicalGitHubRepository,
+  index: number,
+): GitHubRelease | undefined {
+  if (!isRecord(value) || typeof value.draft !== "boolean") {
+    throw invalidRelease(index);
+  }
+  if (value.draft) {
+    return undefined;
+  }
+  if (
+    typeof value.prerelease !== "boolean" ||
+    typeof value.tag_name !== "string" ||
+    (value.name !== null && typeof value.name !== "string") ||
+    (value.body !== null && typeof value.body !== "string") ||
+    typeof value.published_at !== "string" ||
+    typeof value.html_url !== "string"
+  ) {
+    throw invalidRelease(index);
+  }
+  const tagName = boundedReleaseText(value.tag_name, 255, index);
+  const name =
+    value.name === null || value.name.length === 0
+      ? undefined
+      : boundedReleaseText(value.name, 500, index);
+  const publishedAt = normalizeReleaseTimestamp(value.published_at, index);
+  const url = normalizeReleaseUrl(value.html_url, repository, index);
+  const notes =
+    value.body === null || value.body.length === 0 ? undefined : value.body;
+  const boundedNotes =
+    notes === undefined ? undefined : truncateReleaseNotes(notes);
+  if (
+    boundedNotes !== undefined &&
+    UNSAFE_TEXT_CONTROL_PATTERN.test(boundedNotes)
+  ) {
+    throw invalidRelease(index);
+  }
+
+  return {
+    tag_name: tagName,
+    ...(name === undefined ? {} : { name }),
+    prerelease: value.prerelease,
+    published_at: publishedAt,
+    url,
+    ...(boundedNotes === undefined ? {} : { notes: boundedNotes }),
+    ...(boundedNotes === undefined
+      ? {}
+      : { notes_sha256: sha256Text(boundedNotes) }),
+    ...(notes !== undefined && notes !== boundedNotes
+      ? { notes_truncated: true }
+      : {}),
+  };
+}
+
+function truncateReleaseNotes(value: string): string {
+  if (Buffer.byteLength(value) <= MAX_RELEASE_NOTES_BYTES) {
+    return value;
+  }
+  let byteCount = 0;
+  let end = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character);
+    if (byteCount + characterBytes > MAX_RELEASE_NOTES_BYTES) {
+      break;
+    }
+    byteCount += characterBytes;
+    end += character.length;
+  }
+  return value.slice(0, end);
+}
+
+function boundedReleaseText(
+  value: string,
+  maximumLength: number,
+  index: number,
+): string {
+  if (
+    value.length === 0 ||
+    value.length > maximumLength ||
+    value !== value.trim() ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw invalidRelease(index);
+  }
+  return value;
+}
+
+function normalizeReleaseTimestamp(value: string, index: number): string {
+  const timestamp = new Date(value);
+  if (
+    Number.isNaN(timestamp.valueOf()) ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ||
+    timestamp.toISOString().slice(0, 19) !== value.slice(0, 19)
+  ) {
+    throw invalidRelease(index);
+  }
+  return timestamp.toISOString();
+}
+
+function normalizeReleaseUrl(
+  value: string,
+  repository: CanonicalGitHubRepository,
+  index: number,
+): string {
+  try {
+    const url = new URL(value);
+    const prefix = `/${repository.owner}/${repository.repository}/releases/tag/`;
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "github.com" ||
+      url.port.length > 0 ||
+      url.username.length > 0 ||
+      url.password.length > 0 ||
+      url.search.length > 0 ||
+      url.hash.length > 0 ||
+      !url.pathname.toLowerCase().startsWith(prefix.toLowerCase()) ||
+      url.pathname.length <= prefix.length
+    ) {
+      throw new Error("invalid release URL");
+    }
+    return url.toString();
+  } catch {
+    throw invalidRelease(index);
+  }
+}
+
+function invalidRelease(index: number): GitHubSourceError {
+  return new GitHubSourceError(
+    "invalid_github_response",
+    `GitHub release response contained an invalid item at index ${index}`,
+  );
+}
+
+function sha256Text(value: string): string {
+  return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
 function homepageFromMetadata(value: unknown): { homepage_url?: string } {

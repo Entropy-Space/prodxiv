@@ -8,8 +8,10 @@ import {
   validateScanManifest,
 } from "@prodxiv/paperbot-core";
 import {
+  canonicalizeGitHubRepositoryUrl,
   inspectGitRepository,
   scanRepository,
+  type GitHubReleaseSnapshot,
   type GitHubSourceResult,
 } from "@prodxiv/paperbot-source";
 import {
@@ -19,15 +21,21 @@ import {
   writeJsonArtifact,
   writeTextArtifact,
 } from "./artifacts.ts";
-import type { AgentSource, AgentSourceFile } from "./types.ts";
+import type {
+  AgentGitHubRelease,
+  AgentSource,
+  AgentSourceFile,
+} from "./types.ts";
 import { normalizeAnonymousHttpUrl } from "./input.ts";
 
 const MAX_AGENT_FILE_BYTES = 48 * 1024;
 const MAX_AGENT_TOTAL_BYTES = 384 * 1024;
 const MAX_AGENT_SOURCE_FILES = 30;
-const MAX_SOURCE_ARTIFACT_BYTES = 256 * 1024;
+const MAX_SOURCE_ARTIFACT_BYTES = 512 * 1024;
 const MAX_SCAN_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const UNSAFE_TEXT_CONTROL_PATTERN =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 const FILE_TYPE_LIMITS: Readonly<Record<ScanFileType, number>> = {
   documentation: 6,
@@ -94,6 +102,7 @@ export async function acquireLocalSource(
 
 export function sourceFromGitHubResult(
   result: GitHubSourceResult,
+  releaseSnapshot?: GitHubReleaseSnapshot,
 ): AgentSource {
   const files = result.files
     .filter((file) => !isSensitivePath(file.path))
@@ -109,6 +118,21 @@ export function sourceFromGitHubResult(
       ExitCode.scan,
     );
   }
+  if (
+    releaseSnapshot !== undefined &&
+    releaseSnapshot.canonical_url.toLowerCase() !==
+      result.canonical_url.toLowerCase()
+  ) {
+    throw new PaperbotError(
+      "GitHub release snapshot does not match the acquired repository",
+      ExitCode.scan,
+    );
+  }
+  const releases = releaseSnapshot?.releases.map((release, index) => ({
+    ...release,
+    source_id: `github_release:${(index + 1).toString().padStart(3, "0")}`,
+    source_path: `github-releases/release-${(index + 1).toString().padStart(3, "0")}.md`,
+  }));
   return {
     kind: "github",
     canonical_url: result.canonical_url,
@@ -121,6 +145,14 @@ export function sourceFromGitHubResult(
     ...(result.homepage_url === undefined
       ? {}
       : { homepage_url: result.homepage_url }),
+    ...(releaseSnapshot === undefined
+      ? {}
+      : {
+          github_releases: {
+            retrieved_at: releaseSnapshot.retrieved_at,
+            releases: releases ?? [],
+          },
+        }),
     files,
     scan_manifest: {
       schema_version: "1",
@@ -142,7 +174,7 @@ export async function writeSourceArtifacts(
     await writeTextArtifact(runPath, `source/${file.path}`, file.content);
   }
   const sourcePath = await writeJsonArtifact(runPath, "source.json", {
-    schema_version: "1",
+    schema_version: "2",
     kind: source.kind,
     ...(source.canonical_url === undefined
       ? {}
@@ -159,6 +191,9 @@ export async function writeSourceArtifacts(
     ...(source.homepage_url === undefined
       ? {}
       : { homepage_url: source.homepage_url }),
+    ...(source.github_releases === undefined
+      ? {}
+      : { github_releases: source.github_releases }),
     files: source.files.map((file) => ({
       path: file.path,
       file_type: file.file_type,
@@ -215,7 +250,7 @@ export async function readSourceArtifact(
   const retrievedAt = rawSource.retrieved_at;
   const dirty = rawSource.is_dirty;
   if (
-    rawSource.schema_version !== "1" ||
+    rawSource.schema_version !== "2" ||
     (kind !== "github" && kind !== "local") ||
     typeof revision !== "string" ||
     typeof retrievedAt !== "string" ||
@@ -228,6 +263,8 @@ export async function readSourceArtifact(
       typeof rawSource.requested_ref !== "string") ||
     (rawSource.homepage_url !== undefined &&
       typeof rawSource.homepage_url !== "string") ||
+    (rawSource.github_releases !== undefined &&
+      !isRecord(rawSource.github_releases)) ||
     !Array.isArray(rawSource.files) ||
     rawSource.files.length === 0 ||
     rawSource.files.length > MAX_AGENT_SOURCE_FILES
@@ -250,17 +287,13 @@ export async function readSourceArtifact(
       ExitCode.io,
     );
   }
+  const canonicalUrl =
+    typeof rawSource.canonical_url === "string"
+      ? readStoredUrl(rawSource.canonical_url, "canonical_url", securedRunPath)
+      : undefined;
   const source: AgentSource = {
     kind,
-    ...(typeof rawSource.canonical_url === "string"
-      ? {
-          canonical_url: readStoredUrl(
-            rawSource.canonical_url,
-            "canonical_url",
-            securedRunPath,
-          ),
-        }
-      : {}),
+    ...(canonicalUrl === undefined ? {} : { canonical_url: canonicalUrl }),
     ...(typeof rawSource.local_path === "string"
       ? { local_path: rawSource.local_path }
       : {}),
@@ -279,6 +312,15 @@ export async function readSourceArtifact(
           ),
         }
       : {}),
+    ...(rawSource.github_releases === undefined
+      ? {}
+      : {
+          github_releases: readStoredGitHubReleases(
+            rawSource.github_releases,
+            canonicalUrl,
+            securedRunPath,
+          ),
+        }),
     files,
     scan_manifest: scanValidation.manifest,
   };
@@ -397,6 +439,124 @@ export const agent_source_limits = {
   max_file_bytes: MAX_AGENT_FILE_BYTES,
   max_total_bytes: MAX_AGENT_TOTAL_BYTES,
 };
+
+function readStoredGitHubReleases(
+  value: Record<string, unknown>,
+  canonicalUrl: string | undefined,
+  runPath: string,
+): NonNullable<AgentSource["github_releases"]> {
+  if (
+    canonicalUrl === undefined ||
+    typeof value.retrieved_at !== "string" ||
+    !Array.isArray(value.releases) ||
+    value.releases.length > 10 ||
+    Object.keys(value).some(
+      (field) => !["retrieved_at", "releases"].includes(field),
+    )
+  ) {
+    throw invalidSourceArtifact(runPath, "invalid GitHub release snapshot");
+  }
+  return {
+    retrieved_at: readStoredTimestamp(value.retrieved_at, runPath),
+    releases: value.releases.map((release, index) =>
+      readStoredGitHubRelease(release, index, canonicalUrl, runPath),
+    ),
+  };
+}
+
+function readStoredGitHubRelease(
+  value: unknown,
+  index: number,
+  canonicalUrl: string,
+  runPath: string,
+): AgentGitHubRelease {
+  if (!isRecord(value)) {
+    throw invalidSourceArtifact(runPath, `invalid GitHub release ${index + 1}`);
+  }
+  const allowedFields = new Set([
+    "tag_name",
+    "name",
+    "prerelease",
+    "published_at",
+    "url",
+    "notes",
+    "notes_sha256",
+    "notes_truncated",
+    "source_id",
+    "source_path",
+  ]);
+  const expectedSourceId = `github_release:${(index + 1)
+    .toString()
+    .padStart(3, "0")}`;
+  const expectedSourcePath = `github-releases/release-${(index + 1)
+    .toString()
+    .padStart(3, "0")}.md`;
+  if (
+    Object.keys(value).some((field) => !allowedFields.has(field)) ||
+    !isBoundedSingleLine(value.tag_name, 255) ||
+    (value.name !== undefined && !isBoundedSingleLine(value.name, 500)) ||
+    typeof value.prerelease !== "boolean" ||
+    typeof value.published_at !== "string" ||
+    typeof value.url !== "string" ||
+    (value.notes !== undefined &&
+      (typeof value.notes !== "string" ||
+        value.notes.length === 0 ||
+        Buffer.byteLength(value.notes) > 16 * 1024 ||
+        UNSAFE_TEXT_CONTROL_PATTERN.test(value.notes))) ||
+    (value.notes_sha256 !== undefined &&
+      (typeof value.notes_sha256 !== "string" ||
+        !/^[0-9a-f]{64}$/.test(value.notes_sha256))) ||
+    (value.notes_truncated !== undefined && value.notes_truncated !== true) ||
+    value.source_id !== expectedSourceId ||
+    value.source_path !== expectedSourcePath
+  ) {
+    throw invalidSourceArtifact(runPath, `invalid GitHub release ${index + 1}`);
+  }
+  const notes = value.notes as string | undefined;
+  const notesSha256 = value.notes_sha256 as string | undefined;
+  const notesTruncated = value.notes_truncated as true | undefined;
+  const url = readStoredUrl(value.url, `GitHub release ${index + 1}`, runPath);
+  const expectedUrlPrefix = `${canonicalUrl}/releases/tag/`;
+  if (
+    (notes === undefined) !== (notesSha256 === undefined) ||
+    (notesTruncated === true && notes === undefined) ||
+    (notes !== undefined && sha256(notes) !== notesSha256) ||
+    !url.toLowerCase().startsWith(expectedUrlPrefix.toLowerCase()) ||
+    url.length <= expectedUrlPrefix.length
+  ) {
+    throw invalidSourceArtifact(
+      runPath,
+      `GitHub release provenance is invalid at index ${index}`,
+    );
+  }
+  return {
+    tag_name: value.tag_name,
+    ...(value.name === undefined ? {} : { name: value.name }),
+    prerelease: value.prerelease,
+    published_at: readStoredTimestamp(value.published_at, runPath),
+    url,
+    ...(notes === undefined ? {} : { notes }),
+    ...(notesSha256 === undefined ? {} : { notes_sha256: notesSha256 }),
+    ...(notesTruncated === undefined
+      ? {}
+      : { notes_truncated: notesTruncated }),
+    source_id: expectedSourceId,
+    source_path: expectedSourcePath,
+  };
+}
+
+function isBoundedSingleLine(
+  value: unknown,
+  maximumLength: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximumLength &&
+    value === value.trim() &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
 
 async function readStoredSourceFile(
   runPath: string,
@@ -573,7 +733,11 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
     source.files.length > MAX_AGENT_SOURCE_FILES ||
     source.scan_manifest.repository.revision !== source.resolved_revision ||
     source.scan_manifest.repository.is_dirty !== source.is_dirty ||
-    (source.kind === "github" && source.is_dirty)
+    (source.kind === "github" &&
+      (source.is_dirty ||
+        source.github_releases === undefined ||
+        !isCanonicalGitHubSourceUrl(source.canonical_url))) ||
+    (source.kind === "local" && source.github_releases !== undefined)
   ) {
     throw invalidSourceArtifact(
       runPath,
@@ -612,6 +776,47 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
       runPath,
       "source snapshot exceeds its byte limit",
     );
+  }
+
+  if (source.github_releases !== undefined) {
+    if (source.github_releases.retrieved_at !== source.retrieved_at) {
+      throw invalidSourceArtifact(
+        runPath,
+        "GitHub release retrieval time does not match the source snapshot",
+      );
+    }
+    let previousPublishedAt: string | undefined;
+    let releaseNoteBytes = 0;
+    for (const release of source.github_releases.releases) {
+      if (
+        previousPublishedAt !== undefined &&
+        release.published_at > previousPublishedAt
+      ) {
+        throw invalidSourceArtifact(
+          runPath,
+          "GitHub releases are not in deterministic publication order",
+        );
+      }
+      previousPublishedAt = release.published_at;
+      releaseNoteBytes += Buffer.byteLength(release.notes ?? "");
+    }
+    if (releaseNoteBytes > 10 * 16 * 1024) {
+      throw invalidSourceArtifact(
+        runPath,
+        "GitHub release notes exceed their byte limit",
+      );
+    }
+  }
+}
+
+function isCanonicalGitHubSourceUrl(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  try {
+    return canonicalizeGitHubRepositoryUrl(value).canonical_url === value;
+  } catch {
+    return false;
   }
 }
 

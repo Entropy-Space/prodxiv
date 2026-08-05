@@ -7,7 +7,8 @@ use url::Url;
 use utoipa::ToSchema;
 
 use crate::{
-    PaperDocument, PaperScopeKind, REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION,
+    LEGACY_SCHEMA_VERSION, PaperDocument, PaperScopeKind, PaperStatus, ProductStatus,
+    REQUIRED_SECTIONS, SUPPORTED_SCHEMA_VERSION, StatusDetermination, WriterKind,
     canonicalize_paper_id,
 };
 
@@ -63,6 +64,29 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
         );
     }
     for (index, author) in metadata.authors.iter().enumerate() {
+        if metadata.schema_version == SUPPORTED_SCHEMA_VERSION && author.kind.is_none() {
+            error(
+                &mut diagnostics,
+                "authors.kind_required",
+                &format!("metadata.authors[{index}].kind"),
+                "schema version 2 authors must identify whether they are a person or organization",
+            );
+        }
+        if let Some(id) = &author.id {
+            require_nonempty(
+                &format!("metadata.authors[{index}].id"),
+                id,
+                &mut diagnostics,
+            );
+            if !is_namespaced_id(id) {
+                error(
+                    &mut diagnostics,
+                    "authors.invalid_id",
+                    &format!("metadata.authors[{index}].id"),
+                    "author IDs must use a namespaced value such as `github:owner`",
+                );
+            }
+        }
         require_nonempty(
             &format!("metadata.authors[{index}].name"),
             &author.name,
@@ -76,6 +100,8 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
             );
         }
     }
+    validate_writers_and_contact(paper, &mut diagnostics);
+    validate_status(paper, &mut diagnostics);
 
     if metadata.topics.is_empty() {
         error(
@@ -162,6 +188,14 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
     }
 
     if profile == ValidationProfile::Submission {
+        if metadata.schema_version == LEGACY_SCHEMA_VERSION {
+            error(
+                &mut diagnostics,
+                "submission.current_schema_required",
+                "metadata.schema_version",
+                "schema version 1 papers remain readable but new submissions must use schema version 2",
+            );
+        }
         if metadata.paper_id.is_some() {
             error(
                 &mut diagnostics,
@@ -372,15 +406,194 @@ fn validate_sections(markdown: &str, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn require_supported_schema(schema_version: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if schema_version != SUPPORTED_SCHEMA_VERSION {
+    if schema_version != LEGACY_SCHEMA_VERSION && schema_version != SUPPORTED_SCHEMA_VERSION {
         error(
             diagnostics,
             "schema.unsupported_version",
             "schema_version",
             &format!(
-                "unsupported schema version `{schema_version}`; expected `{SUPPORTED_SCHEMA_VERSION}`"
+                "unsupported schema version `{schema_version}`; expected `{LEGACY_SCHEMA_VERSION}` or `{SUPPORTED_SCHEMA_VERSION}`"
             ),
         );
+    }
+}
+
+fn validate_writers_and_contact(paper: &PaperDocument, diagnostics: &mut Vec<Diagnostic>) {
+    let metadata = &paper.metadata;
+    if metadata.schema_version == LEGACY_SCHEMA_VERSION {
+        if !metadata.writers.is_empty() {
+            error(
+                diagnostics,
+                "schema.v1_writers_forbidden",
+                "metadata.writers",
+                "writers require paper schema version 2",
+            );
+        }
+        if metadata.communication_email.is_some() {
+            error(
+                diagnostics,
+                "schema.v1_communication_email_forbidden",
+                "metadata.communication_email",
+                "communication_email requires paper schema version 2",
+            );
+        }
+        return;
+    }
+    if metadata.schema_version != SUPPORTED_SCHEMA_VERSION {
+        return;
+    }
+    if metadata.writers.is_empty() {
+        error(
+            diagnostics,
+            "writers.required",
+            "metadata.writers",
+            "schema version 2 papers require at least one writer",
+        );
+    }
+    for (index, writer) in metadata.writers.iter().enumerate() {
+        require_nonempty(
+            &format!("metadata.writers[{index}].name"),
+            &writer.name,
+            diagnostics,
+        );
+        match writer.kind {
+            WriterKind::Human if writer.model.is_some() => error(
+                diagnostics,
+                "writers.human_model_forbidden",
+                &format!("metadata.writers[{index}].model"),
+                "human writers must not specify a model",
+            ),
+            WriterKind::Agent
+                if writer
+                    .model
+                    .as_ref()
+                    .is_none_or(|model| model.trim().is_empty()) =>
+            {
+                error(
+                    diagnostics,
+                    "writers.agent_model_required",
+                    &format!("metadata.writers[{index}].model"),
+                    "agent writers must identify their model",
+                );
+            }
+            WriterKind::Human | WriterKind::Agent => {}
+        }
+    }
+    if let Some(email) = &metadata.communication_email {
+        if !metadata
+            .writers
+            .iter()
+            .any(|writer| writer.kind == WriterKind::Human)
+        {
+            error(
+                diagnostics,
+                "communication_email.human_writer_required",
+                "metadata.communication_email",
+                "communication_email is available only when a human writer is credited",
+            );
+        }
+        if !is_email(email) {
+            error(
+                diagnostics,
+                "communication_email.invalid",
+                "metadata.communication_email",
+                "communication_email must be a valid email address",
+            );
+        }
+    }
+}
+
+fn validate_status(paper: &PaperDocument, diagnostics: &mut Vec<Diagnostic>) {
+    let metadata = &paper.metadata;
+    match (&metadata.schema_version[..], &metadata.status) {
+        (LEGACY_SCHEMA_VERSION, PaperStatus::Legacy(ProductStatus::Unknown)) => error(
+            diagnostics,
+            "status.v1_unknown_forbidden",
+            "metadata.status",
+            "unknown status requires paper schema version 2",
+        ),
+        (LEGACY_SCHEMA_VERSION, PaperStatus::Legacy(_)) => {}
+        (LEGACY_SCHEMA_VERSION, PaperStatus::Observed(_)) => error(
+            diagnostics,
+            "status.v1_scalar_required",
+            "metadata.status",
+            "schema version 1 status must be a scalar value",
+        ),
+        (SUPPORTED_SCHEMA_VERSION, PaperStatus::Legacy(_)) => error(
+            diagnostics,
+            "status.v2_observation_required",
+            "metadata.status",
+            "schema version 2 status must include its determination and confidence",
+        ),
+        (SUPPORTED_SCHEMA_VERSION, PaperStatus::Observed(status)) => {
+            let is_unknown = status.value == ProductStatus::Unknown;
+            let is_unverified = status.determination == StatusDetermination::Unverified;
+            if is_unknown != is_unverified {
+                error(
+                    diagnostics,
+                    "status.invalid_unverified_value",
+                    "metadata.status",
+                    "unknown status and unverified determination must be used together",
+                );
+            }
+            if status.determination == StatusDetermination::Inferred {
+                if status.evidence.is_empty() {
+                    error(
+                        diagnostics,
+                        "status.inferred_evidence_required",
+                        "metadata.status.evidence",
+                        "inferred status requires at least one evidence reference",
+                    );
+                }
+                if status.observed_at.is_none() {
+                    error(
+                        diagnostics,
+                        "status.inferred_observed_at_required",
+                        "metadata.status.observed_at",
+                        "inferred status requires an observation timestamp",
+                    );
+                }
+            }
+            if let Some(observed_at) = &status.observed_at
+                && !is_utc_timestamp(observed_at)
+            {
+                error(
+                    diagnostics,
+                    "status.invalid_observed_at",
+                    "metadata.status.observed_at",
+                    "status observation timestamps must use UTC RFC 3339 notation",
+                );
+            }
+            let mut evidence_urls = HashSet::new();
+            for (index, evidence) in status.evidence.iter().enumerate() {
+                validate_http_url(
+                    &format!("metadata.status.evidence[{index}].url"),
+                    &evidence.url,
+                    diagnostics,
+                );
+                if !evidence_urls.insert(&evidence.url) {
+                    error(
+                        diagnostics,
+                        "status.duplicate_evidence",
+                        &format!("metadata.status.evidence[{index}].url"),
+                        "status evidence URLs must be unique",
+                    );
+                }
+                if evidence
+                    .tag
+                    .as_ref()
+                    .is_some_and(|tag| tag.trim().is_empty())
+                {
+                    error(
+                        diagnostics,
+                        "status.invalid_evidence_tag",
+                        &format!("metadata.status.evidence[{index}].tag"),
+                        "status evidence tags must not be empty",
+                    );
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -425,6 +638,79 @@ fn is_slug(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn is_namespaced_id(value: &str) -> bool {
+    let Some((provider, identity)) = value.split_once(':') else {
+        return false;
+    };
+    !provider.is_empty()
+        && provider.bytes().enumerate().all(|(index, byte)| {
+            if index == 0 {
+                byte.is_ascii_lowercase()
+            } else {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+            }
+        })
+        && !identity.is_empty()
+        && identity == identity.trim()
+        && !identity.chars().any(char::is_control)
+}
+
+fn is_email(value: &str) -> bool {
+    if value != value.trim() || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let mut parts = value.split('@');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(local), Some(domain), None)
+            if !local.is_empty()
+                && !domain.is_empty()
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+    )
+}
+
+fn is_utc_timestamp(value: &str) -> bool {
+    let Some(value) = value.strip_suffix('Z') else {
+        return false;
+    };
+    let Some((date, time)) = value.split_once('T') else {
+        return false;
+    };
+    if !is_iso_date(date) {
+        return false;
+    }
+    let mut time_parts = time.split(':');
+    let (Some(hour), Some(minute), Some(second), None) = (
+        time_parts.next(),
+        time_parts.next(),
+        time_parts.next(),
+        time_parts.next(),
+    ) else {
+        return false;
+    };
+    let (second, fraction) = second
+        .split_once('.')
+        .map_or((second, None), |(second, fraction)| {
+            (second, Some(fraction))
+        });
+    if fraction.is_some_and(|fraction| {
+        fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    }) {
+        return false;
+    }
+    matches!(
+        (
+            hour.parse::<u8>(),
+            minute.parse::<u8>(),
+            second.parse::<u8>()
+        ),
+        (Ok(0..=23), Ok(0..=59), Ok(0..=59))
+    ) && hour.len() == 2
+        && minute.len() == 2
+        && second.len() == 2
 }
 
 fn is_iso_date(value: &str) -> bool {

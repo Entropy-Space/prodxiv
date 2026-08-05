@@ -35,4 +35,46 @@ describe("paperMetadataSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  test("accepts schema-version-2 attribution and observed status", () => {
+    const result = paperMetadataSchema.parse({
+      ...canonicalMetadata,
+      schema_version: "2",
+      authors: [
+        {
+          id: "github:example",
+          kind: "organization",
+          name: "example",
+          url: "https://github.com/example",
+        },
+      ],
+      writers: [
+        {
+          kind: "agent",
+          name: "paperbot",
+          model: "deepseek-v4-flash",
+        },
+      ],
+      status: {
+        value: "launched",
+        determination: "inferred",
+        confidence: "high",
+        observed_at: "2026-08-05T00:00:00Z",
+        evidence: [
+          {
+            kind: "github_release",
+            url: "https://github.com/example/product/releases/tag/v1.0.0",
+            tag: "v1.0.0",
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toEqual(
+      expect.objectContaining({
+        value: "launched",
+        determination: "inferred",
+      }),
+    );
+  });
 });

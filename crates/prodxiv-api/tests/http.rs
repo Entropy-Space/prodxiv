@@ -12,7 +12,8 @@ use axum::{
 };
 use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{
-    PaperDocument, PublicationIdentity, PublishedPaper, PublishedPaperSummary, prepare_publication,
+    PaperDocument, PaperStatus, ProductStatus, PublicationIdentity, PublishedPaper,
+    PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
     GitHubTrendingEntry, GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector,
@@ -240,6 +241,22 @@ fn submission_markdown() -> String {
     paper.metadata.revision = None;
     let metadata =
         serde_yaml::to_string(&paper.metadata).expect("submission metadata should serialize");
+    format!("---\n{metadata}---\n{}", paper.markdown)
+}
+
+fn legacy_submission_markdown() -> String {
+    let mut paper = PaperDocument::from_markdown(&submission_markdown())
+        .expect("submission paper should parse");
+    paper.metadata.schema_version = "1".to_owned();
+    paper.metadata.writers.clear();
+    paper.metadata.communication_email = None;
+    for author in &mut paper.metadata.authors {
+        author.id = None;
+        author.kind = None;
+    }
+    paper.metadata.status = PaperStatus::Legacy(ProductStatus::Concept);
+    let metadata =
+        serde_yaml::to_string(&paper.metadata).expect("legacy metadata should serialize");
     format!("---\n{metadata}---\n{}", paper.markdown)
 }
 
@@ -710,6 +727,33 @@ async fn rejects_server_owned_submission_metadata() {
             .expect("diagnostics should be an array")
             .iter()
             .any(|diagnostic| diagnostic["code"] == "submission.paper_id_forbidden")
+    );
+}
+
+#[tokio::test]
+async fn rejects_new_legacy_schema_submissions() {
+    let response = app(Arc::new(FakeStore::default()))
+        .oneshot(
+            Request::post("/v1/papers")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "paperbot.test.legacy")
+                .body(Body::from(
+                    json!({ "source_markdown": legacy_submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json_body(response).await;
+    assert!(
+        body["error"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "submission.current_schema_required")
     );
 }
 

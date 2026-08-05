@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-pub const SUPPORTED_SCHEMA_VERSION: &str = "1";
+pub const LEGACY_SCHEMA_VERSION: &str = "1";
+pub const SUPPORTED_SCHEMA_VERSION: &str = "2";
 pub const PAPER_ID_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 pub const PAPER_ID_SUFFIX_LENGTH: usize = 6;
 pub const PRODUCT_ID_PREFIX: &str = "prodxiv-product:";
@@ -60,7 +61,7 @@ impl PaperDocument {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PaperMetadata {
-    #[schemars(regex(pattern = r"^1$"))]
+    #[schemars(regex(pattern = r"^(?:1|2)$"))]
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(regex(pattern = r"^prodxiv:[0-9]{4}\.[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{6}$"))]
@@ -72,6 +73,11 @@ pub struct PaperMetadata {
     pub summary: String,
     #[schemars(length(min = 1))]
     pub authors: Vec<Author>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writers: Vec<PaperWriter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(email)]
+    pub communication_email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,7 +92,7 @@ pub struct PaperMetadata {
     pub product_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<PaperScope>,
-    pub status: ProductStatus,
+    pub status: PaperStatus,
     #[schemars(length(min = 1), inner(regex(pattern = r"^[a-z0-9]+(?:_[a-z0-9]+)*$")))]
     pub topics: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +111,11 @@ pub struct PaperMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Author {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(regex(pattern = r"^[a-z][a-z0-9_-]*:[^\s:][^\s]*$"))]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AuthorKind>,
     #[schemars(length(min = 1))]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,12 +127,93 @@ pub struct Author {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum AuthorKind {
+    Person,
+    Organization,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PaperWriter {
+    pub kind: WriterKind,
+    #[schemars(length(min = 1))]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1))]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WriterKind {
+    Human,
+    Agent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(untagged)]
+pub enum PaperStatus {
+    Legacy(ProductStatus),
+    Observed(ProductStatusObservation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ProductStatus {
+    Unknown,
     Concept,
     PrivateBeta,
     PublicBeta,
     Launched,
     Discontinued,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProductStatusObservation {
+    pub value: ProductStatus,
+    pub determination: StatusDetermination,
+    pub confidence: StatusConfidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(regex(
+        pattern = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z$"
+    ))]
+    pub observed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ProductStatusEvidence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusDetermination {
+    Declared,
+    Inferred,
+    Unverified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusConfidence {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProductStatusEvidence {
+    pub kind: ProductStatusEvidenceKind,
+    #[schemars(url)]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1))]
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductStatusEvidenceKind {
+    GithubRelease,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

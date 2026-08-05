@@ -1,13 +1,21 @@
 ---
-schema_version: "1"
+schema_version: "2"
 title: "Valid fixture product"
 product_name: "Valid fixture product"
 scope:
   kind: product
 summary: "A complete draft fixture for Paperbot validation."
 authors:
-  - name: "Fixture author"
-status: "concept"
+  - kind: "person"
+    name: "Fixture author"
+writers:
+  - kind: "human"
+    name: "Fixture writer"
+communication_email: "fixture@example.test"
+status:
+  value: "concept"
+  determination: "declared"
+  confidence: "high"
 topics:
   - "developer_tools"
 ---

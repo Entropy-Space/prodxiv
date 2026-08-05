@@ -50,6 +50,7 @@ A recommended paper structure is:
 
 ```markdown
 ---
+schema_version: "2"
 title:
 product_name:
 scope:
@@ -58,26 +59,65 @@ scope:
   product_version:
 product_url:
 authors:
+  - id: github:owner
+    kind: person | organization
+    name:
+    url:
+writers:
+  - kind: human | agent
+    name:
+    model: # required for an agent writer
+communication_email: # optional; only for a human-written paper
 organization:
 published_at:
 version:
-status: concept | private_beta | public_beta | launched | discontinued
+status:
+  value: unknown | concept | private_beta | public_beta | launched | discontinued
+  determination: declared | inferred | unverified
+  confidence: high | medium | low
+  observed_at:
+  evidence:
+    - kind: github_release
+      url:
+      tag:
 topics:
 license:
 repository_url:
 ---
 
 # Summary
+
 # Background
+
 # Motivation
+
 # Related Work
+
 # Core Features
+
 # Architecture
+
 # Benchmarks
+
 # Insights and Lessons
+
 # Limitations
+
 # References
 ```
+
+Authors are the people or organizations attributed to the paper. A repository
+owner may be represented by a namespaced external identity such as
+`github:owner`; repository commits and commit email addresses are not an
+authorship source. Writers record who produced the prose. An agent writer names
+both the authoring tool and model, while `communication_email` is optional and
+available only when at least one human writer chooses to provide a contact.
+
+Product status is an observation rather than an unsupported scalar assertion.
+An inferred status records its observation time and evidence. Drafts use
+`unknown` with `unverified` when neither release evidence nor an explicit
+declaration establishes a status. Schema version 1 papers remain readable;
+new papers use schema version 2.
 
 The serialized `version` field is retained as compact publication notation and
 represents the paper revision number. A product release identifier belongs in
@@ -119,8 +159,8 @@ v3 — Expanded benchmark methodology
 Each paper should expose:
 
 - A permanent identifier.
-- Authors and organization.
-- Product status and topics.
+- Authors, writers, and optional human-writer contact.
+- Product status, its determination, and topics.
 - Publication and revision dates.
 - Revision history.
 - Rendered Markdown and raw source.

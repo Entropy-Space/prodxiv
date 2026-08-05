@@ -146,8 +146,10 @@ exist for every calendar day or language.
 ## Publish a paper
 
 Submissions contain Markdown with YAML front matter. They must include a
-license and must omit `paper_id`, `published_at`, and `version`; the service
-assigns those fields transactionally.
+license, use the current schema version 2, and omit `paper_id`, `published_at`,
+and `version`; the service assigns those fields transactionally. Historical
+schema-version-1 papers remain readable but cannot be submitted as new
+revisions.
 
 Paperbot is the preferred client:
 

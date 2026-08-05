@@ -66,7 +66,7 @@ describe("repository-to-renderable-paper workflow", () => {
       "publication",
     );
     expect(validation.report).toEqual({
-      schema_version: "1",
+      schema_version: "2",
       valid: true,
       diagnostics: [],
     });
