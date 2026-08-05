@@ -7,7 +7,12 @@ import {
 export type OutputFormat = "text" | "json";
 export type { ValidationProfile } from "@prodxiv/paperbot-core";
 export type AgentPaperStatus =
-  "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
+  | "unknown"
+  | "concept"
+  | "private_beta"
+  | "public_beta"
+  | "launched"
+  | "discontinued";
 
 export interface PublishArguments {
   command: "publish";
@@ -88,8 +93,8 @@ export interface AgentRunArguments {
   metadata: {
     title: string;
     product_name: string;
-    authors: string[];
-    status: AgentPaperStatus;
+    authors?: string[];
+    status?: AgentPaperStatus;
     product_url?: string;
     repository_url?: string;
   };
@@ -314,12 +319,6 @@ function parseAgentRunArguments(
   if (output_path === undefined) {
     throw usageError("agent run requires --output");
   }
-  if (authors.length === 0) {
-    throw usageError("agent run requires at least one --author");
-  }
-  if (status === undefined) {
-    throw usageError("agent run requires --status");
-  }
   if (!allow_remote_model) {
     throw usageError(
       "agent run requires --allow-remote-model before source content is sent to a model",
@@ -336,8 +335,8 @@ function parseAgentRunArguments(
     metadata: {
       title: title ?? `${defaultProductName} research draft`,
       product_name: product_name ?? defaultProductName,
-      authors,
-      status,
+      ...(authors.length === 0 ? {} : { authors }),
+      ...(status === undefined ? {} : { status }),
       ...(product_url === undefined ? {} : { product_url }),
       ...(repository_url === undefined ? {} : { repository_url }),
     },
@@ -1127,6 +1126,7 @@ function parseProfile(value: string): ValidationProfile {
 
 function parseAgentStatus(value: string): AgentPaperStatus {
   if (
+    value === "unknown" ||
     value === "concept" ||
     value === "private_beta" ||
     value === "public_beta" ||

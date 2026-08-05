@@ -125,7 +125,7 @@ describe("runAgentBatch", () => {
     expect(JSON.stringify(report)).not.toContain("externalSources");
   });
 
-  test("records a missing attribution or status as a project failure and continues", async () => {
+  test("leaves omitted attribution and status for per-project GitHub inference", async () => {
     const workspace = await createWorkspace();
     const inputPath = await writeManifest(workspace, {
       schema_version: "1",
@@ -157,26 +157,25 @@ describe("runAgentBatch", () => {
       },
     );
 
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.metadata).toEqual({
+      title: "missing metadata research draft",
+      product_name: "missing metadata",
+      repository_url: "https://github.com/example/missing-metadata",
+    });
     expect(result.report.summary).toEqual({
       total: 2,
       pending: 0,
       running: 0,
-      succeeded: 1,
-      failed: 1,
+      succeeded: 2,
+      failed: 0,
     });
     expect(result.report.projects[1]).toMatchObject({
-      state: "failed",
-      error: {
-        message: expect.stringContaining("requires authors"),
+      state: "succeeded",
+      metadata: {
+        repository_url: "https://github.com/example/missing-metadata",
       },
     });
-    await expect(
-      readFile(
-        join(outputPath, "example__missing-metadata", "run.json"),
-        "utf8",
-      ),
-    ).rejects.toThrow();
   });
 
   test("continues after an independent agent failure and keeps report order stable with concurrency", async () => {

@@ -29,6 +29,55 @@ const publishedPaper = {
   source_markdown: '---\nschema_version: "1"\n---\n# Summary\n',
 } satisfies PublishedPaper;
 
+const publishedPaperV2 = {
+  schema_version: "2",
+  paper_id: "prodxiv:2608.000001",
+  product_id: "prodxiv-product:2608.000001",
+  version: 1,
+  published_at: "2026-08-05",
+  metadata: {
+    schema_version: "2",
+    paper_id: "prodxiv:2608.000001",
+    title: "Observed product paper",
+    product_name: "Observed product",
+    scope: { kind: "product" },
+    summary: "A schema-version-2 API client fixture.",
+    authors: [
+      {
+        id: "github:example",
+        kind: "organization",
+        name: "example",
+        url: "https://github.com/example",
+      },
+    ],
+    writers: [
+      {
+        kind: "agent",
+        name: "paperbot",
+        model: "deepseek-v4-flash",
+      },
+    ],
+    published_at: "2026-08-05",
+    version: 1,
+    status: {
+      value: "launched",
+      determination: "inferred",
+      confidence: "high",
+      observed_at: "2026-08-05T00:00:00Z",
+      evidence: [
+        {
+          kind: "github_release",
+          url: "https://github.com/example/product/releases/tag/v1.0.0",
+          tag: "v1.0.0",
+        },
+      ],
+    },
+    topics: ["developer_tools"],
+    license: "CC BY 4.0",
+  },
+  source_markdown: '---\nschema_version: "2"\n---\n# Summary\n',
+} satisfies PublishedPaper;
+
 describe("ProdxivApiClient", () => {
   test("reads a GitHub Trending snapshot with an exact scope", async () => {
     let requestUrl = "";
@@ -127,6 +176,69 @@ describe("ProdxivApiClient", () => {
     );
     expect(requestUrl).toBe(
       "https://api.prodxiv.example/v1/papers/prodxiv%3A2607.000001/revisions/1",
+    );
+  });
+
+  test("reads structured v2 attribution and status provenance", async () => {
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example/",
+      fetch: async () => Response.json(publishedPaperV2),
+    });
+
+    expect(await client.getPaperRevision("prodxiv:2608.000001", 1)).toEqual(
+      publishedPaperV2,
+    );
+  });
+
+  test("rejects a communication email without a human writer", async () => {
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example/",
+      fetch: async () =>
+        Response.json({
+          ...publishedPaperV2,
+          metadata: {
+            ...publishedPaperV2.metadata,
+            communication_email: "agent@example.com",
+          },
+        }),
+    });
+
+    await expect(
+      client.getPaperRevision("prodxiv:2608.000001", 1),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "network.invalid_response",
+      } satisfies Partial<ProdxivApiError>),
+    );
+  });
+
+  test("rejects empty status evidence tags", async () => {
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example/",
+      fetch: async () =>
+        Response.json({
+          ...publishedPaperV2,
+          metadata: {
+            ...publishedPaperV2.metadata,
+            status: {
+              ...publishedPaperV2.metadata.status,
+              evidence: [
+                {
+                  ...publishedPaperV2.metadata.status.evidence[0],
+                  tag: "",
+                },
+              ],
+            },
+          },
+        }),
+    });
+
+    await expect(
+      client.getPaperRevision("prodxiv:2608.000001", 1),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "network.invalid_response",
+      } satisfies Partial<ProdxivApiError>),
     );
   });
 

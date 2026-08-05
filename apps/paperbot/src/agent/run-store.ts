@@ -14,16 +14,17 @@ import {
   parseEvidenceResponse,
   validateConflictSourceIds,
 } from "./responses.ts";
-import type {
-  AgentPaperMetadata,
-  AgentRunRecord,
-  AgentRunSourceRecord,
-  AgentSessionRecord,
-  AgentSessionRole,
-  AgentSource,
-  AuthorQuestion,
-  EvidenceItem,
-  EvidenceResponse,
+import {
+  AGENT_RUN_SCHEMA_VERSION,
+  type AgentPaperRequestMetadata,
+  type AgentRunRecord,
+  type AgentRunSourceRecord,
+  type AgentSessionRecord,
+  type AgentSessionRole,
+  type AgentSource,
+  type AuthorQuestion,
+  type EvidenceItem,
+  type EvidenceResponse,
 } from "./types.ts";
 
 export const MAX_AUTHOR_ANSWERS_BYTES = 32 * 1024;
@@ -44,13 +45,13 @@ export interface StoredEvidenceAnalysis {
 }
 
 export function createRunRecord(
-  options: { repository: string; metadata: AgentPaperMetadata },
+  options: { repository: string; metadata: AgentPaperRequestMetadata },
   model: string,
   externalSources: string[],
   timestamp: string,
 ): AgentRunRecord {
   return {
-    schema_version: "2",
+    schema_version: AGENT_RUN_SCHEMA_VERSION,
     state: "initialized",
     started_at: timestamp,
     updated_at: timestamp,
@@ -498,7 +499,7 @@ export function assertRestoredSourceMatchesRunRecord(
 function isRunRecord(value: unknown): value is AgentRunRecord {
   return (
     isRecord(value) &&
-    value.schema_version === "2" &&
+    value.schema_version === AGENT_RUN_SCHEMA_VERSION &&
     typeof value.state === "string" &&
     isRecord(value.input) &&
     isRecord(value.agent) &&

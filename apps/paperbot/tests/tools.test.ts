@@ -143,7 +143,7 @@ describe("Paperbot tools interface", () => {
     ).toBe(0);
 
     expect(JSON.parse(stdout[0] ?? "{}")).toEqual({
-      schema_version: "1",
+      schema_version: "2",
       valid: true,
       diagnostics: [],
     });
@@ -175,7 +175,7 @@ describe("Paperbot tools interface", () => {
     expect(stderr).toEqual([]);
     expect(JSON.parse(stdout[0] ?? "{}")).toEqual(
       expect.objectContaining({
-        schema_version: "1",
+        schema_version: "2",
         valid: true,
         diagnostics: [],
         markdown: expect.stringContaining("# Summary"),

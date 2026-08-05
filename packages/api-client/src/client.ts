@@ -440,14 +440,17 @@ function isPublishedPaperSummary(
     isOptionalString(metadata.product_name) &&
     (metadata.scope === undefined || isPaperScope(metadata.scope)) &&
     isNonEmptyString(metadata.summary) &&
-    isProductStatus(metadata.status) &&
+    isProductStatus(metadata.status, metadata.schema_version) &&
     isNonEmptyString(metadata.license) &&
     isOptionalString(metadata.organization) &&
     isOptionalString(metadata.product_url) &&
     isOptionalString(metadata.repository_url) &&
     Array.isArray(metadata.authors) &&
     metadata.authors.length > 0 &&
-    metadata.authors.every(isAuthor) &&
+    metadata.authors.every((author) =>
+      isAuthor(author, metadata.schema_version),
+    ) &&
+    isWritersAndContact(metadata, metadata.schema_version) &&
     Array.isArray(metadata.topics) &&
     metadata.topics.length > 0 &&
     metadata.topics.every(isNonEmptyString) &&
@@ -476,13 +479,58 @@ function isPaperScope(value: unknown): boolean {
   );
 }
 
-function isAuthor(value: unknown): boolean {
+function isAuthor(value: unknown, schemaVersion: unknown): boolean {
   return (
     isRecord(value) &&
     isNonEmptyString(value.name) &&
+    (value.id == null || isNamespacedId(value.id)) &&
+    (value.kind == null ||
+      value.kind === "person" ||
+      value.kind === "organization") &&
+    (schemaVersion !== "2" ||
+      value.kind === "person" ||
+      value.kind === "organization") &&
     isOptionalString(value.affiliation) &&
     isOptionalString(value.url)
   );
+}
+
+function isWritersAndContact(
+  metadata: Record<string, unknown>,
+  schemaVersion: unknown,
+): boolean {
+  if (schemaVersion === "1") {
+    return (
+      (metadata.writers === undefined ||
+        (Array.isArray(metadata.writers) && metadata.writers.length === 0)) &&
+      metadata.communication_email == null
+    );
+  }
+  if (
+    schemaVersion !== "2" ||
+    !Array.isArray(metadata.writers) ||
+    metadata.writers.length === 0 ||
+    !metadata.writers.every(isWriter)
+  ) {
+    return false;
+  }
+  return (
+    metadata.communication_email == null ||
+    (isEmail(metadata.communication_email) &&
+      metadata.writers.some(
+        (writer) => isRecord(writer) && writer.kind === "human",
+      ))
+  );
+}
+
+function isWriter(value: unknown): boolean {
+  if (!isRecord(value) || !isNonEmptyString(value.name)) {
+    return false;
+  }
+  if (value.kind === "human") {
+    return value.model == null;
+  }
+  return value.kind === "agent" && isNonEmptyString(value.model);
 }
 
 function isRelationship(value: unknown): boolean {
@@ -496,13 +544,101 @@ function isRelationship(value: unknown): boolean {
   );
 }
 
-function isProductStatus(value: unknown): boolean {
+function isProductStatus(value: unknown, schemaVersion: unknown): boolean {
+  if (schemaVersion === "1") {
+    return isProductStatusValue(value) && value !== "unknown";
+  }
+  if (
+    schemaVersion !== "2" ||
+    !isRecord(value) ||
+    !isProductStatusValue(value.value) ||
+    (value.determination !== "declared" &&
+      value.determination !== "inferred" &&
+      value.determination !== "unverified") ||
+    (value.confidence !== "high" &&
+      value.confidence !== "medium" &&
+      value.confidence !== "low") ||
+    (value.value === "unknown") !== (value.determination === "unverified") ||
+    (value.observed_at != null && !isTimestamp(value.observed_at)) ||
+    (value.evidence !== undefined &&
+      (!Array.isArray(value.evidence) ||
+        !value.evidence.every(isProductStatusEvidence)))
+  ) {
+    return false;
+  }
   return (
+    value.determination !== "inferred" ||
+    (isTimestamp(value.observed_at) &&
+      Array.isArray(value.evidence) &&
+      value.evidence.length > 0)
+  );
+}
+
+function isProductStatusValue(value: unknown): boolean {
+  return (
+    value === "unknown" ||
     value === "concept" ||
     value === "private_beta" ||
     value === "public_beta" ||
     value === "launched" ||
     value === "discontinued"
+  );
+}
+
+function isProductStatusEvidence(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.kind === "github_release" &&
+    isHttpUrl(value.url) &&
+    (value.tag == null || isNonEmptyString(value.tag))
+  );
+}
+
+function isNamespacedId(value: unknown): boolean {
+  return (
+    typeof value === "string" && /^[a-z][a-z0-9_-]*:[^\s:][^\s]*$/.test(value)
+  );
+}
+
+function isTimestamp(value: unknown): boolean {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
+  ) {
+    return false;
+  }
+  const timestamp = new Date(value);
+  return (
+    !Number.isNaN(timestamp.valueOf()) &&
+    timestamp.toISOString().slice(0, 19) === value.slice(0, 19)
+  );
+}
+
+function isHttpUrl(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isEmail(value: unknown): boolean {
+  if (typeof value !== "string" || value !== value.trim() || /\s/.test(value)) {
+    return false;
+  }
+  const [local, domain, extra] = value.split("@");
+  return (
+    extra === undefined &&
+    local !== undefined &&
+    local.length > 0 &&
+    domain !== undefined &&
+    domain.length > 0 &&
+    !domain.startsWith(".") &&
+    !domain.endsWith(".")
   );
 }
 

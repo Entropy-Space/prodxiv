@@ -20,9 +20,7 @@ export function buildValidatedEvidence(
   if (candidates.length === 0) {
     invalidEvidence("at least one repository evidence item is required");
   }
-  const sourceFiles = new Map(
-    source.files.map((file) => [file.source_id, file] as const),
-  );
+  const sourceFiles = availableEvidenceSources(source);
   const seen = new Set<string>();
   return candidates.map((candidate, index) => {
     const sourceFile = sourceFiles.get(candidate.source_id);
@@ -30,11 +28,11 @@ export function buildValidatedEvidence(
       invalidEvidence(`source_id is not available: ${candidate.source_id}`);
     }
     if (
-      candidate.evidence_kind !== "repository" &&
+      candidate.evidence_kind !== sourceFile.evidence_kind &&
       candidate.evidence_kind !== "inference"
     ) {
       invalidEvidence(
-        `evidence_kind is not available during repository analysis: ${candidate.evidence_kind}`,
+        `evidence_kind does not match its source: ${candidate.source_id}`,
       );
     }
     const duplicateKey = [
@@ -57,7 +55,8 @@ export function buildValidatedEvidence(
       excerpt_sha256: sha256(candidate.excerpt),
       locator,
       status:
-        candidate.evidence_kind === "repository"
+        candidate.evidence_kind === "repository" ||
+        candidate.evidence_kind === "external"
           ? "source_verified"
           : "qualified_inference",
     };
@@ -108,9 +107,7 @@ export function parseStoredEvidence(
   } catch {
     invalidStoredEvidence("evidence.jsonl is not valid JSON Lines");
   }
-  const sourceFiles = new Map(
-    source.files.map((file) => [file.source_id, file] as const),
-  );
+  const sourceFiles = availableEvidenceSources(source);
   return parsed.map((value, index) => {
     const item = parseStoredEvidenceItem(value, index);
     if (item.evidence_id !== formatEvidenceId(index + 1)) {
@@ -203,6 +200,7 @@ function parseStoredEvidenceItem(value: unknown, index: number): EvidenceItem {
   const evidenceKind = requiredString(value.evidence_kind, "evidence_kind");
   if (
     evidenceKind !== "repository" &&
+    evidenceKind !== "external" &&
     evidenceKind !== "inference" &&
     evidenceKind !== "author"
   ) {
@@ -260,6 +258,9 @@ function expectedEvidenceStatus(
   if (evidenceKind === "repository") {
     return "source_verified";
   }
+  if (evidenceKind === "external") {
+    return "source_verified";
+  }
   if (evidenceKind === "inference") {
     return "qualified_inference";
   }
@@ -267,6 +268,41 @@ function expectedEvidenceStatus(
     return "author_supplied";
   }
   invalidStoredEvidence("external evidence is not supported");
+}
+
+function availableEvidenceSources(source: AgentSource): Map<
+  string,
+  {
+    path: string;
+    content: string;
+    evidence_kind: "repository" | "external";
+  }
+> {
+  const sources = new Map<
+    string,
+    {
+      path: string;
+      content: string;
+      evidence_kind: "repository" | "external";
+    }
+  >();
+  for (const file of source.files) {
+    sources.set(file.source_id, {
+      path: file.path,
+      content: file.content,
+      evidence_kind: "repository",
+    });
+  }
+  for (const release of source.github_releases?.releases ?? []) {
+    if (release.notes !== undefined) {
+      sources.set(release.source_id, {
+        path: release.source_path,
+        content: release.notes,
+        evidence_kind: "external",
+      });
+    }
+  }
+  return sources;
 }
 
 function locateExcerpt(

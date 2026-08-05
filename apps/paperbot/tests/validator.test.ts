@@ -20,7 +20,7 @@ describe("validatePaperFile", () => {
     );
 
     expect(result.report).toEqual({
-      schema_version: "1",
+      schema_version: "2",
       valid: true,
       diagnostics: [],
     });
@@ -127,16 +127,105 @@ describe("validatePaperFile", () => {
         'summary: "A complete draft fixture for Paperbot validation."',
         'summary: "   "',
       )
-      .replace(
-        'status: "concept"',
-        'status: "concept"\npublished_at: "2026-02-30"',
-      );
+      .replace("topics:", 'published_at: "2026-02-30"\ntopics:');
     await writeFile(paperPath, source);
 
     try {
       const result = await validatePaperFile(paperPath, "draft");
       expect(codes(result)).toContain("value.required");
       expect(codes(result)).toContain("publication.invalid_date");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("enforces v2 writer contact and inferred-status rules", async () => {
+    const temporaryDirectory = await mkdtemp(
+      resolve(tmpdir(), "paperbot-v2-metadata-"),
+    );
+    const paperPath = resolve(temporaryDirectory, "paper.md");
+    const source = (
+      await readFile(resolve(fixtureRoot, "valid-paper.md"), "utf8")
+    )
+      .replace(
+        '  - kind: "human"\n    name: "Fixture writer"',
+        '  - kind: "agent"\n    name: "paperbot"\n    model: "fixture-model"',
+      )
+      .replace('  determination: "declared"', '  determination: "inferred"');
+    await writeFile(paperPath, source);
+
+    try {
+      const result = await validatePaperFile(paperPath, "draft");
+      expect(codes(result)).toContain(
+        "communication_email.human_writer_required",
+      );
+      expect(codes(result)).toContain("status.inferred_evidence_required");
+      expect(codes(result)).toContain("status.inferred_observed_at_required");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an impossible inferred-status observation date", async () => {
+    const temporaryDirectory = await mkdtemp(
+      resolve(tmpdir(), "paperbot-v2-status-date-"),
+    );
+    const paperPath = resolve(temporaryDirectory, "paper.md");
+    const source = (
+      await readFile(resolve(fixtureRoot, "valid-paper.md"), "utf8")
+    ).replace(
+      '  determination: "declared"\n  confidence: "high"',
+      [
+        '  determination: "inferred"',
+        '  confidence: "high"',
+        '  observed_at: "2026-02-31T00:00:00Z"',
+        "  evidence:",
+        '    - kind: "github_release"',
+        '      url: "https://github.com/example/product/releases/tag/v1.0.0"',
+        '      tag: "v1.0.0"',
+      ].join("\n"),
+    );
+    await writeFile(paperPath, source);
+
+    try {
+      const result = await validatePaperFile(paperPath, "draft");
+      expect(codes(result)).toContain("status.invalid_observed_at");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps legacy papers readable but rejects new v1 submissions", async () => {
+    const temporaryDirectory = await mkdtemp(
+      resolve(tmpdir(), "paperbot-v1-submission-"),
+    );
+    const paperPath = resolve(temporaryDirectory, "paper.md");
+    const source = (
+      await readFile(resolve(fixtureRoot, "valid-paper.md"), "utf8")
+    )
+      .replace('schema_version: "2"', 'schema_version: "1"')
+      .replace(
+        '  - kind: "person"\n    name: "Fixture author"',
+        '  - name: "Fixture author"',
+      )
+      .replace(
+        'writers:\n  - kind: "human"\n    name: "Fixture writer"\ncommunication_email: "fixture@example.test"\n',
+        "",
+      )
+      .replace(
+        'status:\n  value: "concept"\n  determination: "declared"\n  confidence: "high"',
+        'status: "concept"',
+      )
+      .replace("topics:", 'license: "CC BY 4.0"\ntopics:');
+    await writeFile(paperPath, source);
+
+    try {
+      expect((await validatePaperFile(paperPath, "draft")).report.valid).toBe(
+        true,
+      );
+      expect(codes(await validatePaperFile(paperPath, "submission"))).toContain(
+        "submission.current_schema_required",
+      );
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }
@@ -204,7 +293,7 @@ describe("paper_validate tool", () => {
     };
     expect(report).toEqual(
       expect.objectContaining({
-        schema_version: "1",
+        schema_version: "2",
         valid: false,
       }),
     );

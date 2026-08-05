@@ -5,7 +5,7 @@ import {
   type PaperValidationResult,
 } from "@prodxiv/paperbot-core";
 import {
-  canonicalizeGitHubRepositoryUrl,
+  fetchGitHubReleases,
   fetchGitHubSource,
   GitHubSourceError,
   type GitHubSourceFetch,
@@ -27,10 +27,11 @@ import {
 } from "./evidence.ts";
 import {
   normalizeAgentMetadata,
-  normalizeAnonymousHttpUrl,
+  normalizeAgentRequestMetadata,
   normalizeExternalSources,
   normalizeModelName,
 } from "./input.ts";
+import { completeAgentMetadata } from "./metadata.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import {
   assessDraft,
@@ -92,6 +93,7 @@ import {
 } from "./source.ts";
 import type {
   AgentPaperMetadata,
+  AgentPaperRequestMetadata,
   AgentRunRecord,
   AgentRunResult,
   AgentSessionRole,
@@ -116,7 +118,7 @@ export interface AgentRunOptions {
   repository: string;
   output_path: string;
   allow_remote_model: boolean;
-  metadata: AgentPaperMetadata;
+  metadata: AgentPaperRequestMetadata;
   external_sources?: string[];
   ref?: string;
   model?: string;
@@ -145,7 +147,7 @@ export async function runAgent(
       ExitCode.usage,
     );
   }
-  const requestedMetadata = normalizeAgentMetadata(options.metadata);
+  const requestedMetadata = normalizeAgentRequestMetadata(options.metadata);
   const externalSources = normalizeExternalSources(
     options.external_sources ?? [],
   );
@@ -163,7 +165,12 @@ export async function runAgent(
 
   try {
     const source = await acquireSource(options, dependencies);
-    const metadata = completeMetadata(requestedMetadata, source);
+    const metadata = completeAgentMetadata(
+      requestedMetadata,
+      source,
+      model,
+      now(dependencies).toISOString(),
+    );
     const sourceArtifacts = await writeSourceArtifacts(runPath, source);
     record.input.metadata = metadata;
     record.state = "inputs_ready";
@@ -867,7 +874,12 @@ function invalidDraftError(diagnostics: string[]): PaperbotError {
 }
 
 function availableSourceIds(source: AgentSource): Set<string> {
-  return new Set(source.files.map((file) => file.source_id));
+  return new Set([
+    ...source.files.map((file) => file.source_id),
+    ...(source.github_releases?.releases ?? [])
+      .filter((release) => release.notes !== undefined)
+      .map((release) => release.source_id),
+  ]);
 }
 
 async function acquireSource(
@@ -876,16 +888,23 @@ async function acquireSource(
 ): Promise<AgentSource> {
   if (options.repository.startsWith("https://github.com/")) {
     try {
-      return sourceFromGitHubResult(
-        await fetchGitHubSource({
-          repository_url: options.repository,
+      const retrievedAt = now(dependencies);
+      const sourceOptions = {
+        repository_url: options.repository,
+        ...(dependencies.fetch === undefined
+          ? {}
+          : { fetch: dependencies.fetch }),
+        now: () => retrievedAt,
+      };
+      const [source, releases] = await Promise.all([
+        fetchGitHubSource({
+          ...sourceOptions,
           ...(options.ref === undefined ? {} : { ref: options.ref }),
-          ...(dependencies.fetch === undefined
-            ? {}
-            : { fetch: dependencies.fetch }),
           limits: agent_source_limits,
         }),
-      );
+        fetchGitHubReleases(sourceOptions),
+      ]);
+      return sourceFromGitHubResult(source, releases);
     } catch (error) {
       if (error instanceof GitHubSourceError) {
         throw new PaperbotError(
@@ -914,75 +933,6 @@ function runtimeFor(
   return (
     dependencies.create_runtime?.(model) ?? new PiAuthoringRuntime({ model })
   );
-}
-
-function completeMetadata(
-  metadata: AgentPaperMetadata,
-  source: AgentSource,
-): AgentPaperMetadata {
-  const repositoryUrl =
-    source.canonical_url === undefined
-      ? undefined
-      : normalizeOptionalSourceUrl(source.canonical_url);
-  const homepageUrl =
-    source.homepage_url === undefined
-      ? undefined
-      : normalizeOptionalSourceUrl(source.homepage_url);
-
-  if (source.kind === "github") {
-    if (repositoryUrl === undefined) {
-      throw new PaperbotError(
-        "acquired GitHub source did not provide a canonical repository URL",
-        ExitCode.scan,
-      );
-    }
-    if (metadata.repository_url !== undefined) {
-      let requestedRepositoryUrl: string;
-      try {
-        requestedRepositoryUrl = canonicalizeGitHubRepositoryUrl(
-          metadata.repository_url,
-        ).canonical_url;
-      } catch {
-        throw new PaperbotError(
-          "agent GitHub source repository_url must identify the acquired GitHub repository",
-          ExitCode.usage,
-        );
-      }
-      if (
-        requestedRepositoryUrl.toLowerCase() !== repositoryUrl.toLowerCase()
-      ) {
-        throw new PaperbotError(
-          "agent GitHub source repository_url must match the acquired GitHub repository",
-          ExitCode.usage,
-        );
-      }
-    }
-    return normalizeAgentMetadata({
-      ...metadata,
-      repository_url: repositoryUrl,
-      ...(metadata.product_url === undefined && homepageUrl !== undefined
-        ? { product_url: homepageUrl }
-        : {}),
-    });
-  }
-
-  return normalizeAgentMetadata({
-    ...metadata,
-    ...(metadata.repository_url === undefined && repositoryUrl !== undefined
-      ? { repository_url: repositoryUrl }
-      : {}),
-    ...(metadata.product_url === undefined && homepageUrl !== undefined
-      ? { product_url: homepageUrl }
-      : {}),
-  });
-}
-
-function normalizeOptionalSourceUrl(value: string): string | undefined {
-  try {
-    return normalizeAnonymousHttpUrl(value, "source URL");
-  } catch {
-    return undefined;
-  }
 }
 
 function now(dependencies: AgentRunnerDependencies): Date {

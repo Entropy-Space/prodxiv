@@ -92,11 +92,6 @@ export function validateEvidenceCandidateSourceIds(
   allowedSourceIds: ReadonlySet<string>,
 ): EvidenceCandidate[] {
   for (const item of evidence) {
-    if (item.evidence_kind === "external") {
-      invalidResponse(
-        "external URLs are reference-only until Paperbot snapshots their contents",
-      );
-    }
     if (item.evidence_kind === "author") {
       invalidResponse(
         "the evidence session cannot create author evidence before answers are supplied",
@@ -105,9 +100,20 @@ export function validateEvidenceCandidateSourceIds(
     if (!allowedSourceIds.has(item.source_id)) {
       invalidResponse(`evidence source_id is not available: ${item.source_id}`);
     }
-    if (!isRepositorySourceId(item.source_id)) {
+    if (
+      item.evidence_kind === "repository" &&
+      !isRepositorySourceId(item.source_id)
+    ) {
       invalidResponse(
-        `${item.evidence_kind} evidence must use a repository source_id: ${item.source_id}`,
+        `repository evidence must use a repository source_id: ${item.source_id}`,
+      );
+    }
+    if (
+      item.evidence_kind === "external" &&
+      !isGitHubReleaseSourceId(item.source_id)
+    ) {
+      invalidResponse(
+        `external evidence must use a snapshotted GitHub release source_id: ${item.source_id}`,
       );
     }
   }
@@ -307,6 +313,10 @@ function evidenceConflict(value: unknown, index: number): EvidenceConflict {
 
 function isRepositorySourceId(sourceId: string): boolean {
   return sourceId.startsWith("repository:");
+}
+
+function isGitHubReleaseSourceId(sourceId: string): boolean {
+  return sourceId.startsWith("github_release:");
 }
 
 function parseJsonObject(

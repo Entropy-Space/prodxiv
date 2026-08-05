@@ -26,6 +26,23 @@
             "null"
           ]
         },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_-]*:[^\\s:][^\\s]*$"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthorKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "name": {
           "type": "string",
           "minLength": 1
@@ -43,6 +60,13 @@
         "name"
       ]
     },
+    "AuthorKind": {
+      "type": "string",
+      "enum": [
+        "person",
+        "organization"
+      ]
+    },
     "PaperMetadata": {
       "type": "object",
       "properties": {
@@ -52,6 +76,13 @@
             "$ref": "#/$defs/Author"
           },
           "minItems": 1
+        },
+        "communication_email": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "email"
         },
         "license": {
           "type": [
@@ -109,7 +140,7 @@
         },
         "schema_version": {
           "type": "string",
-          "pattern": "^1$"
+          "pattern": "^(?:1|2)$"
         },
         "scope": {
           "anyOf": [
@@ -122,7 +153,7 @@
           ]
         },
         "status": {
-          "$ref": "#/$defs/ProductStatus"
+          "$ref": "#/$defs/PaperStatus"
         },
         "summary": {
           "type": "string",
@@ -147,6 +178,12 @@
           ],
           "format": "uint32",
           "minimum": 1
+        },
+        "writers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PaperWriter"
+          }
         }
       },
       "additionalProperties": false,
@@ -191,6 +228,40 @@
         "release"
       ]
     },
+    "PaperStatus": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProductStatus"
+        },
+        {
+          "$ref": "#/$defs/ProductStatusObservation"
+        }
+      ]
+    },
+    "PaperWriter": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/WriterKind"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ]
+    },
     "ProductRelationship": {
       "type": "object",
       "properties": {
@@ -211,11 +282,75 @@
     "ProductStatus": {
       "type": "string",
       "enum": [
+        "unknown",
         "concept",
         "private_beta",
         "public_beta",
         "launched",
         "discontinued"
+      ]
+    },
+    "ProductStatusEvidence": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ProductStatusEvidenceKind"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "url"
+      ]
+    },
+    "ProductStatusEvidenceKind": {
+      "type": "string",
+      "enum": [
+        "github_release"
+      ]
+    },
+    "ProductStatusObservation": {
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/StatusConfidence"
+        },
+        "determination": {
+          "$ref": "#/$defs/StatusDetermination"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProductStatusEvidence"
+          }
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+        },
+        "value": {
+          "$ref": "#/$defs/ProductStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "determination",
+        "confidence"
       ]
     },
     "RelationshipKind": {
@@ -225,6 +360,29 @@
         "built_on",
         "alternative_to",
         "supersedes"
+      ]
+    },
+    "StatusConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "StatusDetermination": {
+      "type": "string",
+      "enum": [
+        "declared",
+        "inferred",
+        "unverified"
+      ]
+    },
+    "WriterKind": {
+      "type": "string",
+      "enum": [
+        "human",
+        "agent"
       ]
     }
   }

@@ -1,21 +1,31 @@
 ---
-schema_version: '1'
+schema_version: "2"
 paper_id: prodxiv:2607.000001
-title: 'prodxiv: A Versioned Archive for Product Knowledge'
+title: "prodxiv: A Versioned Archive for Product Knowledge"
 product_name: prodxiv
 scope:
   kind: product
 summary: A proposal for preserving the motivations, decisions, results, and lessons behind products as durable, versioned Markdown papers.
 authors:
-- name: prodxiv contributors
+  - id: github:Entropy-Space
+    kind: organization
+    name: Entropy-Space
+    url: https://github.com/Entropy-Space
+writers:
+  - kind: human
+    name: prodxiv contributors
 organization: prodxiv
 published_at: 2026-07-28
 version: 1
-status: concept
+status:
+  value: concept
+  determination: declared
+  confidence: high
+  observed_at: "2026-07-28T00:00:00Z"
 topics:
-- developer_tools
-- product_design
-- knowledge_management
+  - developer_tools
+  - product_design
+  - knowledge_management
 license: CC BY 4.0
 repository_url: https://github.com/Entropy-Space/prodxiv
 ---
