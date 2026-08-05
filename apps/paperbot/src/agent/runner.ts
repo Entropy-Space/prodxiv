@@ -62,7 +62,6 @@ import {
   MAX_AUTHOR_ANSWERS_BYTES,
   MAX_AUTHOR_QUESTION_ROUNDS,
   MAX_EVIDENCE_BYTES,
-  MAX_SESSION_BYTES,
   pendingQuestionsFor,
   persistRunRecord,
   readArtifact,
@@ -81,6 +80,10 @@ import {
   type StoredEvidenceAnalysis,
 } from "./run-store.ts";
 import {
+  captureSessionArtifact,
+  verifySessionArtifact,
+} from "./session-store.ts";
+import {
   acquireLocalSource,
   agent_source_limits,
   readSourceArtifact,
@@ -91,7 +94,6 @@ import type {
   AgentPaperMetadata,
   AgentRunRecord,
   AgentRunResult,
-  AgentSessionRecord,
   AgentSessionRole,
   AgentSource,
   AskQuestionsResponse,
@@ -381,7 +383,7 @@ export async function resumeAgent(
   let authorSession: AuthoringSession | undefined;
   try {
     const storedSession = requiredSessionRecord(record, "author", runPath);
-    const sessionPath = await verifiedSessionPath(
+    const sessionPath = await verifySessionArtifact(
       runPath,
       "author",
       storedSession,
@@ -390,7 +392,7 @@ export async function resumeAgent(
       role: "author",
       run_path: runPath,
       session_id: storedSession.session_id,
-      ...(sessionPath === undefined ? {} : { session_path: sessionPath }),
+      session_path: sessionPath,
     });
     const response = await parseWithOneRetry(
       authorSession,
@@ -848,67 +850,13 @@ async function checkpointSession(
       ExitCode.io,
     );
   }
-  let artifact: string | undefined;
-  let artifactSha256: string | undefined;
-  if (snapshot.session_path !== undefined) {
-    artifact = relativeArtifact(runPath, snapshot.session_path);
-    if (!artifact.startsWith(`sessions/${role}/`)) {
-      throw new PaperbotError(
-        `${role} session artifact is outside its private directory`,
-        ExitCode.io,
-      );
-    }
-    const serialized = await readArtifact(
-      snapshot.session_path,
-      `${role} session`,
-      MAX_SESSION_BYTES,
-    );
-    artifactSha256 = sha256(serialized);
-  }
+  const artifact = await captureSessionArtifact(runPath, role, snapshot);
   record.sessions[role] = {
-    session_id: snapshot.session_id,
-    ...(artifact === undefined ? {} : { artifact }),
-    ...(artifactSha256 === undefined
-      ? {}
-      : { artifact_sha256: artifactSha256 }),
+    ...artifact,
     turn_count: turnCount,
   };
   record.updated_at = now(dependencies).toISOString();
   await persistRunRecord(runPath, record);
-}
-
-async function verifiedSessionPath(
-  runPath: string,
-  role: AgentSessionRole,
-  session: AgentSessionRecord,
-): Promise<string | undefined> {
-  if (session.artifact === undefined && session.artifact_sha256 === undefined) {
-    return undefined;
-  }
-  if (
-    session.artifact === undefined ||
-    session.artifact_sha256 === undefined ||
-    !session.artifact.startsWith(`sessions/${role}/`) ||
-    !/^[0-9a-f]{64}$/.test(session.artifact_sha256)
-  ) {
-    throw new PaperbotError(
-      `agent ${role} session record is invalid: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  const path = artifactPath(runPath, session.artifact);
-  const serialized = await readArtifact(
-    path,
-    `${role} session`,
-    MAX_SESSION_BYTES,
-  );
-  if (sha256(serialized) !== session.artifact_sha256) {
-    throw new PaperbotError(
-      `agent ${role} session artifact was changed: ${runPath}`,
-      ExitCode.io,
-    );
-  }
-  return path;
 }
 
 function invalidDraftError(diagnostics: string[]): PaperbotError {

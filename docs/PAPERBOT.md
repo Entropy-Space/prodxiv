@@ -216,10 +216,14 @@ reading a small SHA-pinned UTF-8 source bundle. It does not clone the
 repository, run its code, install dependencies, or fetch
 arbitrary URLs.
 
-An `agent run` paper workflow uses exactly two private logical sessions: an
-evidence session and an author session. Their append-only session files live
-inside the mode-`0700` run directory and are mode `0600`; Paperbot records and
-verifies their IDs and SHA-256 digests before reopening the author session.
+Every Paperbot-started Pi session immediately creates a Pi-native, append-only
+JSONL file inside the mode-`0700` run directory. Session files are mode `0600`,
+remain local, and are never included in a submission or publication. They
+contain the complete prompts, model replies, and usage metadata, so the whole
+run directory must be treated as private. Workflow artifacts record each
+session's relative path, Pi session ID, and SHA-256 digest; Paperbot verifies
+those values before reopening a session. An `agent run` paper workflow uses
+exactly two such logical sessions: an evidence session and an author session.
 Every Pi workflow uses an in-memory credential store. Built-in tools,
 extensions, skills, prompt templates, themes, and repository context-file
 discovery remain disabled. The model receives host-built bundles; it cannot
@@ -239,8 +243,8 @@ The agent writes a new private run directory with:
   `evidence_id`, exact excerpt and digest, source ID, line locator, confidence,
   and status. Supplied external URLs remain reference-only until their
   contents are explicitly snapshotted;
-- `sessions/evidence/` and `sessions/author/` — the two private Pi
-  conversations;
+- `sessions/evidence/` and `sessions/author/` — the two private Pi-native JSONL
+  conversations referenced and integrity-bound by `run.json`;
 - `draft.md` and `drafts/` — the editable first draft and immutable accepted
   draft checkpoints with deterministic validation reports;
 - `questions.jsonl`, `questions.md`, and `answers/` — the bounded author
@@ -346,13 +350,15 @@ is a research rationale rather than evidence about the repository.
 The host accepts only ten unique names from the archived candidates, rejects
 unknown fields and malformed reasons, and copies all repository metadata from
 the snapshot rather than trusting the model to repeat it. One correction turn
-is permitted in the same session. A valid run writes the versioned
-`selection.json` with per-scope snapshot provenance, model and session
-metadata, selection `rank`, deterministic `candidate_rank`,
+is permitted in the same session. Its private Pi JSONL file lives under
+`sessions/trend_selection/` even when model output is rejected. A valid run
+writes schema-version `2` `selection.json` with per-scope snapshot provenance,
+model metadata, the session ID, relative session artifact path and SHA-256
+digest, selection `rank`, deterministic `candidate_rank`,
 `source_appearances`, and reasons. `--format json` emits that same selection
-artifact on stdout; diagnostics stay on stderr. A validated `language=all` snapshot
-remains available if fewer than ten unique candidates make selection
-impossible.
+artifact on stdout but never emits the session contents; diagnostics stay on
+stderr. A validated `language=all` snapshot remains available if fewer than
+ten unique candidates make selection impossible.
 
 This command does not download repository contents, start paper-drafting
 sessions, create a batch manifest, submit, or publish. Its ten results are a

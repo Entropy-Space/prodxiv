@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,15 +23,29 @@ afterEach(async () => {
   }
 });
 
-test("creates an in-memory Pi session with no tools or discovered resources", async () => {
+test("creates a persistent Pi session with no tools or discovered resources", async () => {
   temporaryPath = await mkdtemp(join(tmpdir(), "paperbot-pi-"));
+  const sessionDirectory = join(temporaryPath, "sessions", "test");
   const session = await createIsolatedPiSession({
     api_key: "test-deepseek-key",
     model: "deepseek-v4-flash",
     run_path: temporaryPath,
+    session_directory: sessionDirectory,
   });
 
   try {
+    expect(session.sessionManager.isPersisted()).toBe(true);
+    expect(session.sessionFile.startsWith(sessionDirectory)).toBe(true);
+    const [header] = (await readFile(session.sessionFile, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(header).toMatchObject({
+      type: "session",
+      id: session.sessionId,
+      cwd: temporaryPath,
+    });
+    expect((await stat(session.sessionFile)).mode & 0o777).toBe(0o600);
     expect(session.getActiveToolNames()).toEqual([]);
     expect(session.resourceLoader.getExtensions().extensions).toEqual([]);
     expect(session.resourceLoader.getSkills().skills).toEqual([]);
@@ -48,6 +62,7 @@ test("uses a loopback model router without reading Pi user configuration", async
     base_url: "http://localhost:4141/v1/",
     model: "deepseek-v4-flash",
     run_path: temporaryPath,
+    session_directory: join(temporaryPath, "sessions", "router"),
   });
 
   try {
@@ -86,17 +101,17 @@ test("allocates private persistent paths for each bounded workflow role", async 
     expect(
       evidence
         .snapshot()
-        .session_path?.startsWith(join(temporaryPath, "sessions", "evidence")),
+        .session_path.startsWith(join(temporaryPath, "sessions", "evidence")),
     ).toBe(true);
     expect(
       author
         .snapshot()
-        .session_path?.startsWith(join(temporaryPath, "sessions", "author")),
+        .session_path.startsWith(join(temporaryPath, "sessions", "author")),
     ).toBe(true);
     expect(
       trend
         .snapshot()
-        .session_path?.startsWith(
+        .session_path.startsWith(
           join(temporaryPath, "sessions", "trend_selection"),
         ),
     ).toBe(true);
@@ -110,6 +125,15 @@ test("allocates private persistent paths for each bounded workflow role", async 
       (await stat(join(temporaryPath, "sessions", "trend_selection"))).mode &
         0o777,
     ).toBe(0o700);
+    expect((await stat(evidence.snapshot().session_path)).mode & 0o777).toBe(
+      0o600,
+    );
+    expect((await stat(author.snapshot().session_path)).mode & 0o777).toBe(
+      0o600,
+    );
+    expect((await stat(trend.snapshot().session_path)).mode & 0o777).toBe(
+      0o600,
+    );
   } finally {
     await evidence.dispose();
     await author.dispose();

@@ -80,7 +80,9 @@ validated ledger. The author session can emit a bounded `ask_questions` event;
 the host checkpoints it as `awaiting_author`, and `agent resume --answers`
 reopens the same logical author session. Once the loop completes, Paperbot
 writes `paper.md` and stops at `needs_author_review`. It never publishes, and
-independent final evidence review is not part of this version.
+independent final evidence review is not part of this version. Both sessions
+are retained as Pi-native JSONL under the private run directory; `run.json`
+records their relative paths, IDs, and SHA-256 digests.
 
 `agent select-trending` is a separate bounded research workflow. By default it
 requests the exact UTC date with `period=daily&language=all` from the hosted
@@ -98,9 +100,18 @@ repositories by canonical full name for the tool-less Pi session, and retains
 each candidate's deterministic `candidate_rank` plus all `source_appearances`
 with scope language and source rank. The host requires exactly ten unique
 candidates and writes the model's selection order as `rank` in versioned
-`selection.json`. `--format json` also emits that object on stdout. The model
-cannot browse repositories, and the command does not draft or publish papers.
-The selection is a research queue, not an endorsement.
+schema-version `2` `selection.json`. The private Pi-native JSONL remains under
+`sessions/trend_selection/`, while the selection records its relative path and
+SHA-256 digest. `--format json` emits the selection object on stdout, never the
+session contents. The model cannot browse repositories, and the command does
+not draft or publish papers. The selection is a research queue, not an
+endorsement.
+
+Every Paperbot-started Pi session file is created before its first model turn,
+is mode `0600` inside a mode-`0700` run directory, and stays local. Session
+JSONL contains full prompts, model replies, and usage metadata, so treat the
+entire run directory as private. Paperbot never includes session files in a
+submission or publication.
 
 `auth` creates a commented credential template if it does not exist and never
 overwrites it. `auth set` stores the API URL, optional public site URL, and

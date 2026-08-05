@@ -1,6 +1,7 @@
 node_modules/
 .astro/
 dist/
+paperbot-runs/
 .env
 .env.*
 !.env.example

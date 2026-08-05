@@ -28,7 +28,6 @@ import type {
 
 export const MAX_AUTHOR_ANSWERS_BYTES = 32 * 1024;
 export const MAX_EVIDENCE_BYTES = 512 * 1024;
-export const MAX_SESSION_BYTES = 8 * 1024 * 1024;
 export const MAX_AUTHOR_QUESTION_ROUNDS = 3;
 
 const MAX_RESUME_DRAFT_BYTES = 256 * 1024;
@@ -451,6 +450,10 @@ export function requiredSessionRecord(
     session === undefined ||
     typeof session.session_id !== "string" ||
     session.session_id.length === 0 ||
+    typeof session.artifact !== "string" ||
+    session.artifact.length === 0 ||
+    typeof session.artifact_sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(session.artifact_sha256) ||
     !isNonNegativeInteger(session.turn_count)
   ) {
     throw new PaperbotError(
@@ -501,6 +504,8 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     isRecord(value.agent) &&
     isRecord(value.artifacts) &&
     isRecord(value.sessions) &&
+    isOptionalSessionRecord(value.sessions.evidence, "evidence") &&
+    isOptionalSessionRecord(value.sessions.author, "author") &&
     isRecord(value.workflow) &&
     (value.workflow.author_phase === "drafting" ||
       value.workflow.author_phase === "reviewing") &&
@@ -512,6 +517,24 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     value.workflow.pending_question_ids.every(
       (item) => typeof item === "string",
     )
+  );
+}
+
+function isOptionalSessionRecord(
+  value: unknown,
+  role: AgentSessionRole,
+): boolean {
+  return (
+    value === undefined ||
+    (isRecord(value) &&
+      typeof value.session_id === "string" &&
+      value.session_id.length > 0 &&
+      typeof value.artifact === "string" &&
+      value.artifact.startsWith(`sessions/${role}/`) &&
+      value.artifact.endsWith(".jsonl") &&
+      typeof value.artifact_sha256 === "string" &&
+      /^[0-9a-f]{64}$/.test(value.artifact_sha256) &&
+      isNonNegativeInteger(value.turn_count))
   );
 }
 

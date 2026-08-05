@@ -19,6 +19,10 @@ import {
   type TrendSnapshotBundle,
 } from "../src/agent/trend-snapshot.ts";
 import type { ModelCompletion } from "../src/agent/types.ts";
+import {
+  appendFakePiTurn,
+  createFakePiSession,
+} from "./support/fake-pi-session.ts";
 
 const workspaces: string[] = [];
 const archiveApiUrl = "https://api.prodxiv.example";
@@ -103,7 +107,7 @@ describe("runTrendSelection", () => {
       snapshot_path: join(outputPath, "snapshot.json"),
       selection_path: join(outputPath, "selection.json"),
       selection: {
-        schema_version: "1",
+        schema_version: "2",
         generated_at: "2026-08-04T01:02:04Z",
         selection_policy: "product_paper_interest_v1",
         snapshot: {
@@ -117,6 +121,9 @@ describe("runTrendSelection", () => {
           provider: "fake-pi",
           model: "deepseek-v4-flash",
           session_id: "fake-trend-selection",
+          session_artifact:
+            "sessions/trend_selection/fake-trend-selection.jsonl",
+          session_artifact_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
           turn_count: 1,
           usage: { input_tokens: 3, output_tokens: 2 },
         },
@@ -146,6 +153,22 @@ describe("runTrendSelection", () => {
     expect((await stat(join(outputPath, "selection.json"))).mode & 0o777).toBe(
       0o600,
     );
+    expect(
+      (await stat(join(outputPath, "sessions", "trend_selection"))).mode &
+        0o777,
+    ).toBe(0o700);
+    expect(
+      (
+        await stat(
+          join(
+            outputPath,
+            "sessions",
+            "trend_selection",
+            "fake-trend-selection.jsonl",
+          ),
+        )
+      ).mode & 0o777,
+    ).toBe(0o600);
   });
 
   test("repairs one invalid response in the same Pi session", async () => {
@@ -226,6 +249,16 @@ describe("runTrendSelection", () => {
     expect(await Bun.file(join(outputPath, "selection.json")).exists()).toBe(
       false,
     );
+    expect(
+      await Bun.file(
+        join(
+          outputPath,
+          "sessions",
+          "trend_selection",
+          "fake-trend-selection.jsonl",
+        ),
+      ).exists(),
+    ).toBe(true);
   });
 
   test("retains a small source snapshot without starting Pi", async () => {
@@ -531,6 +564,12 @@ class FakeTrendRuntime implements TrendSelectionRuntime {
 
   async startSession(input: { role: "trend_selection"; run_path: string }) {
     this.started_inputs.push(input);
+    const sessionId = "fake-trend-selection";
+    const sessionPath = await createFakePiSession({
+      role: input.role,
+      run_path: input.run_path,
+      session_id: sessionId,
+    });
     return {
       complete: async ({ prompt }: { prompt: string }) => {
         this.prompts.push(prompt);
@@ -538,6 +577,7 @@ class FakeTrendRuntime implements TrendSelectionRuntime {
         if (response === undefined) {
           throw new Error("unexpected trend-selection model call");
         }
+        await appendFakePiTurn(sessionPath, prompt, response);
         if (response instanceof Error) {
           throw response;
         }
@@ -547,7 +587,10 @@ class FakeTrendRuntime implements TrendSelectionRuntime {
           usage: { input_tokens: 3, output_tokens: 2 },
         } satisfies ModelCompletion;
       },
-      snapshot: () => ({ session_id: "fake-trend-selection" }),
+      snapshot: () => ({
+        session_id: sessionId,
+        session_path: sessionPath,
+      }),
       dispose: () => {
         this.disposed += 1;
       },

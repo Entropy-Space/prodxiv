@@ -1,5 +1,5 @@
-import { chmod, lstat, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { chmod, lstat, mkdir, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   createAgentSession,
@@ -24,11 +24,11 @@ import {
 } from "./model-config.ts";
 import { PAPERBOT_SYSTEM_PROMPT } from "./prompts.ts";
 import type {
-  AgentSessionRole,
   AuthoringRuntime,
   AuthoringSession,
   ModelCompletion,
   ModelSessionSnapshot,
+  PiSessionRole,
 } from "./types.ts";
 
 const DEEPSEEK_PROVIDER = "deepseek";
@@ -36,7 +36,7 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 
-export type PiSessionRole = AgentSessionRole | "trend_selection";
+export type { PiSessionRole } from "./types.ts";
 
 export interface PiAgentRuntimeOptions {
   model?: string;
@@ -52,10 +52,12 @@ export interface IsolatedPiSessionOptions {
   base_url?: string;
   model: string;
   run_path: string;
-  session_directory?: string;
+  session_directory: string;
   session_path?: string;
   system_prompt?: string;
 }
+
+export type PersistentPiSession = AgentSession & { sessionFile: string };
 
 /**
  * Pi SDK adapter deliberately runs without Pi's built-in tools, local
@@ -93,11 +95,6 @@ export class PiAgentRuntime implements AuthoringRuntime {
         input.run_path,
         `sessions/${input.role}`,
       );
-      await mkdir(sessionDirectory, {
-        recursive: true,
-        mode: PRIVATE_DIRECTORY_MODE,
-      });
-      await chmod(sessionDirectory, PRIVATE_DIRECTORY_MODE);
       const session = await createIsolatedPiSession({
         api_key: connection.api_key,
         ...(connection.base_url === undefined
@@ -134,30 +131,18 @@ export { PiAgentRuntime as PiAuthoringRuntime };
 
 export async function createIsolatedPiSession(
   options: IsolatedPiSessionOptions,
-): Promise<AgentSession> {
-  if (
-    options.session_directory !== undefined &&
-    options.session_path !== undefined &&
-    dirname(resolve(options.session_path)) !==
-      resolve(options.session_directory)
-  ) {
-    throw new PaperbotError(
-      "Pi session artifact is outside its Paperbot session directory",
-      ExitCode.io,
-    );
-  }
-  if (options.session_path !== undefined) {
-    try {
-      const metadata = await lstat(options.session_path);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) {
-        throw new Error("unsafe session artifact");
-      }
-    } catch {
-      throw new PaperbotError(
-        "Pi session artifact is not a safe regular file",
-        ExitCode.io,
-      );
-    }
+): Promise<PersistentPiSession> {
+  const sessionDirectory = resolvePrivateSessionDirectory(
+    options.run_path,
+    options.session_directory,
+  );
+  await secureSessionDirectory(sessionDirectory);
+  const sessionPath =
+    options.session_path === undefined
+      ? undefined
+      : resolveSessionPath(options.session_path, sessionDirectory);
+  if (sessionPath !== undefined) {
+    await secureSessionArtifact(sessionPath);
   }
   const settings = SettingsManager.inMemory({
     compaction: { enabled: false },
@@ -197,15 +182,12 @@ export async function createIsolatedPiSession(
   });
   await loader.reload();
   const sessionManager =
-    options.session_path !== undefined
-      ? SessionManager.open(
-          options.session_path,
-          options.session_directory,
-          options.run_path,
-        )
-      : options.session_directory !== undefined
-        ? SessionManager.create(options.run_path, options.session_directory)
-        : SessionManager.inMemory(options.run_path);
+    sessionPath === undefined
+      ? await createPersistentSessionManager(options.run_path, sessionDirectory)
+      : SessionManager.open(sessionPath, sessionDirectory, options.run_path);
+  if (!sessionManager.isPersisted()) {
+    throw new PaperbotError("Pi session persistence is disabled", ExitCode.io);
+  }
   const { session } = await createAgentSession({
     cwd: options.run_path,
     modelRuntime: runtime,
@@ -223,12 +205,24 @@ export async function createIsolatedPiSession(
       ExitCode.auth,
     );
   }
-  return session;
+  if (
+    session.sessionFile === undefined ||
+    !session.sessionFile.endsWith(".jsonl") ||
+    dirname(resolve(session.sessionFile)) !== sessionDirectory
+  ) {
+    session.dispose();
+    throw new PaperbotError(
+      "Pi did not allocate a persistent JSONL session artifact",
+      ExitCode.io,
+    );
+  }
+  await secureSessionArtifact(session.sessionFile);
+  return session as PersistentPiSession;
 }
 
 class PiConversation implements AuthoringSession {
   constructor(
-    private readonly session: AgentSession,
+    private readonly session: PersistentPiSession,
     private readonly apiKey: string,
   ) {}
 
@@ -277,9 +271,7 @@ class PiConversation implements AuthoringSession {
   snapshot(): ModelSessionSnapshot {
     return {
       session_id: this.session.sessionId,
-      ...(this.session.sessionFile === undefined
-        ? {}
-        : { session_path: this.session.sessionFile }),
+      session_path: this.session.sessionFile,
     };
   }
 
@@ -288,10 +280,7 @@ class PiConversation implements AuthoringSession {
   }
 }
 
-async function secureSessionArtifact(path: string | undefined): Promise<void> {
-  if (path === undefined) {
-    return;
-  }
+async function secureSessionArtifact(path: string): Promise<void> {
   try {
     const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -304,6 +293,109 @@ async function secureSessionArtifact(path: string | undefined): Promise<void> {
       ExitCode.io,
     );
   }
+}
+
+function resolvePrivateSessionDirectory(
+  runPath: string,
+  sessionDirectory: string,
+): string {
+  const run = resolve(runPath);
+  const directory = resolve(sessionDirectory);
+  const relativeDirectory = relative(run, directory);
+  const directoryParts = relativeDirectory.split(sep);
+  if (
+    relativeDirectory.length === 0 ||
+    relativeDirectory === ".." ||
+    relativeDirectory.startsWith(`..${sep}`) ||
+    isAbsolute(relativeDirectory) ||
+    directoryParts.length !== 2 ||
+    directoryParts[0] !== "sessions" ||
+    directoryParts[1]?.length === 0
+  ) {
+    throw new PaperbotError(
+      "Pi session directory is outside its Paperbot run directory",
+      ExitCode.io,
+    );
+  }
+  return directory;
+}
+
+function resolveSessionPath(
+  sessionPath: string,
+  sessionDirectory: string,
+): string {
+  if (!isAbsolute(sessionPath)) {
+    throw new PaperbotError(
+      "Pi session artifact path must be absolute",
+      ExitCode.io,
+    );
+  }
+  const path = resolve(sessionPath);
+  if (dirname(path) !== sessionDirectory || !path.endsWith(".jsonl")) {
+    throw new PaperbotError(
+      "Pi session artifact is outside its Paperbot session directory",
+      ExitCode.io,
+    );
+  }
+  return path;
+}
+
+async function secureSessionDirectory(path: string): Promise<void> {
+  try {
+    await mkdir(path, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+    const [sessionsMetadata, metadata] = await Promise.all([
+      lstat(dirname(path)),
+      lstat(path),
+    ]);
+    if (
+      !sessionsMetadata.isDirectory() ||
+      sessionsMetadata.isSymbolicLink() ||
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink()
+    ) {
+      throw new Error("unsafe session directory");
+    }
+    await Promise.all([
+      chmod(dirname(path), PRIVATE_DIRECTORY_MODE),
+      chmod(path, PRIVATE_DIRECTORY_MODE),
+    ]);
+  } catch {
+    throw new PaperbotError(
+      "Paperbot could not secure the Pi session directory",
+      ExitCode.io,
+    );
+  }
+}
+
+async function createPersistentSessionManager(
+  runPath: string,
+  sessionDirectory: string,
+): Promise<SessionManager> {
+  // Pi normally defers a new file until the first assistant message. Persist
+  // Pi's own header and reopen it so the initial user turn also survives a
+  // provider failure before any assistant response arrives.
+  const provisional = SessionManager.create(runPath, sessionDirectory);
+  const sessionPath = provisional.getSessionFile();
+  if (sessionPath === undefined) {
+    throw new PaperbotError(
+      "Pi did not allocate a session artifact",
+      ExitCode.io,
+    );
+  }
+  try {
+    await writeFile(
+      sessionPath,
+      `${JSON.stringify(provisional.getHeader())}\n`,
+      { flag: "wx", mode: PRIVATE_FILE_MODE },
+    );
+  } catch {
+    throw new PaperbotError(
+      "Paperbot could not initialize the Pi session artifact",
+      ExitCode.io,
+    );
+  }
+  await secureSessionArtifact(sessionPath);
+  return SessionManager.open(sessionPath, sessionDirectory, runPath);
 }
 
 function lastAssistantMessage(
