@@ -47,7 +47,7 @@ const trendSelectionResult: TrendSelectionRunResult = {
   snapshot_path: "/tmp/paperbot-trending/snapshot.json",
   selection_path: "/tmp/paperbot-trending/selection.json",
   selection: {
-    schema_version: "1",
+    schema_version: "2",
     generated_at: "2026-08-04T01:02:04Z",
     selection_policy: "product_paper_interest_v1",
     snapshot: {
@@ -77,6 +77,8 @@ const trendSelectionResult: TrendSelectionRunResult = {
       provider: "pi",
       model: "deepseek-v4-flash",
       session_id: "trend-session",
+      session_artifact: "sessions/trend_selection/trend-session.jsonl",
+      session_artifact_sha256: "b".repeat(64),
       turn_count: 1,
       usage: { input_tokens: 100, output_tokens: 50 },
     },

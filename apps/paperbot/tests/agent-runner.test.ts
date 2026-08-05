@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   appendFile,
   cp,
-  mkdir,
   mkdtemp,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +18,10 @@ import type {
   AuthoringRuntime,
   ModelCompletion,
 } from "../src/agent/types.ts";
+import {
+  appendFakePiTurn,
+  createFakePiSession,
+} from "./support/fake-pi-session.ts";
 
 const repositoryFixture = resolve(import.meta.dir, "fixtures/repository");
 let workspacePath = "";
@@ -93,8 +97,18 @@ describe("runAgent", () => {
       schema_version: "2",
       state: "needs_author_review",
       sessions: {
-        evidence: { session_id: "fake-evidence", turn_count: 1 },
-        author: { session_id: "fake-author", turn_count: 2 },
+        evidence: {
+          session_id: "fake-evidence",
+          artifact: "sessions/evidence/fake-evidence.jsonl",
+          artifact_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+          turn_count: 1,
+        },
+        author: {
+          session_id: "fake-author",
+          artifact: "sessions/author/fake-author.jsonl",
+          artifact_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+          turn_count: 2,
+        },
       },
       workflow: { draft_revision: 2, question_rounds: 0 },
       artifacts: {
@@ -105,6 +119,23 @@ describe("runAgent", () => {
       },
     });
     expect(questions).toContain("author review is still required");
+    expect(
+      (await stat(join(outputPath, "sessions", "evidence"))).mode & 0o777,
+    ).toBe(0o700);
+    expect(
+      (
+        await stat(
+          join(outputPath, "sessions", "evidence", "fake-evidence.jsonl"),
+        )
+      ).mode & 0o777,
+    ).toBe(0o600);
+    expect(
+      (await stat(join(outputPath, "sessions", "author"))).mode & 0o777,
+    ).toBe(0o700);
+    expect(
+      (await stat(join(outputPath, "sessions", "author", "fake-author.jsonl")))
+        .mode & 0o777,
+    ).toBe(0o600);
     await expect(
       readFile(join(outputPath, "review.json"), "utf8"),
     ).rejects.toThrow();
@@ -459,13 +490,10 @@ describe("resumeAgent", () => {
     const outputPath = join(workspacePath, "run");
     await runAgent(runOptions(outputPath), {
       create_runtime: () =>
-        new FakeRuntime(
-          {
-            evidence: [evidenceResponse()],
-            author: [draftResponse(), askQuestionsResponse()],
-          },
-          true,
-        ),
+        new FakeRuntime({
+          evidence: [evidenceResponse()],
+          author: [draftResponse(), askQuestionsResponse()],
+        }),
     });
     const answersPath = join(workspacePath, "answers.md");
     await writeFile(answersPath, "Author context for a retried model call.\n");
@@ -479,10 +507,7 @@ describe("resumeAgent", () => {
         },
         {
           create_runtime: () =>
-            new FakeRuntime(
-              { author: [new Error("provider unavailable")] },
-              true,
-            ),
+            new FakeRuntime({ author: [new Error("provider unavailable")] }),
         },
       ),
     ).rejects.toThrow("provider unavailable");
@@ -501,7 +526,7 @@ describe("resumeAgent", () => {
       },
     });
 
-    const retryRuntime = new FakeRuntime({ author: [draftResponse()] }, true);
+    const retryRuntime = new FakeRuntime({ author: [draftResponse()] });
     const result = await resumeAgent(
       {
         run_path: outputPath,
@@ -672,13 +697,10 @@ describe("resumeAgent", () => {
     const outputPath = join(workspacePath, "run");
     await runAgent(runOptions(outputPath), {
       create_runtime: () =>
-        new FakeRuntime(
-          {
-            evidence: [evidenceResponse()],
-            author: [draftResponse(), askQuestionsResponse()],
-          },
-          true,
-        ),
+        new FakeRuntime({
+          evidence: [evidenceResponse()],
+          author: [draftResponse(), askQuestionsResponse()],
+        }),
     });
     await appendFile(
       join(outputPath, "sessions", "author", "fake-author.jsonl"),
@@ -747,7 +769,6 @@ class FakeRuntime implements AuthoringRuntime {
     private readonly responses: Partial<
       Record<AgentSessionRole, Array<string | Error>>
     >,
-    private readonly persistSessions = false,
   ) {}
 
   async startSession(input: {
@@ -759,15 +780,14 @@ class FakeRuntime implements AuthoringRuntime {
     this.started_roles.push(input.role);
     const sessionId = input.session_id ?? `fake-${input.role}`;
     this.started_session_ids.push(sessionId);
-    const sessionPath = this.persistSessions
-      ? (input.session_path ??
-        join(input.run_path, "sessions", input.role, `${sessionId}.jsonl`))
-      : undefined;
-    if (sessionPath !== undefined) {
-      await mkdir(join(input.run_path, "sessions", input.role), {
-        recursive: true,
-      });
-    }
+    const sessionPath = await createFakePiSession({
+      role: input.role,
+      run_path: input.run_path,
+      session_id: sessionId,
+      ...(input.session_path === undefined
+        ? {}
+        : { session_path: input.session_path }),
+    });
     return {
       complete: async ({ prompt }: { prompt: string }) => {
         this.prompts.push({ role: input.role, prompt });
@@ -775,16 +795,7 @@ class FakeRuntime implements AuthoringRuntime {
         if (response === undefined) {
           throw new Error(`unexpected ${input.role} model call`);
         }
-        if (sessionPath !== undefined) {
-          await appendFile(
-            sessionPath,
-            `${JSON.stringify({
-              role: input.role,
-              prompt,
-              response: response instanceof Error ? response.message : response,
-            })}\n`,
-          );
-        }
+        await appendFakePiTurn(sessionPath, prompt, response);
         if (response instanceof Error) {
           throw response;
         }
@@ -796,7 +807,7 @@ class FakeRuntime implements AuthoringRuntime {
       },
       snapshot: () => ({
         session_id: sessionId,
-        ...(sessionPath === undefined ? {} : { session_path: sessionPath }),
+        session_path: sessionPath,
       }),
       dispose: () => {},
     };

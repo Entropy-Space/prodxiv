@@ -82,7 +82,9 @@ exactly ten unique candidates into `selection.json`. Treat the result as a
 research queue, not an endorsement or repository evidence. This command does
 not download repository contents, create paper runs, or publish. Do not turn
 the selection into a batch without separate user direction and the required
-author and product-status metadata.
+author and product-status metadata. The Pi-native JSONL remains private under
+`sessions/trend_selection/`; schema-version `2` `selection.json` records its
+relative path and SHA-256 digest but never embeds its contents.
 
 For a public GitHub repository, require the author to provide their paper
 identity and a product status rather than inferring either from contributors or
@@ -111,7 +113,11 @@ event is not a public deterministic tool. Private artifacts include `draft.md`,
 `drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
 `validation.json`, and—when the interview is complete—`paper.md`. The workflow
 always stops at author review. Do not use `publish` unless the author separately
-and explicitly approves the exact reviewed paper.
+and explicitly approves the exact reviewed paper. Every Paperbot-started Pi
+session is retained locally in Pi-native JSONL before its first model turn,
+with mode `0600` under the mode-`0700` run directory. These files contain full
+prompts and replies; never publish, submit, or otherwise expose them. The
+workflow metadata stores only their relative paths, IDs, and SHA-256 digests.
 
 Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
 --allow-remote-model` only when the run is in `awaiting_author`. It copies the

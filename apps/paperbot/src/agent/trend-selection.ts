@@ -6,6 +6,10 @@ import { normalizeModelName } from "./input.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import { PiAgentRuntime } from "./pi.ts";
 import {
+  captureSessionArtifact,
+  type CapturedSessionArtifact,
+} from "./session-store.ts";
+import {
   createTrendCandidates,
   loadTrendSnapshot,
   type TrendCandidate,
@@ -13,13 +17,9 @@ import {
   type TrendSnapshotBundle,
   type TrendSnapshotInputOptions,
 } from "./trend-snapshot.ts";
-import type {
-  AuthoringSession,
-  ModelCompletion,
-  ModelSessionSnapshot,
-} from "./types.ts";
+import type { AuthoringSession, ModelCompletion } from "./types.ts";
 
-export const TREND_SELECTION_SCHEMA_VERSION = "1";
+export const TREND_SELECTION_SCHEMA_VERSION = "2";
 export const TREND_SELECTION_COUNT = 10;
 export const TREND_SELECTION_POLICY = "product_paper_interest_v1";
 
@@ -87,6 +87,8 @@ export interface TrendSelectionArtifact {
     provider: string;
     model: string;
     session_id: string;
+    session_artifact: string;
+    session_artifact_sha256: string;
     turn_count: number;
     usage?: {
       input_tokens: number;
@@ -178,14 +180,18 @@ export async function runTrendSelection(
       parsed = parseTrendSelectionResponse(completion.final_text, candidates);
     }
 
-    const sessionSnapshot = session.snapshot();
+    const sessionArtifact = await captureSessionArtifact(
+      outputPath,
+      "trend_selection",
+      session.snapshot(),
+    );
     const selection = createSelectionArtifact(
       snapshot,
       candidates,
       parsed,
       runtime.provider,
       completions,
-      sessionSnapshot,
+      sessionArtifact,
       timestamp(now(dependencies)),
     );
     const selectionPath = await writeJsonArtifact(
@@ -303,7 +309,7 @@ function createSelectionArtifact(
   parsed: ParsedTrendSelection[],
   provider: string,
   completions: ModelCompletion[],
-  session: ModelSessionSnapshot,
+  session: CapturedSessionArtifact,
   generatedAt: string,
 ): TrendSelectionArtifact {
   const candidates = new Map(
@@ -333,6 +339,8 @@ function createSelectionArtifact(
       provider,
       model: finalCompletion.model,
       session_id: session.session_id,
+      session_artifact: session.artifact,
+      session_artifact_sha256: session.artifact_sha256,
       turn_count: completions.length,
       ...(completions.some((completion) => completion.usage !== undefined)
         ? { usage }

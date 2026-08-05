@@ -16,6 +16,7 @@ export type AgentRunState =
   | "failed";
 export type AuthorPhase = "drafting" | "reviewing";
 export type AgentSessionRole = "evidence" | "author";
+export type PiSessionRole = AgentSessionRole | "trend_selection";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -122,7 +123,7 @@ export interface ModelCompletion {
 
 export interface ModelSessionSnapshot {
   session_id: string;
-  session_path?: string;
+  session_path: string;
 }
 
 export interface AuthoringSession {
@@ -144,8 +145,8 @@ export interface AuthoringRuntime {
 
 export interface AgentSessionRecord {
   session_id: string;
-  artifact?: string;
-  artifact_sha256?: string;
+  artifact: string;
+  artifact_sha256: string;
   turn_count: number;
 }
 
