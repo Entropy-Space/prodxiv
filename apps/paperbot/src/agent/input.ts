@@ -69,6 +69,15 @@ export function normalizeExternalSources(value: unknown): string[] {
   return sources;
 }
 
+export function normalizeModelName(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._/-]{1,200}$/.test(value)) {
+    throw usageError(
+      "agent model must contain only provider-safe identifier characters",
+    );
+  }
+  return value;
+}
+
 export function normalizeAgentMetadata(value: unknown): AgentPaperMetadata {
   if (!isRecord(value)) {
     throw usageError("agent metadata must be an object");

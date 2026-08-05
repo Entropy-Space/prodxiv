@@ -1,4 +1,4 @@
 interface:
   display_name: "Paperbot"
-  short_description: "Draft product papers from repositories"
+  short_description: "Select repositories and draft product papers"
   default_prompt: "Use $paperbot to draft a product paper from this repository."

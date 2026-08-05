@@ -2,7 +2,7 @@
   "snapshot_date": "2026-07-29",
   "captured_at": null,
   "period": "daily",
-  "language": null,
+  "language": "any",
   "spoken_language": null,
   "source_kind": "third_party_archive",
   "source_url": "https://github.com/antonkomarev/github-trending-archive/blob/bd6c3cee9c12e1958797b3716e12b6278edd792a/archive/repository/2026/2026-07-29/(null).json",

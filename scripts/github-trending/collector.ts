@@ -23,6 +23,9 @@ export const defaultLanguages = [
   "zig",
 ] as const;
 
+export const ANY_LANGUAGE = "any";
+export const ALL_LANGUAGES = "all";
+
 export interface TrendingEntry {
   repository_full_name: string;
   repository_node_id: string | null;
@@ -37,7 +40,7 @@ export interface TrendingSnapshot {
   snapshot_date: string;
   captured_at: string;
   period: "daily";
-  language: string | null;
+  language: string;
   spoken_language: null;
   source_kind: "direct_fetch";
   source_url: string;
@@ -48,11 +51,11 @@ export interface TrendingSnapshot {
 export interface CollectionOptions {
   snapshot_date: string;
   captured_at: string;
-  languages: Array<string | null>;
+  languages: string[];
 }
 
 export interface CollectionFailure {
-  language: string | null;
+  language: string;
   message: string;
 }
 
@@ -63,19 +66,27 @@ export interface CollectionResult {
 
 export class TrendingParseError extends Error {}
 
-export function trendingUrl(language: string | null): string {
-  const path = language === null ? "" : `/${encodeURIComponent(language)}`;
+export function trendingUrl(language: string): string {
+  assertSnapshotLanguage(language);
+  const path =
+    language === ANY_LANGUAGE ? "" : `/${encodeURIComponent(language)}`;
   return `https://github.com/trending${path}?since=daily`;
 }
 
-export function snapshotFileName(language: string | null): string {
-  if (language === null) {
-    return "all.json";
-  }
+export function snapshotFileName(language: string): string {
+  assertSnapshotLanguage(language);
   return `${language
     .replaceAll("#", "-sharp")
     .replaceAll("+", "-plus")
     .replace(/[^a-z0-9-]+/g, "-")}.json`;
+}
+
+function assertSnapshotLanguage(language: string): void {
+  if (language === ALL_LANGUAGES || !/^[a-z0-9#+.-]+$/.test(language)) {
+    throw new Error(
+      "snapshot language must be any or a concrete lowercase language slug",
+    );
+  }
 }
 
 export function parseTrendingHtml(source: string): TrendingEntry[] {
@@ -155,10 +166,10 @@ export async function collectTrendingSnapshots(
         source_revision,
         entries,
       });
-      console.log(`${language ?? "all"}: captured ${entries.length} entries`);
+      console.log(`${language}: captured ${entries.length} entries`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`${language ?? "all"}: ${message}`);
+      console.error(`${language}: ${message}`);
       failures.push({ language, message });
     }
   }

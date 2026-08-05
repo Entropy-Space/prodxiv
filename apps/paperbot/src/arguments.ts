@@ -122,6 +122,17 @@ export interface AgentBatchArguments {
   format: OutputFormat;
 }
 
+export interface AgentSelectTrendingArguments {
+  command: "agent";
+  action: "select-trending";
+  output_path: string;
+  allow_remote_model: boolean;
+  api_url?: string;
+  snapshot_path?: string;
+  model?: string;
+  format: OutputFormat;
+}
+
 export type AuthArguments =
   | {
       command: "auth";
@@ -146,6 +157,7 @@ export type ParsedArguments =
   | AgentRunArguments
   | AgentResumeArguments
   | AgentBatchArguments
+  | AgentSelectTrendingArguments
   | AuthArguments
   | {
       command: "help";
@@ -185,6 +197,7 @@ function parseAgentArguments(
   | AgentRunArguments
   | AgentResumeArguments
   | AgentBatchArguments
+  | AgentSelectTrendingArguments
   | { command: "help" } {
   const action = args[0];
   if (action === "--help" || action === "-h") {
@@ -199,7 +212,12 @@ function parseAgentArguments(
   if (action === "batch") {
     return parseAgentBatchArguments(args.slice(1));
   }
-  throw usageError("agent requires one of: run, resume, batch");
+  if (action === "select-trending") {
+    return parseAgentSelectTrendingArguments(args.slice(1));
+  }
+  throw usageError(
+    "agent requires one of: run, resume, batch, select-trending",
+  );
 }
 
 function parseAgentRunArguments(
@@ -524,6 +542,104 @@ function parseAgentBatchArguments(
     ...(status === undefined ? {} : { status }),
     ...(model === undefined ? {} : { model }),
     ...(concurrency === undefined ? {} : { concurrency }),
+    format,
+  };
+}
+
+function parseAgentSelectTrendingArguments(
+  args: string[],
+): AgentSelectTrendingArguments | { command: "help" } {
+  let output_path: string | undefined;
+  let api_url: string | undefined;
+  let snapshot_path: string | undefined;
+  let model: string | undefined;
+  let format: OutputFormat = "text";
+  let allow_remote_model = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return { command: "help" };
+    }
+    if (argument === "--allow-remote-model") {
+      allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--output") {
+      output_path = requiredFollowingValue(args, index, "--output");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--output=")) {
+      output_path = requiredInlineValue(argument, "--output");
+      continue;
+    }
+    if (argument === "--api-url") {
+      api_url = requiredFollowingValue(args, index, "--api-url");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--api-url=")) {
+      api_url = requiredInlineValue(argument, "--api-url");
+      continue;
+    }
+    if (argument === "--snapshot") {
+      snapshot_path = requiredFollowingValue(args, index, "--snapshot");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--snapshot=")) {
+      snapshot_path = requiredInlineValue(argument, "--snapshot");
+      continue;
+    }
+    if (argument === "--model") {
+      model = requiredFollowingValue(args, index, "--model");
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--model=")) {
+      model = requiredInlineValue(argument, "--model");
+      continue;
+    }
+    if (argument === "--format") {
+      format = parseFormat(requiredFollowingValue(args, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--format=")) {
+      format = parseFormat(requiredInlineValue(argument, "--format"));
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      throw usageError(`unknown option: ${argument}`);
+    }
+    throw usageError("agent select-trending does not accept positional inputs");
+  }
+
+  if (output_path === undefined) {
+    throw usageError("agent select-trending requires --output");
+  }
+  if (!allow_remote_model) {
+    throw usageError(
+      "agent select-trending requires --allow-remote-model before the public trend snapshot is sent to a model",
+    );
+  }
+  if (api_url !== undefined && snapshot_path !== undefined) {
+    throw usageError(
+      "agent select-trending accepts either --snapshot or --api-url, not both",
+    );
+  }
+  return {
+    command: "agent",
+    action: "select-trending",
+    output_path,
+    allow_remote_model,
+    ...(api_url === undefined ? {} : { api_url }),
+    ...(snapshot_path === undefined ? {} : { snapshot_path }),
+    ...(model === undefined ? {} : { model }),
     format,
   };
 }

@@ -165,6 +165,22 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   expect(agent.exit_code).toBe(6);
   expect(agent.stderr).toContain("DEEPSEEK_API_KEY is required");
 
+  const trendSelection = await runProcess(
+    [
+      binaryPath,
+      "agent",
+      "select-trending",
+      "--output",
+      join(cleanPath, "trend-run"),
+    ],
+    cleanPath,
+    environment,
+  );
+  expect(trendSelection.exit_code).toBe(2);
+  expect(trendSelection.stderr).toContain(
+    "agent select-trending requires --allow-remote-model",
+  );
+
   const batchInputPath = join(cleanPath, "projects.json");
   await writeFile(batchInputPath, '{"schema_version":"1","projects":[]}\n');
   const batch = await runProcess(

@@ -40,7 +40,8 @@ export interface GetGitHubTrendingInput {
 }
 
 export interface GitHubTrendingView {
-  snapshot?: GitHubTrendingSnapshot;
+  requested_language: string;
+  snapshots: GitHubTrendingSnapshot[];
   previous_date?: string;
   next_date?: string;
   available_languages: string[];
@@ -195,7 +196,16 @@ export class ProdxivApiClient {
     const { response, body } = await this.#request(
       `/v1/github/trending${suffix}`,
     );
-    return githubTrending(response, body);
+    const view = githubTrending(response, body);
+    const requested_language = input.language?.trim().toLowerCase() || "any";
+    if (view.requested_language !== requested_language) {
+      throw new ProdxivApiError(
+        response.status,
+        "network.invalid_response",
+        "prodxiv API returned a different GitHub Trending language selector",
+      );
+    }
+    return view;
   }
 
   async #request(
@@ -301,15 +311,18 @@ function githubTrending(response: Response, body: unknown): GitHubTrendingView {
   }
   if (
     !isRecord(body) ||
-    !(
-      body.snapshot === undefined ||
-      body.snapshot === null ||
-      isGitHubTrendingSnapshot(body.snapshot)
-    ) ||
+    !isGitHubTrendingLanguageSelector(body.requested_language) ||
+    !Array.isArray(body.snapshots) ||
+    !body.snapshots.every(isGitHubTrendingSnapshot) ||
+    (body.requested_language !== "all" &&
+      (body.snapshots.length > 1 ||
+        body.snapshots.some(
+          (snapshot) => snapshot.language !== body.requested_language,
+        ))) ||
     !isOptionalDateString(body.previous_date) ||
     !isOptionalDateString(body.next_date) ||
     !Array.isArray(body.available_languages) ||
-    !body.available_languages.every(isNonEmptyString)
+    !body.available_languages.every(isConcreteGitHubTrendingLanguage)
   ) {
     throw new ProdxivApiError(
       response.status,
@@ -318,9 +331,8 @@ function githubTrending(response: Response, body: unknown): GitHubTrendingView {
     );
   }
   return {
-    ...(body.snapshot === undefined || body.snapshot === null
-      ? {}
-      : { snapshot: body.snapshot }),
+    requested_language: body.requested_language,
+    snapshots: body.snapshots,
     ...(body.previous_date === undefined || body.previous_date === null
       ? {}
       : { previous_date: body.previous_date }),
@@ -341,7 +353,7 @@ function isGitHubTrendingSnapshot(
     (value.period === "daily" ||
       value.period === "weekly" ||
       value.period === "monthly") &&
-    isOptionalString(value.language) &&
+    isGitHubTrendingLanguageScope(value.language) &&
     isOptionalString(value.spoken_language) &&
     isNonEmptyString(value.source_kind) &&
     isNonEmptyString(value.source_url) &&
@@ -349,6 +361,23 @@ function isGitHubTrendingSnapshot(
     Array.isArray(value.entries) &&
     value.entries.every(isGitHubTrendingEntry)
   );
+}
+
+function isGitHubTrendingLanguageSelector(value: unknown): value is string {
+  return value === "all" || isGitHubTrendingLanguageScope(value);
+}
+
+function isGitHubTrendingLanguageScope(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 100 &&
+    value !== "all" &&
+    /^[a-z0-9#+.-]+$/.test(value)
+  );
+}
+
+function isConcreteGitHubTrendingLanguage(value: unknown): value is string {
+  return value !== "any" && isGitHubTrendingLanguageScope(value);
 }
 
 function isGitHubTrendingEntry(value: unknown): value is GitHubTrendingEntry {

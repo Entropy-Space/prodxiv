@@ -55,7 +55,7 @@ export async function readGitHubTrending(
     const view = await client.getGitHubTrending({
       ...(options.date === undefined ? {} : { date: options.date }),
       ...(options.period === undefined ? {} : { period: options.period }),
-      ...(options.language === undefined ? {} : { language: options.language }),
+      language: options.language ?? "any",
       ...(options.spoken_language === undefined
         ? {}
         : { spoken_language: options.spoken_language }),
@@ -88,33 +88,15 @@ export async function readGitHubTrendingDay(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const baseView = await client.getGitHubTrending({
+    const view = await client.getGitHubTrending({
       date: options.date,
       ...(options.period === undefined ? {} : { period: options.period }),
+      language: "all",
       ...(options.spoken_language === undefined
         ? {}
         : { spoken_language: options.spoken_language }),
     });
-    const languageViews = await Promise.all(
-      baseView.available_languages.map((language) =>
-        client.getGitHubTrending({
-          date: options.date,
-          ...(options.period === undefined ? {} : { period: options.period }),
-          language,
-          ...(options.spoken_language === undefined
-            ? {}
-            : { spoken_language: options.spoken_language }),
-        }),
-      ),
-    );
-    if (languageViews.some((view) => view.snapshot === undefined)) {
-      throw new Error("an advertised Trending scope was not returned");
-    }
-    const snapshots = [baseView, ...languageViews].flatMap((view) =>
-      view.snapshot === undefined ? [] : [view.snapshot],
-    );
-
-    return { ok: true, snapshots };
+    return { ok: true, snapshots: view.snapshots };
   } catch {
     return {
       ok: false,

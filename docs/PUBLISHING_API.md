@@ -64,6 +64,12 @@ It accepts multiple JSON paths in one invocation and records successful
 zero-entry snapshots, preserving the distinction between an empty Trending
 scope and a failed collection attempt.
 
+Snapshot JSON always names its language scope. `language: "any"` is GitHub's
+single unfiltered Trending page; concrete language slugs name exact filtered
+pages. The storage codec maps `any` to the existing SQL `NULL` representation,
+so this terminology change requires no data migration. `all` is a read or
+collector selector and is never stored as a snapshot language.
+
 ## Collect GitHub Trending daily
 
 The `Collect GitHub Trending` GitHub Actions workflow runs every day at
@@ -83,8 +89,8 @@ preview. Preview URLs and their backing databases are ephemeral, whereas
 trending snapshots are durable observations. Use a stable staging API and
 database for manual non-production ingestion.
 
-The Bun collector fetches the all-language page and the configured language
-scopes, validates GitHub's current Trending HTML, and creates snapshots using
+The Bun collector fetches the unfiltered `any` page and the configured concrete
+language scopes, validates GitHub's current Trending HTML, and creates snapshots using
 the same JSON contract as the local fixture importer. It sends each successful
 scope to the authenticated API independently. The API validates it again,
 records the ingestion actor and idempotency key, and stores the observation in
@@ -113,10 +119,13 @@ PRODXIV_TRENDING_INGEST_ACTOR=local_trending_collector \
     --captured-at "${captured_at}"
 ```
 
-The default scopes are All, C#, C++, Dart, Elixir, Go, Java, JavaScript, Julia,
+The default scopes are Any, C#, C++, Dart, Elixir, Go, Java, JavaScript, Julia,
 Kotlin, Markdown, PHP, Python, Raku, Rust, Scala, Shell, Swift, TypeScript, Vue,
 and Zig. Pass one or more `--language` options to collect only selected scopes;
-use `--language all` for the all-language page.
+use `--language any` for only the unfiltered page. `--language all` expands to
+`any` plus every configured concrete scope and cannot be combined with another
+`--language` value. With no language option, the collector uses the same `all`
+expansion.
 
 With the API and website running, open `http://127.0.0.1:4321/trending`. The
 page reads the latest exact match for `period`, `language`, and
@@ -124,8 +133,13 @@ page reads the latest exact match for `period`, `language`, and
 falling back to a different observation.
 
 Passing `date=YYYY-MM-DD` reads an exact historical snapshot. Each response
-also includes the nearest earlier and later imported dates for that scope, plus
-the language scopes available on the selected date. The website uses that
+contains `requested_language` and a `snapshots` array. Omitted `language` and
+`language=any` select the single unfiltered scope, a concrete slug selects that
+exact scope, and `language=all` returns every stored scope for the date in one
+response. Each snapshot still has a concrete language value (`any` or a slug),
+never `all` or `null`. The response also includes the nearest earlier and later
+imported dates for the selector, plus the concrete language scopes available on
+the selected date. The website uses that
 metadata for day arrows and language tabs; it does not assume observations
 exist for every calendar day or language.
 

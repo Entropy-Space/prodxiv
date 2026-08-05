@@ -32,7 +32,7 @@ export function buildGitHubTrendingCsv(
       rows.push([
         snapshot.snapshot_date,
         snapshot.period,
-        snapshot.language ?? "all",
+        snapshot.language,
         snapshot.spoken_language,
         entry.rank,
         entry.repository_full_name,

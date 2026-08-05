@@ -15,8 +15,9 @@ use prodxiv_domain::{
     PaperDocument, PublicationIdentity, PublishedPaper, PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
-    GitHubTrendingEntry, GitHubTrendingSnapshot, GitHubTrendingView, NewGitHubTrendingSnapshot,
-    PublicationCursor, PublicationPage, PublishOutcome, TrendingImportOutcome,
+    GitHubTrendingEntry, GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector,
+    GitHubTrendingSnapshot, GitHubTrendingView, NewGitHubTrendingSnapshot, PublicationCursor,
+    PublicationPage, PublishOutcome, TrendingImportOutcome,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -30,7 +31,7 @@ struct FakeStore {
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
     trending_requests: Mutex<HashMap<String, String>>,
     trending_actors: Mutex<Vec<String>>,
-    github_trending: Mutex<Option<GitHubTrendingSnapshot>>,
+    github_trending: Mutex<Vec<GitHubTrendingSnapshot>>,
 }
 
 #[async_trait]
@@ -149,24 +150,29 @@ impl PublicationStore for FakeStore {
     async fn github_trending_view(
         &self,
         period: &str,
-        language: Option<&str>,
+        language: &GitHubTrendingLanguageSelector,
         spoken_language: Option<&str>,
         snapshot_date: Option<&str>,
     ) -> Result<GitHubTrendingView, StoreError> {
-        let snapshot = self
-            .github_trending
-            .lock()
-            .expect("fake Trending snapshot should lock")
-            .as_ref()
-            .filter(|snapshot| {
-                snapshot.period == period
-                    && snapshot.language.as_deref() == language
-                    && snapshot.spoken_language.as_deref() == spoken_language
-                    && snapshot_date.is_none_or(|date| snapshot.snapshot_date == date)
-            })
-            .cloned();
+        let snapshots = {
+            let snapshots = self
+                .github_trending
+                .lock()
+                .expect("fake Trending snapshot should lock");
+            snapshots
+                .iter()
+                .filter(|snapshot| {
+                    snapshot.period == period
+                        && (matches!(language, GitHubTrendingLanguageSelector::All)
+                            || snapshot.language.as_str() == language.as_str())
+                        && snapshot.spoken_language.as_deref() == spoken_language
+                        && snapshot_date.is_none_or(|date| snapshot.snapshot_date == date)
+                })
+                .cloned()
+                .collect()
+        };
         Ok(GitHubTrendingView {
-            snapshot,
+            snapshots,
             previous_date: None,
             next_date: None,
             available_languages: vec!["rust".to_owned(), "typescript".to_owned()],
@@ -254,11 +260,11 @@ async fn json_body(response: axum::response::Response) -> Value {
 #[tokio::test]
 async fn reads_the_latest_github_trending_snapshot() {
     let store = Arc::new(FakeStore {
-        github_trending: Mutex::new(Some(GitHubTrendingSnapshot {
+        github_trending: Mutex::new(vec![GitHubTrendingSnapshot {
             snapshot_date: "2026-07-29".to_owned(),
             captured_at: None,
             period: "daily".to_owned(),
-            language: None,
+            language: GitHubTrendingLanguageScope::Any,
             spoken_language: None,
             source_kind: "third_party_archive".to_owned(),
             source_url: "https://example.com/archive".to_owned(),
@@ -273,7 +279,7 @@ async fn reads_the_latest_github_trending_snapshot() {
                 forks: None,
                 stars_in_period: None,
             }],
-        })),
+        }]),
         ..FakeStore::default()
     });
     let response = app(store)
@@ -287,13 +293,52 @@ async fn reads_the_latest_github_trending_snapshot() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
-    assert_eq!(body["snapshot"]["snapshot_date"], "2026-07-29");
+    assert_eq!(body["requested_language"], "any");
+    assert_eq!(body["snapshots"][0]["snapshot_date"], "2026-07-29");
+    assert_eq!(body["snapshots"][0]["language"], "any");
     assert_eq!(body["available_languages"][0], "rust");
     assert!(body["previous_date"].is_null());
     assert_eq!(
-        body["snapshot"]["entries"][0]["repository_url"],
+        body["snapshots"][0]["entries"][0]["repository_url"],
         "https://github.com/pascalorg/editor"
     );
+}
+
+#[tokio::test]
+async fn reads_all_github_trending_language_scopes() {
+    let snapshot = |language| GitHubTrendingSnapshot {
+        snapshot_date: "2026-07-29".to_owned(),
+        captured_at: None,
+        period: "daily".to_owned(),
+        language,
+        spoken_language: None,
+        source_kind: "third_party_archive".to_owned(),
+        source_url: "https://example.com/archive".to_owned(),
+        source_revision: "abc123".to_owned(),
+        entries: Vec::new(),
+    };
+    let store = Arc::new(FakeStore {
+        github_trending: Mutex::new(vec![
+            snapshot(GitHubTrendingLanguageScope::Any),
+            snapshot(GitHubTrendingLanguageScope::Language("rust".to_owned())),
+        ]),
+        ..FakeStore::default()
+    });
+    let response = app(store)
+        .oneshot(
+            Request::get("/v1/github/trending?period=daily&language=all")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["requested_language"], "all");
+    assert_eq!(body["snapshots"].as_array().map(Vec::len), Some(2));
+    assert_eq!(body["snapshots"][0]["language"], "any");
+    assert_eq!(body["snapshots"][1]["language"], "rust");
 }
 
 #[tokio::test]
@@ -342,6 +387,33 @@ async fn ingests_a_trending_snapshot_idempotently() {
             "github_actions:daily_trending",
             "github_actions:daily_trending"
         ]
+    );
+}
+
+#[tokio::test]
+async fn rejects_all_as_an_ingested_language_scope() {
+    let mut snapshot = trending_snapshot_json();
+    snapshot["language"] = json!("all");
+    let response = app(Arc::new(FakeStore::default()))
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {INGEST_TOKEN}"))
+                .header("idempotency-key", "github-trending.test.all")
+                .header("x-prodxiv-actor", "github_actions:daily_trending")
+                .body(Body::from(snapshot.to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["code"], "trending.snapshot_invalid");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("all is query-only"))
     );
 }
 

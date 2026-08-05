@@ -37,32 +37,35 @@ describe("ProdxivApiClient", () => {
       fetch: async (input) => {
         requestUrl = input.toString();
         return Response.json({
+          requested_language: "typescript",
           previous_date: "2026-07-28",
           next_date: null,
           available_languages: ["rust", "typescript"],
-          snapshot: {
-            snapshot_date: "2026-07-29",
-            captured_at: null,
-            period: "daily",
-            language: "typescript",
-            spoken_language: null,
-            source_kind: "third_party_archive",
-            source_url: "https://example.com/archive",
-            source_revision: "abc123",
-            entries: [
-              {
-                rank: 1,
-                repository_full_name: "pascalorg/editor",
-                repository_node_id: null,
-                repository_url: "https://github.com/pascalorg/editor",
-                description: "A repository",
-                primary_language: "TypeScript",
-                stars: null,
-                forks: null,
-                stars_in_period: null,
-              },
-            ],
-          },
+          snapshots: [
+            {
+              snapshot_date: "2026-07-29",
+              captured_at: null,
+              period: "daily",
+              language: "typescript",
+              spoken_language: null,
+              source_kind: "third_party_archive",
+              source_url: "https://example.com/archive",
+              source_revision: "abc123",
+              entries: [
+                {
+                  rank: 1,
+                  repository_full_name: "pascalorg/editor",
+                  repository_node_id: null,
+                  repository_url: "https://github.com/pascalorg/editor",
+                  description: "A repository",
+                  primary_language: "TypeScript",
+                  stars: null,
+                  forks: null,
+                  stars_in_period: null,
+                },
+              ],
+            },
+          ],
         });
       },
     });
@@ -73,9 +76,10 @@ describe("ProdxivApiClient", () => {
       language: "typescript",
     });
 
-    expect(view.snapshot?.entries[0]?.repository_full_name).toBe(
+    expect(view.snapshots[0]?.entries[0]?.repository_full_name).toBe(
       "pascalorg/editor",
     );
+    expect(view.requested_language).toBe("typescript");
     expect(view.previous_date).toBe("2026-07-28");
     expect(requestUrl).toBe(
       "https://api.prodxiv.example/v1/github/trending?date=2026-07-29&period=daily&language=typescript",

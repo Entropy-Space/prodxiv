@@ -1,6 +1,6 @@
 ---
 name: paperbot
-description: Turn an existing repository and its documentation into a prodxiv product paper draft, validate it, and publish it after explicit author approval. Use when an agent needs to scan a codebase, draft or improve a Markdown product paper, interview an author about intent and tradeoffs, review uncertain statements, validate a draft, or submit an approved paper with the Paperbot CLI.
+description: Select a daily GitHub Trending research queue or turn an existing repository and its documentation into a prodxiv product paper draft, validate it, and publish it after explicit author approval. Use when an agent needs to identify interesting trending repositories, scan a codebase, draft or improve a Markdown product paper, interview an author about intent and tradeoffs, review uncertain statements, validate a draft, or submit an approved paper with the Paperbot CLI.
 ---
 
 # Paperbot
@@ -42,7 +42,8 @@ arguments are supplied.
 ## Use the optional Pi agent
 
 Use `PAPERBOT_CMD agent` only when the user explicitly authorizes remote model
-analysis. It is a private drafting workflow, never a publication workflow.
+analysis. These are private research or drafting workflows, never publication
+workflows.
 
 Prefer the configured local model router when available:
 
@@ -59,6 +60,30 @@ Alternatively, direct DeepSeek remains supported with `DEEPSEEK_API_KEY` when
 no local router is configured. Never put any key in a command argument,
 manifest, paper, or run artifact.
 
+To rank today's public all-language GitHub Trending snapshot for deeper
+product-paper research, run:
+
+```sh
+PAPERBOT_CMD agent select-trending \
+  --output ./paperbot-runs/trending-YYYY-MM-DD \
+  --allow-remote-model \
+  --format json
+```
+
+The default source is the exact UTC day's all-language daily observation at
+`https://prodxiv-api.vercel.app/`. Override it with `--api-url` or a non-empty
+`PRODXIV_API_URL` only for development or self-hosting. If that observation is
+unavailable, stop; never substitute direct GitHub scraping, a nearby date, or
+another source. For a reproducible or offline run, add
+`--snapshot <snapshot.json>` using a previously saved bare prodxiv snapshot.
+The host validates and writes `snapshot.json`, sends
+only its normalized public metadata to one tool-less Pi session, and accepts
+exactly ten unique candidates into `selection.json`. Treat the result as a
+research queue, not an endorsement or repository evidence. This command does
+not download repository contents, create paper runs, or publish. Do not turn
+the selection into a batch without separate user direction and the required
+author and product-status metadata.
+
 For a public GitHub repository, require the author to provide their paper
 identity and a product status rather than inferring either from contributors or
 marketing copy:
@@ -71,18 +96,18 @@ PAPERBOT_CMD agent run https://github.com/owner/repository \
   --allow-remote-model
 ```
 
-`--allow-remote-model` is explicit consent to send the bounded selected source
-bundle to the configured model, including through a loopback router that may
-route it onward. The agent accepts a local Git worktree or an anonymous
-canonical public GitHub URL. For GitHub it resolves an exact source revision
-without cloning or executing repository code. It has no shell, filesystem,
-browser, credential, or publish tools.
+`--allow-remote-model` is explicit consent to send the bounded public snapshot
+or selected source bundle to the configured model, including through a
+loopback router that may route it onward. A paper run accepts a local Git
+worktree or an anonymous canonical public GitHub URL. For GitHub it resolves
+an exact source revision without cloning or executing repository code. It has
+no shell, filesystem, browser, credential, or publish tools.
 
-The run uses exactly two private logical Pi sessions. The evidence session
-extracts exact repository excerpts into `evidence.jsonl`; after host integrity
-validation, the author session drafts and revises from that ledger. The author
-session may emit a bounded `ask_questions` protocol event, but that event is
-not a public deterministic tool. Private artifacts include `draft.md`,
+An `agent run` uses exactly two private logical Pi sessions. The evidence
+session extracts exact repository excerpts into `evidence.jsonl`; after host
+integrity validation, the author session drafts and revises from that ledger.
+The author session may emit a bounded `ask_questions` protocol event, but that
+event is not a public deterministic tool. Private artifacts include `draft.md`,
 `drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
 `validation.json`, and—when the interview is complete—`paper.md`. The workflow
 always stops at author review. Do not use `publish` unless the author separately

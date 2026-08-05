@@ -2,6 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  ALL_LANGUAGES,
+  ANY_LANGUAGE,
   collectTrendingSnapshots,
   defaultLanguages,
   snapshotFileName,
@@ -16,7 +18,7 @@ import {
 interface Arguments {
   snapshot_date: string;
   captured_at: string;
-  languages: Array<string | null>;
+  languages: string[];
   output_dir: string | null;
 }
 
@@ -40,7 +42,7 @@ export async function runCollector(
   if (failures.length > 0) {
     throw new Error(
       `failed to process ${failures.length} scope(s): ${failures
-        .map(({ language }) => language ?? "all")
+        .map(({ language }) => language)
         .join(", ")}`,
     );
   }
@@ -50,7 +52,7 @@ export function parseArguments(values: string[]): Arguments {
   let snapshot_date: string | null = null;
   let captured_at: string | null = null;
   let output_dir: string | null = null;
-  const languages: Array<string | null> = [];
+  const requestedLanguages: string[] = [];
 
   for (let index = 0; index < values.length; index += 1) {
     const argument = values[index];
@@ -69,7 +71,7 @@ export function parseArguments(values: string[]): Arguments {
         if (!/^[a-z0-9#+.-]+$/.test(language)) {
           throw new Error(`invalid language slug: ${language}`);
         }
-        languages.push(language === "all" ? null : language);
+        requestedLanguages.push(language);
         break;
       }
       default:
@@ -86,13 +88,22 @@ export function parseArguments(values: string[]): Arguments {
   if (captured_at.slice(0, 10) !== snapshot_date) {
     throw new Error("--snapshot-date must match the UTC date in --captured-at");
   }
-  if (languages.length === 0) {
-    languages.push(null, ...defaultLanguages);
+  if (
+    requestedLanguages.includes(ALL_LANGUAGES) &&
+    requestedLanguages.length !== 1
+  ) {
+    throw new Error(
+      "--language all cannot be combined with other language scopes",
+    );
   }
-  const normalized = languages.map((language) => language ?? "all");
-  if (new Set(normalized).size !== normalized.length) {
+  if (new Set(requestedLanguages).size !== requestedLanguages.length) {
     throw new Error("language scopes must not be repeated");
   }
+
+  const languages =
+    requestedLanguages.length === 0 || requestedLanguages[0] === ALL_LANGUAGES
+      ? [ANY_LANGUAGE, ...defaultLanguages]
+      : requestedLanguages;
 
   return { snapshot_date, captured_at, languages, output_dir };
 }
@@ -149,7 +160,7 @@ function usage(): string {
     "usage: bun run collect:github-trending --",
     "  --snapshot-date YYYY-MM-DD",
     "  --captured-at YYYY-MM-DDTHH:MM:SSZ",
-    "  [--language all] [--language rust ...]",
+    "  [--language all | --language any | --language rust ...]",
     "  [--output-dir path]",
   ].join(" \\\n");
 }

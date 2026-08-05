@@ -110,7 +110,7 @@ The workspace separates deterministic capabilities from the CLI shell:
   validation, draft scaffolding, and canonical paper validation.
 - `packages/paperbot-source` owns local Git inspection, safe repository file
   selection, shared file classification, and the read-only public GitHub
-  source client.
+  repository source client.
 
 Dependencies point toward the deterministic core:
 
@@ -216,14 +216,15 @@ reading a small SHA-pinned UTF-8 source bundle. It does not clone the
 repository, run its code, install dependencies, or fetch
 arbitrary URLs.
 
-Pi runs with an in-memory credential store and exactly two private logical
-sessions: an evidence session and an author session. Their append-only session
-files live inside the mode-`0700` run directory and are mode `0600`; Paperbot
-records and verifies their IDs and SHA-256 digests before reopening the author
-session. Built-in tools, extensions, skills, prompt templates, themes, and
-repository context-file discovery remain disabled. The model receives
-host-built bundles; it cannot use a shell, read arbitrary files, browse the
-web, access environment variables, or call `publish`.
+An `agent run` paper workflow uses exactly two private logical sessions: an
+evidence session and an author session. Their append-only session files live
+inside the mode-`0700` run directory and are mode `0600`; Paperbot records and
+verifies their IDs and SHA-256 digests before reopening the author session.
+Every Pi workflow uses an in-memory credential store. Built-in tools,
+extensions, skills, prompt templates, themes, and repository context-file
+discovery remain disabled. The model receives host-built bundles; it cannot
+use a shell, read arbitrary files, browse the web, access environment
+variables, or call `publish`.
 
 The agent writes a new private run directory with:
 
@@ -279,6 +280,83 @@ link—not as evidence in the claim ledger. When related work needs external
 research, Paperbot records focused author questions rather than fabricating
 comparisons. The agent also omits `# Benchmarks` unless a future explicit
 reproducible benchmark input is added.
+
+### Daily GitHub Trending selection
+
+To create a bounded research queue from today's public GitHub Trending page,
+run:
+
+```sh
+bun run paperbot agent select-trending \
+  --output ./paperbot-runs/trending-2026-08-04 \
+  --allow-remote-model \
+  --model deepseek-v4-flash \
+  --format json
+```
+
+The scheduled prodxiv collector, outside Paperbot, captures and normalizes
+GitHub Trending and ingests immutable observations into the prodxiv archive.
+By default Paperbot requests the exact current UTC date with `period=daily`
+and `language=all` from the hosted prodxiv archive at
+`https://prodxiv-api.vercel.app/`. The API returns the unfiltered `any` scope
+and every stored concrete language scope for that day in one response.
+Paperbot requires the `any` scope and never treats it as a union or silently
+returns a partial response. `--api-url` or a
+non-empty `PRODXIV_API_URL` overrides the endpoint for development or
+self-hosting. If today's exact snapshots are unavailable, the command fails
+clearly. It never scrapes GitHub, selects a nearby date, or silently falls back
+to another source.
+
+For a reproducible or offline rerun, pass a previously saved Paperbot snapshot
+bundle instead of an API URL:
+
+```sh
+bun run paperbot agent select-trending \
+  --output ./paperbot-runs/trending-2026-08-03-rerun \
+  --snapshot ./snapshots/trending-2026-08-03.json \
+  --allow-remote-model \
+  --format json
+```
+
+`--snapshot` and `--api-url` are mutually exclusive. A file input may describe
+an older date. The preferred input is the schema-versioned `snapshot.json`
+bundle from an earlier run. Its top-level `language` is `all` or `any`, while
+each contained scope uses `any` or a concrete language slug. Every scope must
+share the date and daily period, use no spoken-language filter, and contain
+canonical, unique, sequentially ranked repositories. Bare unfiltered prodxiv
+snapshots from earlier Paperbot runs remain accepted as single-scope inputs;
+legacy `language: null` is normalized to `any` at this file boundary. Paperbot
+bounds and validates either form, writes the normalized bundle with every raw
+scope observation to the new run's `snapshot.json`, and only then starts Pi.
+
+Paperbot deduplicates repositories across scopes by case-insensitive canonical
+full name before starting one separate, tool-less `trend_selection` Pi session.
+The first appearance in deterministic scope-and-rank order supplies shared
+repository metadata. Each candidate also carries `source_appearances`, which
+preserves every scope language, source rank, and per-scope `stars_in_period`;
+the raw source snapshots remain intact in `snapshot.json`. The session receives
+only this normalized public candidate set and scope provenance. It cannot open
+repositories or browse for more context. It ranks exactly ten candidates for
+potential product-paper research using distinct ideas, learning value,
+inspectable implementation, and diversity as selection signals. Popularity
+and appearing in multiple scopes are context, not the score. Repository names
+and descriptions are treated as untrusted data, and the model-authored reason
+is a research rationale rather than evidence about the repository.
+
+The host accepts only ten unique names from the archived candidates, rejects
+unknown fields and malformed reasons, and copies all repository metadata from
+the snapshot rather than trusting the model to repeat it. One correction turn
+is permitted in the same session. A valid run writes the versioned
+`selection.json` with per-scope snapshot provenance, model and session
+metadata, selection `rank`, deterministic `candidate_rank`,
+`source_appearances`, and reasons. `--format json` emits that same selection
+artifact on stdout; diagnostics stay on stderr. A validated `language=all` snapshot
+remains available if fewer than ten unique candidates make selection
+impossible.
+
+This command does not download repository contents, start paper-drafting
+sessions, create a batch manifest, submit, or publish. Its ten results are a
+research queue, not endorsements.
 
 ### Batch public repositories
 

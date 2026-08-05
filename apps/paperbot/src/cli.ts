@@ -5,6 +5,10 @@ import type { AgentBatchOptions, AgentBatchResult } from "./agent/batch.ts";
 import type { ToolsArguments } from "./arguments.ts";
 import type { AgentResumeOptions, AgentRunOptions } from "./agent/runner.ts";
 import type { AgentRunResult } from "./agent/types.ts";
+import type {
+  TrendSelectionOptions,
+  TrendSelectionRunResult,
+} from "./agent/trend-selection.ts";
 import {
   ExitCode,
   PaperbotError,
@@ -55,6 +59,7 @@ Usage:
   paperbot agent run <repository> --output <run-directory> --author <name> [--author <name> ...] --status <concept|private_beta|public_beta|launched|discontinued> --allow-remote-model [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
   paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
+  paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
@@ -68,7 +73,7 @@ Deterministic operations:
 
 Human and agent workflows:
   skills    Discover focused agent guidance by artifact scope and component
-  agent     Create or revise a private, evidence-backed paper draft with Pi
+  agent     Run bounded trend research or private paper drafting with Pi
 
 Agent-host deterministic tools:
   tools     Use the same deterministic operations with direct CLI arguments
@@ -88,10 +93,11 @@ Options:
   --status <status>    Product status for an agent run or batch default
   --source <url>       Supply a citeable public URL; Paperbot does not fetch it
   --ref <ref>          Request a GitHub revision for an agent run
-  --model <model>      Pi model for an agent run, resume, or batch
+  --model <model>      Pi model for an agent workflow
   --concurrency <1-4>  Concurrent projects for an agent batch (default: 1)
-  --allow-remote-model Explicitly allow the bounded source bundle to leave this machine
-  --api-url <url>      Publishing API base URL
+  --allow-remote-model Allow a bounded public snapshot or source bundle to reach the model
+  --api-url <url>      Override the hosted archive API, or configure publishing
+  --snapshot <path>    Use an archived trend snapshot file instead of the API
   --site-url <url>     Public website base URL for reader links
   --token-stdin        Read the publishing token from stdin
   --product-id <id>    Attach a new paper to an existing product
@@ -134,6 +140,9 @@ export interface CliDependencies {
   run_agent?: (options: AgentRunOptions) => Promise<AgentRunResult>;
   resume_agent?: (options: AgentResumeOptions) => Promise<AgentRunResult>;
   run_agent_batch?: (options: AgentBatchOptions) => Promise<AgentBatchResult>;
+  run_trend_selection?: (
+    options: TrendSelectionOptions,
+  ) => Promise<TrendSelectionRunResult>;
 }
 
 const defaultIo: Required<CliIo> = {
@@ -291,6 +300,22 @@ export async function run(
         });
         writeAgentResult(io, parsed.format, parsed.action, result);
         return result.validation.valid ? ExitCode.success : ExitCode.validation;
+      }
+      if (parsed.action === "select-trending") {
+        const execute =
+          dependencies.run_trend_selection ??
+          (await loadTrendSelection()).runTrendSelection;
+        const result = await execute({
+          output_path: parsed.output_path,
+          allow_remote_model: parsed.allow_remote_model,
+          ...(parsed.api_url === undefined ? {} : { api_url: parsed.api_url }),
+          ...(parsed.snapshot_path === undefined
+            ? {}
+            : { snapshot_path: parsed.snapshot_path }),
+          ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        });
+        writeTrendSelectionResult(io, parsed.format, result);
+        return ExitCode.success;
       }
 
       const execute =
@@ -535,6 +560,12 @@ async function loadAgentBatch(): Promise<typeof import("./agent/batch.ts")> {
   return import("./agent/batch.ts");
 }
 
+async function loadTrendSelection(): Promise<
+  typeof import("./agent/trend-selection.ts")
+> {
+  return import("./agent/trend-selection.ts");
+}
+
 function writeAgentResult(
   io: CliIo,
   format: "text" | "json",
@@ -589,6 +620,34 @@ function writeAgentBatchResult(
       `Failed: ${result.report.summary.failed}`,
       `Report: ${result.output_path}/batch.json`,
       "Publication: not attempted. Review every private draft, evidence ledger, question list, and validation report before any submission.",
+    ].join("\n"),
+  );
+}
+
+function writeTrendSelectionResult(
+  io: CliIo,
+  format: "text" | "json",
+  result: TrendSelectionRunResult,
+): void {
+  if (format === "json") {
+    io.stdout(JSON.stringify(result.selection, null, 2));
+    io.stderr(
+      `paperbot: selected ${result.selection.selected_repositories.length} repositories in ${result.selection_path}`,
+    );
+    return;
+  }
+
+  io.stdout(
+    [
+      "Paperbot GitHub Trending selection",
+      `Snapshot: ${result.selection.snapshot.snapshot_date} (${result.selection.snapshot.candidate_count} unique candidates across ${result.selection.snapshot.scope_count} ${result.selection.snapshot.scope_count === 1 ? "scope" : "scopes"})`,
+      ...result.selection.selected_repositories.map(
+        (repository) =>
+          `${repository.rank}. ${repository.repository_full_name} — ${repository.reason}`,
+      ),
+      `Result: ${result.selection_path}`,
+      `Source snapshot: ${result.snapshot_path}`,
+      "Publication: not attempted. Selection is a research queue, not an endorsement.",
     ].join("\n"),
   );
 }
