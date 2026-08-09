@@ -1401,7 +1401,9 @@ function parseRelease(
   const publishedAt = normalizeReleaseTimestamp(value.published_at, index);
   const url = normalizeReleaseUrl(value.html_url, repository, index);
   const notes =
-    value.body === null || value.body.length === 0 ? undefined : value.body;
+    value.body === null || value.body.length === 0
+      ? undefined
+      : normalizeReleaseNotes(value.body);
   const boundedNotes =
     notes === undefined ? undefined : truncateReleaseNotes(notes);
   if (
@@ -1425,6 +1427,10 @@ function parseRelease(
       ? { notes_truncated: true }
       : {}),
   };
+}
+
+function normalizeReleaseNotes(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
 }
 
 function truncateReleaseNotes(value: string): string {

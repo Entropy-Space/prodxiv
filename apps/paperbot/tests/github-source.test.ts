@@ -811,6 +811,43 @@ describe("fetchGitHubReleases", () => {
     );
   });
 
+  test("normalizes release-note line endings before hashing and evidence validation", async () => {
+    const endpoint = urls();
+    const normalizedNotes = "First line.\n\nSecond line.\nThird line.";
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: "First line.\r\n\r\nSecond line.\rThird line.",
+              published_at: "2026-08-01T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    const result = await fetchGitHubReleases({
+      repository_url: "https://github.com/example/product",
+      fetch: mock.fetch,
+    });
+
+    expect(result.releases[0]).toMatchObject({
+      notes: normalizedNotes,
+      notes_sha256: new Bun.CryptoHasher("sha256")
+        .update(normalizedNotes)
+        .digest("hex"),
+    });
+    expect(result.releases[0]?.notes_truncated).toBeUndefined();
+  });
+
   test("rejects impossible release publication dates", async () => {
     const endpoint = urls();
     const mock = fetchMock(
