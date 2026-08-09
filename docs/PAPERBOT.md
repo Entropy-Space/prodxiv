@@ -19,6 +19,22 @@ product exists, why alternatives were rejected, or what its creators learned.
 Paperbot should describe what it can observe and turn missing context into
 specific author questions.
 
+Paperbot maintains a deliberate voice boundary. The evidence ledger is neutral
+research material: it refers to the product by name and never speaks as `we`.
+The paper is a disclosed draft written on behalf of its credited product
+authors, so its narrative uses `we`, `our`, and `us` for their work and
+decisions. Writer metadata names Paperbot and its model. First-person voice
+does not relax evidence requirements; unsupported intention, history, and
+lessons remain questions until the author answers them.
+
+The draft is organized around the problem the product solves. Background
+describes that problem, the people affected, its constraints, and why it is
+difficult. Motivation explains how and why the authors pursue their solution.
+Related Work describes how other identifiable work approaches the same problem.
+Core Features maps mechanisms back to those problem constraints. The current Pi
+workflow does not browse the web, so missing external Background or Related
+Work evidence remains visible for later research rather than being fabricated.
+
 ## Inputs and outputs
 
 Paperbot may analyze:
@@ -47,7 +63,8 @@ visible instead of filling them with speculation.
    selected file inventory.
 4. **Build an evidence ledger.** An evidence session reads the bounded source
    bundle, extracts exact source excerpts, and records observations,
-   qualified inferences, contradictions, unknowns, and candidate questions.
+   qualified inferences, contradictions, unknowns, and candidate questions in
+   neutral language that identifies the product by name.
 5. **Validate evidence integrity.** The host verifies source IDs, exact
    excerpts, locators, digests, evidence kinds, and source revision before any
    prose is drafted. This gate does not claim to prove semantic entailment.
@@ -55,9 +72,10 @@ visible instead of filling them with speculation.
    but a URL alone cannot support a factual claim. The current Pi workflow
    keeps URLs reference-only; a future collector must snapshot and validate
    their contents before admitting them as external evidence.
-7. **Generate a private draft.** A separate author session completes sections
-   supported by validated repository evidence or author statements and leaves
-   uncertain details as questions.
+7. **Generate a private draft.** A separate author session writes on behalf of
+   the credited product authors in first-person plural voice, completes
+   problem-centered sections supported by validated repository evidence or
+   author statements, and leaves uncertain details as questions.
 8. **Interview the author.** The same author session asks a short, adaptive set
    of questions about motivation, background, alternatives, tradeoffs, and
    lessons.
@@ -81,8 +99,7 @@ visible instead of filling them with speculation.
 
 ## Local-first persistence
 
-The repository implements local workspace storage and asynchronous
-synchronization.
+We keep workspace data locally and synchronize it asynchronously.
 
 > Author review:
 > Is offline operation a product goal or only an implementation detail?
@@ -274,13 +291,14 @@ The evidence session sees the bounded source bundle and returns evidence, not
 paper Markdown. It is instructed to build a selective, high-information ledger
 covering product purpose, mechanisms, interfaces, guarantees, verification,
 operations, performance methodology, tradeoffs, and limitations rather than
-collecting incidental constants or file-level trivia. Missing important areas
-become explicit unknowns. After the integrity gate, the author session sees
-only the validated evidence excerpts, metadata, external reference URLs, and
-recorded unknowns. It creates a product-centered candidate, then reviews and
-revises that candidate in the same conversation. That pass is self-review, not
-an independent model review; an independent final evidence review is
-intentionally deferred.
+collecting incidental constants or file-level trivia. Its claims and analysis
+refer to the product neutrally by name. Missing important areas become explicit
+unknowns. After the integrity gate, the author session sees only the validated
+evidence excerpts, metadata, external reference URLs, and recorded unknowns.
+It writes on behalf of the credited authors in first-person plural voice,
+creates a problem-centered candidate, then reviews and revises that candidate
+in the same conversation. That pass is self-review, not an independent model
+review; an independent final evidence review is intentionally deferred.
 
 During review, the author session emits one of two host-controlled protocol
 events: `submit_draft` or `ask_questions`. `ask_questions` is not a public

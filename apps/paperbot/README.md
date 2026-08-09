@@ -83,7 +83,10 @@ session that drafts and self-reviews from that validated ledger. Public GitHub
 runs use a bounded, coverage-aware file selection across architecture, core
 implementation, interfaces, verification, performance, and operations when
 available. The evidence prompt favors product-defining claims over incidental
-constants and file trivia. The author session can emit a bounded
+constants and file trivia and records them in neutral product-name language.
+The author session writes on behalf of the credited product authors using
+first-person plural voice, organizes the draft around the product problem, and
+does not invent intention merely to make `we` prose sound complete. It can emit a bounded
 `ask_questions` event;
 the host checkpoints it as `awaiting_author`, and `agent resume --answers`
 reopens the same logical author session. Once the loop completes, Paperbot

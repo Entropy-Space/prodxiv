@@ -52,16 +52,23 @@ inspectable data exists.
 
 ## Section guidance
 
-- **Summary:** State what the product is, who it serves, and the paper's scope.
-- **Background:** Separate documented context from history supplied by the
-  author.
-- **Motivation:** Prefer author answers. Code rarely explains why a product
-  exists.
-- **Related Work:** Name specific, inspectable alternatives and influences,
-  cite primary sources, and explain each relationship. Avoid unsupported
-  superiority claims.
-- **Core Features:** Describe observable behavior and important user-facing
-  constraints.
+- **Voice:** Evidence refers to the product neutrally by name. Paper prose is
+  written on behalf of the credited authors and uses `we`, `our`, and `us` for
+  their work and decisions. Do not narrate the authors as “they” or “the team.”
+  Intentional claims such as “we chose” require author input or explicit source
+  evidence.
+- **Summary:** State the problem, who experiences it, and the solution thesis.
+- **Background:** Explain the problem domain, affected users, constraints, and
+  why the problem is difficult. Separate documented context from history
+  supplied by the author.
+- **Motivation:** Explain how and why the authors pursue this solution and
+  which objectives shape it. Prefer author answers because code rarely
+  establishes intention.
+- **Related Work:** Explain how specific, inspectable alternatives and
+  influences approach the same problem, cite primary sources, and explain each
+  relationship. Avoid unsupported superiority claims.
+- **Core Features:** Map observable mechanisms and user-facing behavior to the
+  problem constraints they address.
 - **Architecture:** Separate observed technical boundaries from the author's
   explanation of why they exist.
 - **Benchmarks:** Include results only with reproducible methodology, inputs,

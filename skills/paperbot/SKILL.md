@@ -119,6 +119,14 @@ selection reserves coverage across architecture, core implementation,
 interfaces, verification, performance, and operations when available. Prefer
 claims that explain product purpose and mechanisms; omit technically true but
 paper-irrelevant constants, literals, and file trivia.
+Keep the evidence ledger in neutral analyst voice: identify the product by
+name, never as `we`. Write the paper on behalf of its credited product authors
+using `we`, `our`, and `us` for their work and decisions. Do not describe the
+authors from outside as “they” or “the team,” and do not turn observed
+implementation into unsupported first-person intent. Organize Background around
+the problem and its constraints, Motivation around how and why the authors
+pursue their solution, Related Work around other approaches to the same
+problem, and Core Features around the mapping from mechanisms to constraints.
 The author session may emit a bounded `ask_questions` protocol event, but that
 event is not a public deterministic tool. Private artifacts include `draft.md`,
 `drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
