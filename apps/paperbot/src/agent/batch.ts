@@ -11,7 +11,7 @@ import {
   MAX_AGENT_AUTHORS,
   MAX_AGENT_TEXT_LENGTH,
   MAX_AGENT_URL_LENGTH,
-  normalizeAgentMetadata,
+  normalizeAgentRequestMetadata,
   normalizeAnonymousHttpUrl,
   normalizeExternalSources,
   normalizeText,
@@ -20,7 +20,7 @@ import {
 import { initializeRunDirectory, writeJsonArtifact } from "./artifacts.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import { runAgent, type AgentRunOptions } from "./runner.ts";
-import type { AgentPaperMetadata, AgentRunResult } from "./types.ts";
+import type { AgentPaperRequestMetadata, AgentRunResult } from "./types.ts";
 
 export const AGENT_BATCH_SCHEMA_VERSION = "1";
 export const MAX_AGENT_BATCH_PROJECTS = 100;
@@ -69,7 +69,7 @@ export interface AgentBatchProjectReport {
   repository_url: string;
   output_path: string;
   state: AgentBatchProjectState;
-  metadata?: AgentPaperMetadata;
+  metadata?: AgentPaperRequestMetadata;
   started_at?: string;
   completed_at?: string;
   result?: AgentRunResult;
@@ -467,27 +467,17 @@ function normalizeOptions(options: AgentBatchOptions): {
 function projectMetadata(
   project: ParsedBatchProject,
   options: ReturnType<typeof normalizeOptions>,
-): AgentPaperMetadata {
+): AgentPaperRequestMetadata {
   const authors = project.authors ?? options.authors;
-  if (authors === undefined || authors.length === 0) {
-    throw usageError(
-      `${project.repository.canonical_url} requires authors in the project or batch command; Paperbot will not infer author attribution`,
-    );
-  }
   const status = project.status ?? options.status;
-  if (status === undefined) {
-    throw usageError(
-      `${project.repository.canonical_url} requires status in the project or batch command; Paperbot will not infer product status`,
-    );
-  }
   const productName =
     project.product_name ??
     productNameFromRepository(project.repository.repository);
-  return normalizeAgentMetadata({
+  return normalizeAgentRequestMetadata({
     title: project.title ?? `${productName} research draft`,
     product_name: productName,
-    authors,
-    status,
+    ...(authors === undefined ? {} : { authors }),
+    ...(status === undefined ? {} : { status }),
     ...(project.product_url === undefined
       ? {}
       : { product_url: project.product_url }),

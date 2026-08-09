@@ -140,7 +140,7 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   );
   expect(toolValidation.exit_code).toBe(0);
   expect(JSON.parse(toolValidation.stdout)).toMatchObject({
-    schema_version: "1",
+    schema_version: "2",
     valid: true,
     diagnostics: [],
   });

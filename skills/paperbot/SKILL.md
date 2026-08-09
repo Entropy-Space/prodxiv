@@ -81,22 +81,28 @@ only its normalized public metadata to one tool-less Pi session, and accepts
 exactly ten unique candidates into `selection.json`. Treat the result as a
 research queue, not an endorsement or repository evidence. This command does
 not download repository contents, create paper runs, or publish. Do not turn
-the selection into a batch without separate user direction and the required
-author and product-status metadata. The Pi-native JSONL remains private under
+the selection into a batch without separate user direction. The Pi-native
+JSONL remains private under
 `sessions/trend_selection/`; schema-version `2` `selection.json` records its
 relative path and SHA-256 digest but never embeds its contents.
 
-For a public GitHub repository, require the author to provide their paper
-identity and a product status rather than inferring either from contributors or
-marketing copy:
+For a public GitHub repository, Paperbot uses the repository owner as the
+default organization author, represented by `github:<owner>`. It never derives
+authors or contact addresses from commits, contributors, or commit email
+addresses. Paperbot snapshots up to ten releases and bounded release notes;
+stable release evidence supports `launched`, prerelease evidence supports
+`public_beta`, and no supporting release produces an explicit `unknown`
+status. Use repeatable `--author` or `--status` only as explicit overrides:
 
 ```sh
 PAPERBOT_CMD agent run https://github.com/owner/repository \
   --output ./paperbot-runs/repository \
-  --author "Paper author" \
-  --status public_beta \
   --allow-remote-model
 ```
+
+Every generated paper credits `paperbot` and the selected model as its agent
+writer. Agent-only papers omit `communication_email`; that optional field is
+reserved for papers with a credited human writer and is never inferred.
 
 `--allow-remote-model` is explicit consent to send the bounded public snapshot
 or selected source bundle to the configured model, including through a
@@ -106,8 +112,9 @@ an exact source revision without cloning or executing repository code. It has
 no shell, filesystem, browser, credential, or publish tools.
 
 An `agent run` uses exactly two private logical Pi sessions. The evidence
-session extracts exact repository excerpts into `evidence.jsonl`; after host
-integrity validation, the author session drafts and revises from that ledger.
+session extracts exact repository excerpts and snapshotted release-note
+excerpts into `evidence.jsonl`; after host integrity validation, the author
+session drafts and revises from that ledger.
 The author session may emit a bounded `ask_questions` protocol event, but that
 event is not a public deterministic tool. Private artifacts include `draft.md`,
 `drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
@@ -132,8 +139,6 @@ the batch command:
 ```sh
 PAPERBOT_CMD agent batch ./projects.json \
   --output ./paperbot-runs/trending \
-  --author "Paper research team" \
-  --status public_beta \
   --allow-remote-model \
   --concurrency 2
 ```
@@ -141,11 +146,12 @@ PAPERBOT_CMD agent batch ./projects.json \
 Each manifest project must provide an anonymous canonical
 `https://github.com/<owner>/<repo>` URL. It may override `authors`, `status`,
 title, product metadata, revision, and reference-only `external_sources`.
-Command-level authors and status are defaults, never inferred values. Paperbot
-writes a private child run for each project and `batch.json`; one failed
-project does not stop the remainder, but a failed or invalid draft makes the
-batch exit nonzero. Do not place API keys, signed URLs, or source contents in
-the manifest.
+Command-level authors and status are optional defaults. Without overrides,
+each child run uses its GitHub owner and release snapshot. Paperbot writes a
+private child run for each project and `batch.json`; one failed project does
+not stop the remainder, but a failed or invalid draft makes the batch exit
+nonzero. Do not place API keys, signed URLs, or source contents in the
+manifest.
 
 ## Load guidance progressively
 

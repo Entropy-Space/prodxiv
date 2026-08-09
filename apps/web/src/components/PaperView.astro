@@ -24,7 +24,18 @@ const publishedAt = new Intl.DateTimeFormat("en", {
   timeZone: "UTC",
 }).format(new Date(`${published_at}T00:00:00Z`));
 const authorNames = metadata.authors.map((author) => author.name).join(", ");
-const statusLabel = metadata.status.replaceAll("_", " ");
+const status =
+  typeof metadata.status === "string" ? metadata.status : metadata.status.value;
+const statusLabel = status.replaceAll("_", " ");
+const statusObservation =
+  typeof metadata.status === "string" ? undefined : metadata.status;
+const writerNames = (metadata.writers ?? [])
+  .map((writer) =>
+    writer.kind === "agent" && writer.model
+      ? `${writer.name} + ${writer.model}`
+      : writer.name,
+  )
+  .join(", ");
 const scopeLabel =
   metadata.scope?.kind === "feature"
     ? `Feature · ${metadata.scope.name}`
@@ -63,6 +74,14 @@ const scopeLabel =
           <span>Published</span>
           <strong>{publishedAt}</strong>
         </p>
+        {
+          writerNames.length > 0 && (
+            <p>
+              <span>Written by</span>
+              <strong>{writerNames}</strong>
+            </p>
+          )
+        }
       </div>
 
       <ul class="topic-list" aria-label="Paper topics">
@@ -101,12 +120,41 @@ const scopeLabel =
               <dt>Status</dt>
               <dd>{statusLabel}</dd>
             </div>
+            {
+              statusObservation && (
+                <div>
+                  <dt>Status basis</dt>
+                  <dd>
+                    {statusObservation.determination.replaceAll("_", " ")} · {statusObservation.confidence}
+                  </dd>
+                </div>
+              )
+            }
             <div>
               <dt>License</dt>
               <dd>{metadata.license}</dd>
             </div>
           </dl>
         </div>
+
+        {
+          metadata.communication_email && (
+            <a
+              class="source-link"
+              href={`mailto:${metadata.communication_email}`}
+            >
+              Contact the writer ↗
+            </a>
+          )
+        }
+
+        {
+          statusObservation?.evidence?.map((evidence) => (
+            <a class="source-link" href={evidence.url}>
+              Status evidence{evidence.tag ? ` · ${evidence.tag}` : ""} ↗
+            </a>
+          ))
+        }
 
         <nav class="sidebar-block" aria-label="Table of contents">
           <p class="sidebar-label">Contents</p>

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   canonicalizeGitHubRepositoryUrl,
+  fetchGitHubReleases,
   fetchGitHubSource,
   GitHubSourceError,
   selectDefaultGitHubSourcePaths,
@@ -75,6 +76,7 @@ function urls(): {
   tree: string;
   readme: string;
   source: string;
+  releases: string;
 } {
   const api = "https://api.github.com/repos/example/product";
   const raw = `https://raw.githubusercontent.com/example/product/${REVISION}`;
@@ -84,6 +86,7 @@ function urls(): {
     tree: `${api}/git/trees/${REVISION}?recursive=1`,
     readme: `${raw}/README.md`,
     source: `${raw}/src/index.ts`,
+    releases: `${api}/releases?per_page=10&page=1`,
   };
 }
 
@@ -570,5 +573,174 @@ describe("fetchGitHubSource", () => {
         limits: { max_file_bytes: 8, max_total_bytes: 8 },
       }),
     ).rejects.toMatchObject({ code: "content_limit_exceeded" });
+  });
+});
+
+describe("fetchGitHubReleases", () => {
+  test("captures bounded public release notes for deterministic status evidence", async () => {
+    const endpoint = urls();
+    const prereleaseNotesSha256 = new Bun.CryptoHasher("sha256")
+      .update("Public release candidate notes.")
+      .digest("hex");
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: true,
+              prerelease: false,
+              tag_name: "unpublished",
+              name: null,
+              body: null,
+              published_at: null,
+              html_url:
+                "https://github.com/example/product/releases/tag/unpublished",
+            },
+            {
+              draft: false,
+              prerelease: true,
+              tag_name: "v2.0.0-rc.1",
+              name: "Version 2 release candidate",
+              body: "Public release candidate notes.",
+              published_at: "2026-08-04T12:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v2.0.0-rc.1",
+            },
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: "Stable release notes.",
+              published_at: "2026-08-01T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    const result = await fetchGitHubReleases({
+      repository_url: "https://github.com/example/product",
+      fetch: mock.fetch,
+      now: () => new Date("2026-08-05T00:00:00Z"),
+    });
+
+    expect(result).toMatchObject({
+      canonical_url: "https://github.com/example/product",
+      retrieved_at: "2026-08-05T00:00:00.000Z",
+      releases: [
+        {
+          tag_name: "v2.0.0-rc.1",
+          prerelease: true,
+          notes: "Public release candidate notes.",
+          notes_sha256: prereleaseNotesSha256,
+        },
+        {
+          tag_name: "v1.0.0",
+          prerelease: false,
+          notes: "Stable release notes.",
+        },
+      ],
+    });
+    expect(mock.calls.map((call) => call.url)).toEqual([endpoint.releases]);
+  });
+
+  test("hashes the exact bounded release notes retained in the snapshot", async () => {
+    const endpoint = urls();
+    const notes = "😀".repeat(5_000);
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: notes,
+              published_at: "2026-08-01T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    const result = await fetchGitHubReleases({
+      repository_url: "https://github.com/example/product",
+      fetch: mock.fetch,
+    });
+    const release = result.releases[0];
+
+    expect(Buffer.byteLength(release?.notes ?? "")).toBe(16 * 1024);
+    expect(release?.notes_truncated).toBe(true);
+    expect(release?.notes_sha256).toBe(
+      new Bun.CryptoHasher("sha256").update(release?.notes ?? "").digest("hex"),
+    );
+  });
+
+  test("rejects impossible release publication dates", async () => {
+    const endpoint = urls();
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: "Stable release notes.",
+              published_at: "2026-02-31T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    await expect(
+      fetchGitHubReleases({
+        repository_url: "https://github.com/example/product",
+        fetch: mock.fetch,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_github_response" });
+  });
+
+  test("rejects unsafe control characters in retained release notes", async () => {
+    const endpoint = urls();
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: "Stable\u0001release notes.",
+              published_at: "2026-08-01T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    await expect(
+      fetchGitHubReleases({
+        repository_url: "https://github.com/example/product",
+        fetch: mock.fetch,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_github_response" });
   });
 });

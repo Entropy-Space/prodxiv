@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 
 import { PaperbotError } from "@prodxiv/paperbot-core";
 import { resumeAgent, runAgent } from "../src/agent/runner.ts";
+import { readSourceArtifact } from "../src/agent/source.ts";
 import type {
   AgentSessionRole,
   AuthoringRuntime,
@@ -94,7 +95,7 @@ describe("runAgent", () => {
       excerpt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(JSON.parse(runText)).toMatchObject({
-      schema_version: "2",
+      schema_version: "3",
       state: "needs_author_review",
       sessions: {
         evidence: {
@@ -324,7 +325,7 @@ describe("runAgent", () => {
     );
   });
 
-  test("rejects external evidence before starting the author session", async () => {
+  test("rejects external evidence for repository source IDs", async () => {
     const outputPath = join(workspacePath, "run");
     const runtime = new FakeRuntime({
       evidence: [
@@ -337,7 +338,9 @@ describe("runAgent", () => {
       runAgent(runOptions(outputPath), { create_runtime: () => runtime }),
     ).rejects.toMatchObject({
       exit_code: 5,
-      message: expect.stringContaining("external URLs are reference-only"),
+      message: expect.stringContaining(
+        "external evidence must use a snapshotted GitHub release source_id",
+      ),
     });
     expect(runtime.started_roles).toEqual(["evidence"]);
   });
@@ -429,6 +432,122 @@ describe("runAgent", () => {
       ),
     });
     expect(runtime.started_roles).toEqual([]);
+  });
+
+  test("uses the GitHub owner and stable release as deterministic metadata", async () => {
+    const outputPath = join(workspacePath, "remote-inferred-run");
+    const remoteEvidence = JSON.stringify({
+      evidence: [
+        {
+          claim: "The acquired product has a repository README.",
+          evidence_kind: "repository",
+          source_id: "repository:README.md",
+          excerpt: "# Acquired Product",
+          confidence: "high",
+        },
+        {
+          claim: "GitHub contains a stable release note.",
+          evidence_kind: "external",
+          source_id: "github_release:001",
+          excerpt: "First stable release.",
+          confidence: "high",
+        },
+      ],
+      contradictions: [],
+      unknowns: [],
+      questions: [],
+    });
+    const remoteDraft = draftResponse({
+      evidence_ids: ["evidence:001", "evidence:002"],
+      markdown: paperBody().replaceAll(
+        "https://github.com/example/product",
+        "https://github.com/example/acquired-product",
+      ),
+    });
+    const runtime = new FakeRuntime({
+      evidence: [remoteEvidence],
+      author: [remoteDraft, remoteDraft],
+    });
+
+    await runAgent(
+      {
+        repository: "https://github.com/example/acquired-product",
+        output_path: outputPath,
+        allow_remote_model: true,
+        metadata: {
+          title: "Acquired Product research draft",
+          product_name: "Acquired Product",
+        },
+        model: "deepseek-v4-flash",
+      },
+      {
+        create_runtime: () => runtime,
+        fetch: remoteGitHubFetch,
+        now: () => new Date("2026-08-05T00:00:00.000Z"),
+      },
+    );
+
+    const [paper, run, source] = await Promise.all([
+      readFile(join(outputPath, "paper.md"), "utf8"),
+      readFile(join(outputPath, "run.json"), "utf8"),
+      readFile(join(outputPath, "source.json"), "utf8"),
+    ]);
+    expect(paper).toContain('id: "github:example"');
+    expect(paper).toContain('kind: "organization"');
+    expect(paper).toContain('name: "paperbot"');
+    expect(paper).toContain('model: "deepseek-v4-flash"');
+    expect(paper).toContain('value: "launched"');
+    expect(paper).toContain('determination: "inferred"');
+    expect(JSON.parse(run)).toMatchObject({
+      input: {
+        metadata: {
+          authors: [
+            {
+              id: "github:example",
+              kind: "organization",
+              name: "example",
+            },
+          ],
+          writers: [
+            {
+              kind: "agent",
+              name: "paperbot",
+              model: "deepseek-v4-flash",
+            },
+          ],
+          status: {
+            value: "launched",
+            determination: "inferred",
+            evidence: [{ kind: "github_release", tag: "v1.0.0" }],
+          },
+        },
+      },
+    });
+    expect(JSON.parse(source)).toMatchObject({
+      schema_version: "2",
+      github_releases: {
+        releases: [
+          {
+            tag_name: "v1.0.0",
+            notes: "First stable release.",
+            source_id: "github_release:001",
+          },
+        ],
+      },
+    });
+
+    const tamperedSource = JSON.parse(source) as {
+      github_releases: { releases: Array<{ url: string }> };
+    };
+    tamperedSource.github_releases.releases[0]!.url =
+      "https://example.com/releases/tag/v1.0.0";
+    await writeFile(
+      join(outputPath, "source.json"),
+      `${JSON.stringify(tamperedSource, null, 2)}\n`,
+    );
+    await expect(readSourceArtifact(outputPath)).rejects.toThrow(
+      "GitHub release provenance is invalid",
+    );
   });
 });
 
@@ -961,6 +1080,20 @@ async function remoteGitHubFetch(
         },
       ],
     });
+  }
+  if (url === `${api}/releases?per_page=10&page=1`) {
+    return jsonResponse([
+      {
+        draft: false,
+        prerelease: false,
+        tag_name: "v1.0.0",
+        name: "Version 1.0.0",
+        body: "First stable release.",
+        published_at: "2026-08-04T00:00:00Z",
+        html_url:
+          "https://github.com/example/acquired-product/releases/tag/v1.0.0",
+      },
+    ]);
   }
   if (url === raw) {
     return new Response(REMOTE_README);

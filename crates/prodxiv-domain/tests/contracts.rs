@@ -1,8 +1,9 @@
 use std::{fs, path::Path};
 
 use prodxiv_domain::{
-    PaperDocument, PaperMetadata, PaperParseError, PaperScope, PaperScopeKind, ProductStatus,
-    PublicationIdentity, ValidationProfile, ValidationReport, canonicalize_paper_id,
+    PaperDocument, PaperMetadata, PaperParseError, PaperScope, PaperScopeKind, PaperStatus,
+    ProductStatus, ProductStatusEvidence, ProductStatusEvidenceKind, PublicationIdentity,
+    StatusDetermination, ValidationProfile, ValidationReport, WriterKind, canonicalize_paper_id,
     canonicalize_product_id, encode_paper_id_suffix, prepare_publication, validate_paper,
     validation_policy,
 };
@@ -62,6 +63,77 @@ fn publication_allows_benchmarks_to_be_omitted() {
 }
 
 #[test]
+fn communication_email_requires_a_human_writer() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+    paper.metadata.communication_email = Some("papers@example.com".to_owned());
+    assert!(validate_paper(&paper, ValidationProfile::Publication).valid);
+
+    let writer = paper
+        .metadata
+        .writers
+        .first_mut()
+        .expect("exemplary paper should credit a writer");
+    writer.kind = WriterKind::Agent;
+    writer.model = Some("example-model".to_owned());
+    let report = validate_paper(&paper, ValidationProfile::Publication);
+    assert!(diagnostic_codes(&report).contains(&"communication_email.human_writer_required"));
+}
+
+#[test]
+fn inferred_status_requires_timestamped_evidence() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+    let PaperStatus::Observed(status) = &mut paper.metadata.status else {
+        panic!("schema version 2 paper should use an observed status");
+    };
+    status.determination = StatusDetermination::Inferred;
+    status.observed_at = None;
+    status.evidence.clear();
+
+    let report = validate_paper(&paper, ValidationProfile::Publication);
+    let codes = diagnostic_codes(&report);
+    assert!(codes.contains(&"status.inferred_observed_at_required"));
+    assert!(codes.contains(&"status.inferred_evidence_required"));
+
+    let PaperStatus::Observed(status) = &mut paper.metadata.status else {
+        panic!("schema version 2 paper should use an observed status");
+    };
+    status.observed_at = Some("2026-02-31T00:00:00Z".to_owned());
+    status.evidence = vec![ProductStatusEvidence {
+        kind: ProductStatusEvidenceKind::GithubRelease,
+        url: "https://github.com/example/product/releases/tag/v1.0.0".to_owned(),
+        tag: Some("v1.0.0".to_owned()),
+    }];
+    let report = validate_paper(&paper, ValidationProfile::Publication);
+    assert!(diagnostic_codes(&report).contains(&"status.invalid_observed_at"));
+}
+
+#[test]
+fn legacy_papers_remain_readable_but_cannot_be_submitted() {
+    let source = fs::read_to_string(repository_root().join("examples/papers/prodxiv.md"))
+        .expect("exemplary paper should be readable");
+    let mut paper = PaperDocument::from_markdown(&source).expect("exemplary paper should parse");
+    paper.metadata.schema_version = "1".to_owned();
+    paper.metadata.paper_id = None;
+    paper.metadata.published_at = None;
+    paper.metadata.revision = None;
+    paper.metadata.writers.clear();
+    paper.metadata.communication_email = None;
+    for author in &mut paper.metadata.authors {
+        author.id = None;
+        author.kind = None;
+    }
+    paper.metadata.status = PaperStatus::Legacy(ProductStatus::Concept);
+
+    assert!(validate_paper(&paper, ValidationProfile::Draft).valid);
+    let report = validate_paper(&paper, ValidationProfile::Submission);
+    assert!(diagnostic_codes(&report).contains(&"submission.current_schema_required"));
+}
+
+#[test]
 fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
     let mut paper = PaperDocument {
         metadata: PaperMetadata {
@@ -70,16 +142,20 @@ fn draft_profile_allows_server_owned_publication_fields_to_be_absent() {
             title: "A draft".to_owned(),
             summary: "A complete paper that has not been submitted.".to_owned(),
             authors: vec![prodxiv_domain::Author {
+                id: None,
+                kind: None,
                 name: "Draft author".to_owned(),
                 affiliation: None,
                 url: None,
             }],
+            writers: Vec::new(),
+            communication_email: None,
             organization: None,
             published_at: None,
             revision: None,
             product_name: Some("Draft product".to_owned()),
             scope: Some(PaperScope::default()),
-            status: ProductStatus::Concept,
+            status: PaperStatus::Legacy(ProductStatus::Concept),
             topics: vec!["developer_tools".to_owned()],
             license: None,
             product_url: None,

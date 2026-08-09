@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   normalizeAgentMetadata,
+  normalizeAgentRequestMetadata,
   normalizeAnonymousHttpUrl,
   normalizeExternalSources,
 } from "../src/agent/input.ts";
@@ -30,7 +31,7 @@ test("rejects duplicate external references and bounds metadata before a run", (
   ).toThrow("duplicate");
 
   expect(
-    normalizeAgentMetadata({
+    normalizeAgentRequestMetadata({
       title: " Research draft ",
       product_name: " Product ",
       authors: [" Research Team "],
@@ -44,4 +45,74 @@ test("rejects duplicate external references and bounds metadata before a run", (
     status: "concept",
     repository_url: "https://github.com/example/product",
   });
+});
+
+test("validates completed owner, writer, and status metadata", () => {
+  expect(
+    normalizeAgentMetadata({
+      title: "Research draft",
+      product_name: "Product",
+      authors: [
+        {
+          id: "github:example",
+          kind: "organization",
+          name: "example",
+          url: "https://github.com/example",
+        },
+      ],
+      writers: [
+        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+      ],
+      status: {
+        value: "launched",
+        determination: "inferred",
+        confidence: "high",
+        observed_at: "2026-08-05T00:00:00Z",
+        evidence: [
+          {
+            kind: "github_release",
+            url: "https://github.com/example/product/releases/tag/v1.0.0",
+            tag: "v1.0.0",
+          },
+        ],
+      },
+      repository_url: "https://github.com/example/product",
+    }),
+  ).toEqual(
+    expect.objectContaining({
+      authors: [expect.objectContaining({ id: "github:example" })],
+      writers: [
+        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+      ],
+      status: expect.objectContaining({
+        value: "launched",
+        determination: "inferred",
+        observed_at: "2026-08-05T00:00:00.000Z",
+      }),
+    }),
+  );
+
+  expect(() =>
+    normalizeAgentMetadata({
+      title: "Research draft",
+      product_name: "Product",
+      authors: [{ kind: "organization", name: "example" }],
+      writers: [
+        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+      ],
+      status: {
+        value: "launched",
+        determination: "inferred",
+        confidence: "high",
+        observed_at: "2026-02-31T00:00:00Z",
+        evidence: [
+          {
+            kind: "github_release",
+            url: "https://github.com/example/product/releases/tag/v1.0.0",
+            tag: "v1.0.0",
+          },
+        ],
+      },
+    }),
+  ).toThrow("must be a valid timestamp");
 });

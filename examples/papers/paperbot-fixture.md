@@ -1,5 +1,5 @@
 ---
-schema_version: "1"
+schema_version: "2"
 paper_id: "prodxiv:2607.000002"
 title: "Paperbot Fixture: A Repository-Assisted Test Product"
 product_name: "Paperbot Fixture"
@@ -7,11 +7,22 @@ scope:
   kind: product
 summary: "A deliberately small product fixture used to exercise the complete Paperbot scan, drafting, validation, and website-rendering workflow."
 authors:
-  - name: "prodxiv contributors"
+  - id: "github:Entropy-Space"
+    kind: "organization"
+    name: "Entropy-Space"
+    url: "https://github.com/Entropy-Space"
+writers:
+  - kind: "agent"
+    name: "paperbot"
+    model: "fixture-model"
 organization: "prodxiv"
 published_at: "2026-07-27"
 version: 1
-status: "concept"
+status:
+  value: "concept"
+  determination: "declared"
+  confidence: "high"
+  observed_at: "2026-07-27T00:00:00Z"
 topics:
   - "developer_tools"
   - "testing"

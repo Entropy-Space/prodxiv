@@ -90,9 +90,13 @@ export interface components {
   schemas: {
     Author: {
       affiliation?: string | null;
+      id?: string | null;
+      kind?: null | components["schemas"]["AuthorKind"];
       name: string;
       url?: string | null;
     };
+    /** @enum {string} */
+    AuthorKind: "person" | "organization";
     Diagnostic: {
       code: string;
       message: string;
@@ -180,6 +184,7 @@ export interface components {
     };
     PaperMetadata: {
       authors: components["schemas"]["Author"][];
+      communication_email?: string | null;
       license?: string | null;
       organization?: string | null;
       paper_id?: string | null;
@@ -190,12 +195,13 @@ export interface components {
       repository_url?: string | null;
       schema_version: string;
       scope?: null | components["schemas"]["PaperScope"];
-      status: components["schemas"]["ProductStatus"];
+      status: components["schemas"]["PaperStatus"];
       summary: string;
       title: string;
       topics: string[];
       /** Format: int32 */
       version?: number | null;
+      writers?: components["schemas"]["PaperWriter"][];
     };
     PaperScope: {
       kind: components["schemas"]["PaperScopeKind"];
@@ -204,13 +210,40 @@ export interface components {
     };
     /** @enum {string} */
     PaperScopeKind: "product" | "feature" | "release";
+    PaperStatus:
+      | components["schemas"]["ProductStatus"]
+      | components["schemas"]["ProductStatusObservation"];
+    PaperWriter: {
+      kind: components["schemas"]["WriterKind"];
+      model?: string | null;
+      name: string;
+    };
     ProductRelationship: {
       kind: components["schemas"]["RelationshipKind"];
       paper_id: string;
     };
     /** @enum {string} */
     ProductStatus:
-      "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
+      | "unknown"
+      | "concept"
+      | "private_beta"
+      | "public_beta"
+      | "launched"
+      | "discontinued";
+    ProductStatusEvidence: {
+      kind: components["schemas"]["ProductStatusEvidenceKind"];
+      tag?: string | null;
+      url: string;
+    };
+    /** @enum {string} */
+    ProductStatusEvidenceKind: "github_release";
+    ProductStatusObservation: {
+      confidence: components["schemas"]["StatusConfidence"];
+      determination: components["schemas"]["StatusDetermination"];
+      evidence?: components["schemas"]["ProductStatusEvidence"][];
+      observed_at?: string | null;
+      value: components["schemas"]["ProductStatus"];
+    };
     PublishPaperRequest: {
       product_id?: string | null;
       source_markdown: string;
@@ -237,6 +270,12 @@ export interface components {
     /** @enum {string} */
     RelationshipKind:
       "inspired_by" | "built_on" | "alternative_to" | "supersedes";
+    /** @enum {string} */
+    StatusConfidence: "high" | "medium" | "low";
+    /** @enum {string} */
+    StatusDetermination: "declared" | "inferred" | "unverified";
+    /** @enum {string} */
+    WriterKind: "human" | "agent";
   };
   responses: never;
   parameters: never;

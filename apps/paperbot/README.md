@@ -23,6 +23,9 @@ bun run paperbot agent select-trending \
   --output ./paperbot-runs/trending-2026-08-04 \
   --allow-remote-model \
   --format json
+bun run paperbot agent run https://github.com/tigerbeetle/tigerbeetle \
+  --output ./paperbot-runs/tigerbeetle \
+  --allow-remote-model
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -69,20 +72,30 @@ access the network, or execute shell commands. `skills`, `agent`, `auth`, and
 
 `paper_scaffold` accepts a valid scan manifest and emits a section-complete
 Markdown scaffold to stdout. It does not turn repository observations into
-prose, and it never writes or overwrites a paper file. Missing author metadata
-and narrative content remain visibly incomplete for the Agent Skill and author
-to resolve.
+prose, and it never writes or overwrites a paper file. Missing author and
+writer metadata, along with narrative content, remain visibly incomplete for
+the Agent Skill and author to resolve.
 
 `agent run` is the optional model-assisted workflow. It creates one isolated
-Pi evidence session, verifies exact repository excerpts into `evidence.jsonl`,
-then creates one separate author session that drafts and self-reviews from that
-validated ledger. The author session can emit a bounded `ask_questions` event;
+Pi evidence session, verifies exact repository excerpts and snapshotted
+release-note excerpts into `evidence.jsonl`, then creates one separate author
+session that drafts and self-reviews from that validated ledger. The author
+session can emit a bounded `ask_questions` event;
 the host checkpoints it as `awaiting_author`, and `agent resume --answers`
 reopens the same logical author session. Once the loop completes, Paperbot
 writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version. Both sessions
 are retained as Pi-native JSONL under the private run directory; `run.json`
 records their relative paths, IDs, and SHA-256 digests.
+
+For a public GitHub URL, `agent run` uses the repository owner as the default
+organization author and never derives authors from commits or contributors. It
+snapshots up to ten releases and bounded release notes: stable release evidence
+supports `launched`, prerelease evidence supports `public_beta`, and no
+supported release produces an explicit `unknown` status. `--author` and
+`--status` remain explicit overrides. Local runs do not contact GitHub. Every
+generated paper credits `paperbot` and the selected model as its agent writer;
+agent-only papers omit the optional human-writer `communication_email`.
 
 `agent select-trending` is a separate bounded research workflow. By default it
 requests the exact UTC date with `period=daily&language=all` from the hosted

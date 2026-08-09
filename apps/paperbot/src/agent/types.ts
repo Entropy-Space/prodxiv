@@ -1,6 +1,6 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 
-export const AGENT_RUN_SCHEMA_VERSION = "2";
+export const AGENT_RUN_SCHEMA_VERSION = "3";
 
 export type EvidenceKind = "repository" | "external" | "author" | "inference";
 export type EvidenceStatus =
@@ -23,12 +23,56 @@ export interface AgentModelConfig {
   model: string;
 }
 
+export type AgentPaperStatusValue =
+  | "unknown"
+  | "concept"
+  | "private_beta"
+  | "public_beta"
+  | "launched"
+  | "discontinued";
+
+export interface AgentPaperRequestMetadata {
+  title: string;
+  product_name: string;
+  authors?: string[];
+  status?: AgentPaperStatusValue;
+  product_url?: string;
+  repository_url?: string;
+}
+
+export interface AgentAuthor {
+  id?: string;
+  kind: "person" | "organization";
+  name: string;
+  url?: string;
+}
+
+export interface AgentWriter {
+  kind: "agent";
+  name: "paperbot";
+  model: string;
+}
+
+export interface AgentProductStatusEvidence {
+  kind: "github_release";
+  url: string;
+  tag: string;
+}
+
+export interface AgentProductStatus {
+  value: AgentPaperStatusValue;
+  determination: "declared" | "inferred" | "unverified";
+  confidence: "high" | "medium" | "low";
+  observed_at?: string;
+  evidence?: AgentProductStatusEvidence[];
+}
+
 export interface AgentPaperMetadata {
   title: string;
   product_name: string;
-  authors: string[];
-  status:
-    "concept" | "private_beta" | "public_beta" | "launched" | "discontinued";
+  authors: AgentAuthor[];
+  writers: AgentWriter[];
+  status: AgentProductStatus;
   product_url?: string;
   repository_url?: string;
 }
@@ -51,8 +95,27 @@ export interface AgentSource {
   is_dirty: boolean;
   retrieved_at: string;
   homepage_url?: string;
+  github_releases?: AgentGitHubReleaseSnapshot;
   files: AgentSourceFile[];
   scan_manifest: ScanManifest;
+}
+
+export interface AgentGitHubRelease {
+  tag_name: string;
+  name?: string;
+  prerelease: boolean;
+  published_at: string;
+  url: string;
+  notes?: string;
+  notes_sha256?: string;
+  notes_truncated?: boolean;
+  source_id: string;
+  source_path: string;
+}
+
+export interface AgentGitHubReleaseSnapshot {
+  retrieved_at: string;
+  releases: AgentGitHubRelease[];
 }
 
 export interface EvidenceCandidate {
@@ -169,7 +232,7 @@ export interface AgentRunRecord {
     repository: string;
     allow_remote_model: true;
     external_sources: string[];
-    metadata: AgentPaperMetadata;
+    metadata: AgentPaperRequestMetadata | AgentPaperMetadata;
   };
   source?: AgentRunSourceRecord;
   sessions: {
