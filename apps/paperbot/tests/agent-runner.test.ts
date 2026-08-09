@@ -70,11 +70,26 @@ describe("runAgent", () => {
       "author",
     ]);
     expect(runtime.prompts[0]?.prompt).toContain("<paperbot_source_bundle>");
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "selective, high-information ledger",
+    );
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "A technically true detail is not useful evidence",
+    );
     expect(runtime.prompts[1]?.prompt).toContain("<paperbot_evidence_bundle>");
+    expect(runtime.prompts[1]?.prompt).toContain(
+      "Write a product explanation, not an evidence inventory",
+    );
     expect(runtime.prompts[1]?.prompt).not.toContain(
       "<paperbot_source_bundle>",
     );
     expect(runtime.prompts[2]?.prompt).toContain("not an independent review");
+    expect(runtime.prompts[2]?.prompt).toContain(
+      "You must choose ask_questions",
+    );
+    expect(runtime.prompts[2]?.prompt).toContain(
+      "resubmit the candidate byte-for-byte unchanged as explicit approval",
+    );
 
     const [paper, draft, evidenceText, runText, questions] = await Promise.all([
       readFile(join(outputPath, "paper.md"), "utf8"),
@@ -111,12 +126,12 @@ describe("runAgent", () => {
           turn_count: 2,
         },
       },
-      workflow: { draft_revision: 2, question_rounds: 0 },
+      workflow: { draft_revision: 1, question_rounds: 0 },
       artifacts: {
         evidence: "evidence.jsonl",
         paper: "paper.md",
         draft: "draft.md",
-        drafts: ["drafts/draft-1.md", "drafts/draft-2.md"],
+        drafts: ["drafts/draft-1.md"],
       },
     });
     expect(questions).toContain("author review is still required");
@@ -140,6 +155,41 @@ describe("runAgent", () => {
     await expect(
       readFile(join(outputPath, "review.json"), "utf8"),
     ).rejects.toThrow();
+  });
+
+  test("checkpoints a second draft only when self-review changes it", async () => {
+    const outputPath = join(workspacePath, "run");
+    const revisedBody = paperBody().replace(
+      "a small fixture product",
+      "a small deterministic fixture product",
+    );
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        draftResponse(),
+        draftResponse({
+          summary:
+            "A deterministic fixture product used to exercise the Paperbot agent runner.",
+          markdown: revisedBody,
+        }),
+      ],
+    });
+
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () => runtime,
+    });
+
+    expect(
+      JSON.parse(await readFile(join(outputPath, "run.json"), "utf8")),
+    ).toMatchObject({
+      workflow: { draft_revision: 2 },
+      artifacts: {
+        drafts: ["drafts/draft-1.md", "drafts/draft-2.md"],
+      },
+    });
+    expect(await readFile(join(outputPath, "paper.md"), "utf8")).toContain(
+      "small deterministic fixture product",
+    );
   });
 
   test("checkpoints questions and resumes the same logical author session", async () => {

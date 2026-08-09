@@ -34,6 +34,7 @@ const SOURCE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
   ".vue",
+  ".zig",
   ".zsh",
 ]);
 const CONFIGURATION_EXTENSIONS = new Set([

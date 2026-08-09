@@ -103,6 +103,7 @@ import type {
   AuthoringRuntime,
   AuthoringSession,
   AuthorQuestion,
+  DraftResponse,
   EvidenceItem,
 } from "./types.ts";
 
@@ -289,7 +290,9 @@ export async function runAgent(
       return runResult(runPath, record, initialResolution.validation, source);
     }
 
-    await checkpointDraft(runPath, record, reviewResolution, dependencies);
+    if (!sameDraftResponse(initialResolution.draft, reviewResolution.draft)) {
+      await checkpointDraft(runPath, record, reviewResolution, dependencies);
+    }
     await finalizePaper(runPath, record, reviewResolution, dependencies);
     return runResult(runPath, record, reviewResolution.validation, source);
   } catch (error) {
@@ -946,6 +949,26 @@ function safeErrorMessage(error: unknown): string {
 
 function remainingQuestionRounds(record: AgentRunRecord): number {
   return MAX_AUTHOR_QUESTION_ROUNDS - record.workflow.question_rounds;
+}
+
+function sameDraftResponse(left: DraftResponse, right: DraftResponse): boolean {
+  return (
+    left.summary === right.summary &&
+    left.markdown === right.markdown &&
+    arraysEqual(left.topics, right.topics) &&
+    arraysEqual(left.evidence_ids, right.evidence_ids) &&
+    arraysEqual(left.unresolved_questions, right.unresolved_questions)
+  );
+}
+
+function arraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function runResult(
