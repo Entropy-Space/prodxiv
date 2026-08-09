@@ -113,6 +113,14 @@ authorship source. Writers record who produced the prose. An agent writer names
 both the authoring tool and model, while `communication_email` is optional and
 available only when at least one human writer chooses to provide a contact.
 
+A product paper speaks on behalf of its credited authors. Its narrative should
+normally use first-person plural voice for the authors' work and decisions,
+while writer metadata discloses whether a human or agent produced the prose.
+An unreviewed agent draft remains private and visibly unendorsed until an author
+confirms it. First-person voice does not authorize invented intent: statements
+about why the authors chose an approach, what they tried, or what they learned
+still require author input or inspectable evidence.
+
 Product status is an observation rather than an unsupported scalar assertion.
 An inferred status records its observation time and evidence. Drafts use
 `unknown` with `unverified` when neither release evidence nor an explicit
@@ -137,6 +145,13 @@ measurement exists rather than publishing an empty placeholder. When a paper
 does make measured claims, benchmark methodology is first-class content and
 should identify its date, environment, dataset, comparison target, and
 reproducibility notes. Limitations remain required.
+
+The product problem organizes the narrative. Background establishes who
+experiences the problem, its domain constraints, and why it is difficult.
+Motivation explains how and why the authors pursue their solution. Related Work
+compares how other identifiable work approaches the same problem, rather than
+listing adjacent products. Core Features then connects mechanisms and
+user-visible behavior back to the stated problem constraints.
 
 ## Publishing model
 

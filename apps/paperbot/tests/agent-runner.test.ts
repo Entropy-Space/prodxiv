@@ -76,9 +76,22 @@ describe("runAgent", () => {
     expect(runtime.prompts[0]?.prompt).toContain(
       "A technically true detail is not useful evidence",
     );
+    expect(runtime.prompts[0]?.prompt).toContain(
+      'Refer to the product explicitly as "Fixture Product"',
+    );
+    expect(runtime.prompts[0]?.prompt).toContain("never use we, our, or us");
     expect(runtime.prompts[1]?.prompt).toContain("<paperbot_evidence_bundle>");
     expect(runtime.prompts[1]?.prompt).toContain(
       "Write a product explanation, not an evidence inventory",
+    );
+    expect(runtime.prompts[1]?.prompt).toContain(
+      "Write on behalf of the credited product authors",
+    );
+    expect(runtime.prompts[1]?.prompt).toContain(
+      "Summary states the problem, who experiences it, and the solution thesis",
+    );
+    expect(runtime.prompts[1]?.prompt).toContain(
+      "Never convert an observed implementation fact into an unsupported claim",
     );
     expect(runtime.prompts[1]?.prompt).not.toContain(
       "<paperbot_source_bundle>",
@@ -86,6 +99,10 @@ describe("runAgent", () => {
     expect(runtime.prompts[2]?.prompt).toContain("not an independent review");
     expect(runtime.prompts[2]?.prompt).toContain(
       "You must choose ask_questions",
+    );
+    expect(runtime.prompts[2]?.prompt).toContain("Review the narrative voice");
+    expect(runtime.prompts[2]?.prompt).toContain(
+      "If first-person prose claims why we chose something",
     );
     expect(runtime.prompts[2]?.prompt).toContain(
       "resubmit the candidate byte-for-byte unchanged as explicit approval",
@@ -212,7 +229,7 @@ describe("runAgent", () => {
       readFile(join(outputPath, "paper.md"), "utf8"),
     ).rejects.toThrow();
     expect(await readFile(join(outputPath, "questions.md"), "utf8")).toContain(
-      "What user problem originally motivated this product?",
+      "What user problem originally motivated Fixture Product?",
     );
 
     const answersPath = join(workspacePath, "answers.md");
@@ -1018,7 +1035,7 @@ function evidenceResponse(
   return JSON.stringify({
     evidence: [
       {
-        claim: "The repository is a deterministic Paperbot scanner fixture.",
+        claim: "Fixture Product is a deterministic Paperbot scanner fixture.",
         evidence_kind: "repository",
         source_id: "repository:README.md",
         excerpt: repositoryExcerpt,
@@ -1027,8 +1044,10 @@ function evidenceResponse(
       },
     ],
     contradictions: [],
-    unknowns: ["The repository does not establish product motivation."],
-    questions: ["What user problem originally motivated this product?"],
+    unknowns: [
+      "The repository does not establish Fixture Product's motivation.",
+    ],
+    questions: ["What user problem originally motivated Fixture Product?"],
   });
 }
 
@@ -1037,7 +1056,8 @@ function draftResponse(
 ): string {
   return JSON.stringify({
     action: "submit_draft",
-    summary: "A fixture product used to exercise the Paperbot agent runner.",
+    summary:
+      "We provide a repeatable fixture for exercising the Paperbot agent runner.",
     topics: ["developer_tools", "testing"],
     markdown: paperBody(),
     evidence_ids: ["evidence:001"],
@@ -1053,7 +1073,7 @@ function askQuestionsResponse(
     action: "ask_questions",
     questions: [
       {
-        question: "What user problem originally motivated this product?",
+        question: "What user problem originally motivated Fixture Product?",
         reason: "Repository evidence cannot establish product intent.",
         evidence_ids: ["evidence:001"],
         ...overrides,
@@ -1066,15 +1086,15 @@ function paperBody(): string {
   return [
     "# Summary",
     "",
-    "The repository provides a small fixture product.",
+    "Repository analysis needs repeatable inputs. We provide a small fixture product for that problem.",
     "",
     "# Background",
     "",
-    "The fixture supports repeatable repository-analysis tests.",
+    "Repository-analysis tests need bounded inputs whose behavior remains stable across runs.",
     "",
     "# Motivation",
     "",
-    "The repository does not establish product motivation, so author input is required.",
+    "The evidence does not establish why we chose this approach, so author input is required.",
     "",
     "# Related Work",
     "",
@@ -1082,15 +1102,15 @@ function paperBody(): string {
     "",
     "# Core Features",
     "",
-    "The repository includes source, tests, documentation, and configuration.",
+    "We include source, tests, documentation, and configuration to provide the observable fixture surface.",
     "",
     "# Insights and Lessons",
     "",
-    "Repository evidence can establish implementation details but not intent.",
+    "We can verify implementation details from repository evidence, but our intent still requires author confirmation.",
     "",
     "# Limitations",
     "",
-    "This fixture does not establish production behavior.",
+    "Our fixture does not establish production behavior.",
     "",
     "# References",
     "",

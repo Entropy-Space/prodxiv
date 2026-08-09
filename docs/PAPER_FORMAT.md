@@ -116,6 +116,26 @@ Required level-one sections appear once and in this order:
 7. Limitations
 8. References
 
+The paper speaks on behalf of its credited authors. After identifying the
+product, use `we`, `our`, and `us` for the authors' work and decisions instead
+of describing them from outside as “they” or “the team.” The product name may
+still be used where clarity requires it. First-person statements about intent,
+history, rejected approaches, or lessons require author confirmation or an
+inspectable source; voice must not turn an implementation observation into an
+invented rationale.
+
+Organize the sections around the product problem:
+
+- **Summary** states the problem, who experiences it, and the solution thesis.
+- **Background** explains the problem domain, affected users, constraints, and
+  why the problem is difficult. It is not a feature overview.
+- **Motivation** explains how and why the authors pursue this solution and
+  which objectives shape its design.
+- **Related Work** explains how other identifiable work approaches the same
+  problem and supports comparisons with inspectable sources.
+- **Core Features** connects mechanisms and user-visible behavior to the
+  problem constraints they address.
+
 Cite material claims near the relevant prose with descriptive Markdown links,
 and list publicly inspectable sources in References. Every paper can cite at
 least its product site, repository, documentation, or named related work. A
