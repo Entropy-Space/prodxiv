@@ -114,7 +114,11 @@ no shell, filesystem, browser, credential, or publish tools.
 An `agent run` uses exactly two private logical Pi sessions. The evidence
 session extracts exact repository excerpts and snapshotted release-note
 excerpts into `evidence.jsonl`; after host integrity validation, the author
-session drafts and revises from that ledger.
+session drafts and revises from that ledger. For GitHub sources, deterministic
+selection reserves coverage across architecture, core implementation,
+interfaces, verification, performance, and operations when available. Prefer
+claims that explain product purpose and mechanisms; omit technically true but
+paper-irrelevant constants, literals, and file trivia.
 The author session may emit a bounded `ask_questions` protocol event, but that
 event is not a public deterministic tool. Private artifacts include `draft.md`,
 `drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
@@ -125,6 +129,10 @@ session is retained locally in Pi-native JSONL before its first model turn,
 with mode `0600` under the mode-`0700` run directory. These files contain full
 prompts and replies; never publish, submit, or otherwise expose them. The
 workflow metadata stores only their relative paths, IDs, and SHA-256 digests.
+Material author-answerable gaps in motivation, current behavior, tradeoffs,
+history, benchmark interpretation, or lessons should become questions rather
+than being hidden in Limitations. An unchanged self-review preserves the
+existing draft checkpoint instead of creating a duplicate revision.
 
 Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
 --allow-remote-model` only when the run is in `awaiting_author`. It copies the

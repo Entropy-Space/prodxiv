@@ -225,9 +225,13 @@ For a remote source, Paperbot accepts only
 the requested or default ref to an exact commit SHA through GitHub, rejects
 private repositories, symlinks, submodules, unsafe paths, truncated trees, and
 oversized content, then verifies each raw file against its Git blob SHA before
-reading a small SHA-pinned UTF-8 source bundle. It does not clone the
-repository, run its code, install dependencies, or fetch
-arbitrary URLs.
+reading a small SHA-pinned UTF-8 source bundle. The default sixteen-file
+selection recognizes supported implementation languages, including Zig, and
+reserves deterministic coverage for architecture or design documentation,
+core implementation, public interfaces, verification, performance, and
+operational metadata when those areas exist. README-linked paths remain
+preferred, but cannot consume the entire bundle. It does not clone the
+repository, run its code, install dependencies, or fetch arbitrary URLs.
 
 Every Paperbot-started Pi session immediately creates a Pi-native, append-only
 JSONL file inside the mode-`0700` run directory. Session files are mode `0600`,
@@ -267,11 +271,16 @@ The agent writes a new private run directory with:
   current deterministic validation report.
 
 The evidence session sees the bounded source bundle and returns evidence, not
-paper Markdown. After the integrity gate, the author session sees only the
-validated evidence excerpts, metadata, external reference URLs, and recorded
-unknowns. It creates a candidate, then reviews and revises that candidate in
-the same conversation. That pass is self-review, not an independent model
-review; an independent final evidence review is intentionally deferred.
+paper Markdown. It is instructed to build a selective, high-information ledger
+covering product purpose, mechanisms, interfaces, guarantees, verification,
+operations, performance methodology, tradeoffs, and limitations rather than
+collecting incidental constants or file-level trivia. Missing important areas
+become explicit unknowns. After the integrity gate, the author session sees
+only the validated evidence excerpts, metadata, external reference URLs, and
+recorded unknowns. It creates a product-centered candidate, then reviews and
+revises that candidate in the same conversation. That pass is self-review, not
+an independent model review; an independent final evidence review is
+intentionally deferred.
 
 During review, the author session emits one of two host-controlled protocol
 events: `submit_draft` or `ask_questions`. `ask_questions` is not a public
@@ -281,6 +290,11 @@ deterministic CLI tool. Paperbot checkpoints the questions, moves to
 host-directed draft repair attempts per stage, and twelve author-session
 turns. Every submitted draft is checked for evidence IDs, fields, links, raw
 HTML, benchmark policy, and canonical paper structure before it is accepted.
+The review must ask when an author-answerable gap materially affects the
+product thesis, motivation, current behavior, tradeoffs, history, benchmark
+interpretation, or lessons. If review approves an unchanged draft, Paperbot
+keeps the original immutable checkpoint instead of creating a duplicate
+revision.
 
 When no questions remain, Paperbot writes `paper.md` and ends in
 `needs_author_review`. A run waiting for answers has a validated draft

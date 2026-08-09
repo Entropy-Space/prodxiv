@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   canonicalizeGitHubRepositoryUrl,
+  classifyGitHubSourcePath,
   fetchGitHubReleases,
   fetchGitHubSource,
   GitHubSourceError,
@@ -212,7 +213,7 @@ describe("fetchGitHubSource", () => {
       blob(".env", 12),
     ];
     for (let index = 0; index < 20; index += 1) {
-      entries.push(blob(`src/${index}.ts`, 1));
+      entries.push(blob(`src/${index}.ts`, 1, gitBlobSha("x")));
     }
     const mock = fetchMock(
       new Map([
@@ -221,8 +222,8 @@ describe("fetchGitHubSource", () => {
         [endpoint.tree, jsonResponse(tree(entries))],
         [endpoint.readme, new Response("hello\n")],
         [
-          `https://raw.githubusercontent.com/example/product/${REVISION}/package.json`,
-          new Response("{}"),
+          `https://raw.githubusercontent.com/example/product/${REVISION}/src/0.ts`,
+          new Response("x"),
         ],
       ]),
     );
@@ -233,10 +234,7 @@ describe("fetchGitHubSource", () => {
       limits: { max_selected_files: 2 },
     });
 
-    expect(result.selection.selected_paths).toEqual([
-      "README.md",
-      "package.json",
-    ]);
+    expect(result.selection.selected_paths).toEqual(["README.md", "src/0.ts"]);
     expect(result.selection.skipped_file_counts.excluded).toBe(1);
     expect(result.selection.skipped_file_counts.selection_limit).toBe(20);
     expect(mock.calls).toHaveLength(6);
@@ -288,12 +286,95 @@ describe("fetchGitHubSource", () => {
     ).toMatchObject({
       selected_paths: [
         "README.md",
-        "CHANGELOG.md",
-        "package.json",
         "src/index.ts",
+        "package.json",
+        "CHANGELOG.md",
       ],
       skipped_file_counts: { selection_limit: 16 },
     });
+  });
+
+  test("reserves source coverage across product-defining repository areas", () => {
+    const snapshot: GitHubRepositorySnapshot = {
+      canonical_url: "https://github.com/example/product",
+      owner: "example",
+      repository: "product",
+      resolved_ref: "main",
+      resolved_revision: REVISION,
+      files: [
+        ["README.md", "documentation"],
+        ["docs/architecture.md", "documentation"],
+        ["src/core/engine.zig", "source_code"],
+        ["src/clients/go/client.go", "source_code"],
+        ["src/vopr.zig", "source_code"],
+        ["benches/throughput.zig", "benchmark"],
+        ["package.json", "manifest"],
+        ...Array.from({ length: 12 }, (_, index) => [
+          `src/clients/zz/generated-${index}.ts`,
+          "source_code",
+        ]),
+      ].map(([path, fileType]) => ({
+        path: path as string,
+        blob_sha: BLOB_SHA,
+        byte_count: 1,
+        file_type: fileType as
+          "benchmark" | "documentation" | "manifest" | "source_code",
+      })),
+    };
+
+    expect(
+      selectDefaultGitHubSourcePaths(snapshot, { max_selected_files: 7 }),
+    ).toMatchObject({
+      selected_paths: [
+        "README.md",
+        "src/core/engine.zig",
+        "docs/architecture.md",
+        "src/clients/go/client.go",
+        "src/vopr.zig",
+        "benches/throughput.zig",
+        "package.json",
+      ],
+      skipped_file_counts: { selection_limit: 12 },
+    });
+    expect(classifyGitHubSourcePath("src/core/engine.zig")).toBe("source_code");
+  });
+
+  test("selects representative core subsystems before alphabetic utilities", () => {
+    const paths = [
+      "README.md",
+      "src/aof.zig",
+      "src/counting_allocator.zig",
+      "src/state_machine.zig",
+      "src/vsr.zig",
+      "src/lsm/forest.zig",
+      "src/io.zig",
+      "src/clients/client.zig",
+    ];
+    const snapshot: GitHubRepositorySnapshot = {
+      canonical_url: "https://github.com/example/product",
+      owner: "example",
+      repository: "product",
+      resolved_ref: "main",
+      resolved_revision: REVISION,
+      files: paths.map((path) => ({
+        path,
+        blob_sha: BLOB_SHA,
+        byte_count: 1,
+        file_type: classifyGitHubSourcePath(path),
+      })),
+    };
+
+    expect(
+      selectDefaultGitHubSourcePaths(snapshot, { max_selected_files: 6 })
+        .selected_paths,
+    ).toEqual([
+      "README.md",
+      "src/state_machine.zig",
+      "src/vsr.zig",
+      "src/lsm/forest.zig",
+      "src/io.zig",
+      "src/clients/client.zig",
+    ]);
   });
 
   test("excludes repository agent instruction documents from default selection", () => {
@@ -399,6 +480,52 @@ describe("fetchGitHubSource", () => {
       "README.md",
       "skills/routing.md",
       "CHANGELOG.md",
+    ]);
+  });
+
+  test("limits README preferences so product coverage is not starved", () => {
+    const preferredPaths = Array.from(
+      { length: 8 },
+      (_, index) => `docs/guide-${index}.md`,
+    );
+    const snapshot: GitHubRepositorySnapshot = {
+      canonical_url: "https://github.com/example/product",
+      owner: "example",
+      repository: "product",
+      resolved_ref: "main",
+      resolved_revision: REVISION,
+      files: [
+        "README.md",
+        ...preferredPaths,
+        "docs/architecture.md",
+        "src/core/engine.ts",
+        "src/clients/client.ts",
+        "src/vopr.ts",
+        "benchmarks/throughput.ts",
+        "package.json",
+      ].map((path) => ({
+        path,
+        blob_sha: BLOB_SHA,
+        byte_count: 1,
+        file_type: classifyGitHubSourcePath(path),
+      })),
+    };
+
+    expect(
+      selectDefaultGitHubSourcePaths(
+        snapshot,
+        { max_selected_files: 8 },
+        preferredPaths,
+      ).selected_paths,
+    ).toEqual([
+      "README.md",
+      "docs/guide-0.md",
+      "docs/guide-1.md",
+      "src/core/engine.ts",
+      "docs/architecture.md",
+      "src/clients/client.ts",
+      "src/vopr.ts",
+      "benchmarks/throughput.ts",
     ]);
   });
 
@@ -682,6 +809,43 @@ describe("fetchGitHubReleases", () => {
     expect(release?.notes_sha256).toBe(
       new Bun.CryptoHasher("sha256").update(release?.notes ?? "").digest("hex"),
     );
+  });
+
+  test("normalizes release-note line endings before hashing and evidence validation", async () => {
+    const endpoint = urls();
+    const normalizedNotes = "First line.\n\nSecond line.\nThird line.";
+    const mock = fetchMock(
+      new Map([
+        [
+          endpoint.releases,
+          jsonResponse([
+            {
+              draft: false,
+              prerelease: false,
+              tag_name: "v1.0.0",
+              name: "Version 1",
+              body: "First line.\r\n\r\nSecond line.\rThird line.",
+              published_at: "2026-08-01T00:00:00Z",
+              html_url:
+                "https://github.com/example/product/releases/tag/v1.0.0",
+            },
+          ]),
+        ],
+      ]),
+    );
+
+    const result = await fetchGitHubReleases({
+      repository_url: "https://github.com/example/product",
+      fetch: mock.fetch,
+    });
+
+    expect(result.releases[0]).toMatchObject({
+      notes: normalizedNotes,
+      notes_sha256: new Bun.CryptoHasher("sha256")
+        .update(normalizedNotes)
+        .digest("hex"),
+    });
+    expect(result.releases[0]?.notes_truncated).toBeUndefined();
   });
 
   test("rejects impossible release publication dates", async () => {

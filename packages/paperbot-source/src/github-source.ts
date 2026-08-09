@@ -23,6 +23,38 @@ const MAX_RELEASE_RESPONSE_BYTES = 512 * 1024;
 const MAX_RELEASE_NOTES_BYTES = 16 * 1024;
 const UNSAFE_TEXT_CONTROL_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const MAX_PREFERRED_SOURCE_PATHS = 4;
+
+const ARCHITECTURE_PATH_PATTERN =
+  /(?:^|[\/_-])(?:architecture|concepts?|design|internals?|overview|protocol)(?:[\/_.-]|$)/;
+const INTERFACE_PATH_SEGMENTS = new Set([
+  "api",
+  "apis",
+  "binding",
+  "bindings",
+  "client",
+  "clients",
+  "sdk",
+  "sdks",
+]);
+const AUXILIARY_SOURCE_PATH_SEGMENTS = new Set([
+  ...INTERFACE_PATH_SEGMENTS,
+  "devhub",
+  "example",
+  "examples",
+  "sample",
+  "samples",
+  "script",
+  "scripts",
+  "tool",
+  "tools",
+  "web",
+  "website",
+]);
+const VERIFICATION_PATH_PATTERN =
+  /(?:^|[\/_-])(?:fuzz|fuzzing|simulation|simulator|test|testing|tests|verification|vopr)(?:[\/_.-]|$)/;
+const PERFORMANCE_PATH_PATTERN =
+  /(?:^|[\/_-])(?:bench|benchmark|benchmarks|perf|performance)(?:[\/_.-]|$)/;
 
 const AGENT_INSTRUCTION_FILENAMES = new Set([
   "agents.md",
@@ -306,7 +338,11 @@ export function selectDefaultGitHubSourcePaths(
     compareDefaultSourcePriority(left, right, preferredRanks),
   );
 
-  const selected = eligible.slice(0, resolvedLimits.max_selected_files);
+  const selected = selectCoverageAwareFiles(
+    eligible,
+    resolvedLimits.max_selected_files,
+    preferredRanks,
+  );
   skipped_file_counts.selection_limit = eligible.length - selected.length;
 
   return {
@@ -314,6 +350,259 @@ export function selectDefaultGitHubSourcePaths(
     tree_file_count: snapshot.files.length,
     skipped_file_counts,
   };
+}
+
+type SourceCoverageRole =
+  | "architecture"
+  | "core_implementation"
+  | "interface"
+  | "verification"
+  | "performance"
+  | "operations";
+
+const SOURCE_COVERAGE_ROLES: readonly SourceCoverageRole[] = [
+  "architecture",
+  "interface",
+  "verification",
+  "performance",
+  "operations",
+];
+const COVERAGE_REPRESENTATIVE_NAMES: Readonly<
+  Partial<Record<SourceCoverageRole, readonly string[]>>
+> = {
+  architecture: [
+    "architecture",
+    "overview",
+    "design",
+    "concept",
+    "concepts",
+    "internals",
+    "protocol",
+  ],
+  interface: ["api", "client", "sdk", "binding", "bindings"],
+  verification: [
+    "vopr",
+    "simulation",
+    "simulator",
+    "integration_test",
+    "integration_tests",
+    "test",
+    "fuzz",
+  ],
+  performance: ["benchmark", "bench", "performance", "perf"],
+};
+
+interface CoreCoverageTopic {
+  pattern: RegExp;
+  representative_names: readonly string[];
+}
+
+const CORE_COVERAGE_TOPICS: readonly CoreCoverageTopic[] = [
+  {
+    pattern:
+      /(?:^|[\/_-])(?:domain|ledger|model|state_machine|transaction)(?:[\/_.-]|$)/,
+    representative_names: [
+      "state_machine",
+      "domain",
+      "ledger",
+      "model",
+      "transaction",
+    ],
+  },
+  {
+    pattern:
+      /(?:^|[\/_-])(?:consensus|paxos|raft|replica|replication|vsr)(?:[\/_.-]|$)/,
+    representative_names: [
+      "consensus",
+      "replica",
+      "replication",
+      "raft",
+      "paxos",
+      "vsr",
+    ],
+  },
+  {
+    pattern:
+      /(?:^|[\/_-])(?:database|db|forest|grid|journal|lsm|storage|tree)(?:[\/_.-]|$)/,
+    representative_names: [
+      "storage",
+      "database",
+      "db",
+      "lsm",
+      "forest",
+      "tree",
+      "grid",
+      "journal",
+    ],
+  },
+  {
+    pattern: /(?:^|[\/_-])(?:engine|io|runtime|scheduler|server)(?:[\/_.-]|$)/,
+    representative_names: ["engine", "server", "runtime", "scheduler", "io"],
+  },
+];
+
+function selectCoverageAwareFiles(
+  eligible: GitHubSourceTreeFile[],
+  limit: number,
+  preferredRanks: ReadonlyMap<string, number>,
+): GitHubSourceTreeFile[] {
+  const selected: GitHubSourceTreeFile[] = [];
+  const selectedPaths = new Set<string>();
+  const add = (file: GitHubSourceTreeFile | undefined): void => {
+    if (
+      file === undefined ||
+      selected.length >= limit ||
+      selectedPaths.has(file.path)
+    ) {
+      return;
+    }
+    selected.push(file);
+    selectedPaths.add(file.path);
+  };
+
+  add(eligible.find((file) => isRootReadmePath(file.path)));
+
+  const preferredLimit = Math.min(
+    MAX_PREFERRED_SOURCE_PATHS,
+    Math.max(2, Math.floor(limit / 4)),
+  );
+  let preferredCount = 0;
+  for (const file of eligible) {
+    if (
+      preferredCount >= preferredLimit ||
+      !preferredRanks.has(file.path) ||
+      isRootReadmePath(file.path)
+    ) {
+      continue;
+    }
+    add(file);
+    preferredCount += 1;
+  }
+
+  let coreCoverageCount = 0;
+  for (const topic of CORE_COVERAGE_TOPICS) {
+    const candidate = eligible
+      .filter(
+        (file) =>
+          !selectedPaths.has(file.path) &&
+          sourceCoverageRole(file) === "core_implementation" &&
+          topic.pattern.test(file.path.toLowerCase()),
+      )
+      .sort((left, right) => compareCoreRepresentative(left, right, topic))[0];
+    if (candidate !== undefined) {
+      add(candidate);
+      coreCoverageCount += 1;
+    }
+  }
+  if (coreCoverageCount === 0) {
+    add(
+      eligible.find(
+        (file) =>
+          !selectedPaths.has(file.path) &&
+          sourceCoverageRole(file) === "core_implementation",
+      ),
+    );
+  }
+
+  for (const role of SOURCE_COVERAGE_ROLES) {
+    if (selected.some((file) => sourceCoverageRole(file) === role)) {
+      continue;
+    }
+    add(
+      eligible
+        .filter(
+          (file) =>
+            !selectedPaths.has(file.path) && sourceCoverageRole(file) === role,
+        )
+        .sort((left, right) =>
+          compareCoverageRepresentative(left, right, role),
+        )[0],
+    );
+  }
+
+  for (const file of eligible) {
+    add(file);
+  }
+  return selected;
+}
+
+function compareCoverageRepresentative(
+  left: GitHubSourceTreeFile,
+  right: GitHubSourceTreeFile,
+  role: SourceCoverageRole,
+): number {
+  const names = COVERAGE_REPRESENTATIVE_NAMES[role];
+  if (names !== undefined) {
+    const rank =
+      representativeNameRank(left.path, names) -
+      representativeNameRank(right.path, names);
+    if (rank !== 0) {
+      return rank;
+    }
+  }
+  return compareSourcePriority(left, right);
+}
+
+function representativeNameRank(
+  path: string,
+  names: readonly string[],
+): number {
+  const filename = basename(path.toLowerCase());
+  const stem = filename.includes(".")
+    ? filename.slice(0, filename.lastIndexOf("."))
+    : filename;
+  const exactRank = names.indexOf(stem);
+  if (exactRank !== -1) {
+    return exactRank;
+  }
+  const containedRank = names.findIndex((name) => stem.includes(name));
+  return containedRank === -1 ? names.length * 2 : names.length + containedRank;
+}
+
+function compareCoreRepresentative(
+  left: GitHubSourceTreeFile,
+  right: GitHubSourceTreeFile,
+  topic: CoreCoverageTopic,
+): number {
+  const rank =
+    representativeNameRank(left.path, topic.representative_names) -
+    representativeNameRank(right.path, topic.representative_names);
+  return rank === 0 ? compareSourcePriority(left, right) : rank;
+}
+
+function sourceCoverageRole(
+  file: GitHubSourceTreeFile,
+): SourceCoverageRole | undefined {
+  const lowerPath = file.path.toLowerCase();
+  const segments = lowerPath.split("/");
+  if (
+    file.file_type === "documentation" &&
+    ARCHITECTURE_PATH_PATTERN.test(lowerPath)
+  ) {
+    return "architecture";
+  }
+  if (
+    file.file_type === "benchmark" ||
+    PERFORMANCE_PATH_PATTERN.test(lowerPath)
+  ) {
+    return "performance";
+  }
+  if (file.file_type === "test" || VERIFICATION_PATH_PATTERN.test(lowerPath)) {
+    return "verification";
+  }
+  if (segments.some((segment) => INTERFACE_PATH_SEGMENTS.has(segment))) {
+    return "interface";
+  }
+  if (
+    file.file_type === "source_code" &&
+    !segments.some((segment) => AUXILIARY_SOURCE_PATH_SEGMENTS.has(segment))
+  ) {
+    return "core_implementation";
+  }
+  if (file.file_type === "manifest" || file.file_type === "configuration") {
+    return "operations";
+  }
+  return undefined;
 }
 
 /**
@@ -1112,7 +1401,9 @@ function parseRelease(
   const publishedAt = normalizeReleaseTimestamp(value.published_at, index);
   const url = normalizeReleaseUrl(value.html_url, repository, index);
   const notes =
-    value.body === null || value.body.length === 0 ? undefined : value.body;
+    value.body === null || value.body.length === 0
+      ? undefined
+      : normalizeReleaseNotes(value.body);
   const boundedNotes =
     notes === undefined ? undefined : truncateReleaseNotes(notes);
   if (
@@ -1136,6 +1427,10 @@ function parseRelease(
       ? { notes_truncated: true }
       : {}),
   };
+}
+
+function normalizeReleaseNotes(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
 }
 
 function truncateReleaseNotes(value: string): string {
