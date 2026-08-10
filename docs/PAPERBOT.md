@@ -62,12 +62,15 @@ visible instead of filling them with speculation.
 3. **Create a scan manifest.** The CLI records the repository revision and
    selected file inventory.
 4. **Build an evidence ledger.** An evidence session reads the bounded source
-   bundle, extracts exact source excerpts, and records observations,
-   qualified inferences, contradictions, unknowns, and candidate questions in
-   neutral language that identifies the product by name.
-5. **Validate evidence integrity.** The host verifies source IDs, exact
-   excerpts, locators, digests, evidence kinds, and source revision before any
-   prose is drafted. This gate does not claim to prove semantic entailment.
+   bundle through a host-numbered line view, selects inclusive source spans,
+   and records observations, qualified inferences, contradictions, unknowns,
+   and candidate questions in neutral language that identifies the product by
+   name.
+5. **Materialize and validate evidence.** The host resolves each selected span
+   against the private source snapshot, extracts the exact original text, and
+   records its source ID, locator, and digest before any prose is drafted. The
+   model never reproduces evidence excerpts. This integrity gate does not claim
+   to prove semantic entailment.
 6. **Collect related-work inputs.** The host may record public reference URLs,
    but a URL alone cannot support a factual claim. The current Pi workflow
    keeps URLs reference-only; a future collector must snapshot and validate
@@ -274,8 +277,10 @@ The agent writes a new private run directory with:
   GitHub release metadata and notes used for status inference;
 - `evidence-candidates/`, `evidence-analysis.json`, and `evidence.jsonl` — the
   evidence session's candidate checkpoints, unresolved analysis, and the
-  integrity-validated claim ledger. Each repository or snapshotted
-  release-note item has an `evidence_id`, exact excerpt and digest, source ID,
+  integrity-validated claim ledger. Candidate schema version 2 stores neutral
+  claims and model-selected inclusive line ranges, not copied excerpts. The
+  host materializes each repository or snapshotted release-note item in
+  `evidence.jsonl` with an `evidence_id`, exact excerpt and digest, source ID,
   line locator, confidence, and status. Supplied external URLs remain
   reference-only until their contents are explicitly snapshotted;
 - `sessions/evidence/` and `sessions/author/` — the two private Pi-native JSONL
@@ -288,13 +293,17 @@ The agent writes a new private run directory with:
   current deterministic validation report.
 
 The evidence session sees the bounded source bundle and returns evidence, not
-paper Markdown. It is instructed to build a selective, high-information ledger
-covering product purpose, mechanisms, interfaces, guarantees, verification,
-operations, performance methodology, tradeoffs, and limitations rather than
-collecting incidental constants or file-level trivia. Its claims and analysis
-refer to the product neutrally by name. Missing important areas become explicit
-unknowns. After the integrity gate, the author session sees only the validated
-evidence excerpts, metadata, external reference URLs, and recorded unknowns.
+paper Markdown. The host gives every source line a display-only absolute number.
+The model selects narrow inclusive line ranges and builds a selective,
+high-information ledger covering product purpose, mechanisms, interfaces,
+guarantees, verification, operations, performance methodology, tradeoffs, and
+limitations rather than collecting incidental constants or file-level trivia.
+Its claims and analysis refer to the product neutrally by name. The host
+extracts exact text from the original snapshot; display line numbers never
+enter the excerpt. Missing important areas become explicit unknowns. After the
+integrity gate, the author session sees the full materialized ledger—neutral
+claims, exact excerpts, paths, locators, digests, confidence, and analysis—but
+not the repository bundle itself.
 It writes on behalf of the credited authors in first-person plural voice,
 creates a problem-centered candidate, then reviews and revises that candidate
 in the same conversation. That pass is self-review, not an independent model

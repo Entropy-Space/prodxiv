@@ -112,9 +112,11 @@ an exact source revision without cloning or executing repository code. It has
 no shell, filesystem, browser, credential, or publish tools.
 
 An `agent run` uses exactly two private logical Pi sessions. The evidence
-session extracts exact repository excerpts and snapshotted release-note
-excerpts into `evidence.jsonl`; after host integrity validation, the author
-session drafts and revises from that ledger. For GitHub sources, deterministic
+session selects inclusive ranges from host-numbered repository and snapshotted
+release-note lines and writes neutral claims. The host extracts exact original
+text, attaches paths, locators, digests, confidence, and status in
+`evidence.jsonl`; after integrity validation, the author session drafts and
+revises from that complete materialized ledger. For GitHub sources, deterministic
 selection reserves coverage across architecture, core implementation,
 interfaces, verification, performance, and operations when available. Prefer
 claims that explain product purpose and mechanisms; omit technically true but

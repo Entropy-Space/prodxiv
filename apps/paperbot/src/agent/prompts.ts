@@ -41,7 +41,7 @@ export function createEvidencePrompt(input: PromptInput): string {
     "Act as the evidence analyst for this private Paperbot run. Extract a bounded claim ledger before any paper is drafted.",
     "Return exactly one fenced JSON object and no surrounding explanation.",
     evidenceResponseShape(),
-    "Every evidence item must quote an exact, contiguous excerpt from one provided source_id. Preserve whitespace and punctuation exactly; Paperbot verifies the excerpt byte-for-byte. Use repository for repository files, external for snapshotted GitHub release notes, and inference only for an explicitly qualified interpretation. Do not create author evidence. Keep excerpts under 2,000 characters.",
+    "Every source line below has an absolute line number added by the host. For each evidence item, select one source_id and an inclusive line_start/line_end range from that source. The host—not you—extracts the exact original text, verifies the range, and materializes the excerpt for the drafting session. Select the narrowest contiguous range that supports the claim and remains under 2,000 characters. Use repository for repository files, external for snapshotted GitHub release notes, and inference only for an explicitly qualified interpretation. Do not create author evidence.",
     `Write every claim, note, contradiction, unknown, and candidate question in neutral analyst language. Refer to the product explicitly as ${JSON.stringify(input.metadata.product_name)} where a subject is needed; never use we, our, or us and never speak on behalf of the credited authors. Source excerpts remain verbatim regardless of voice.`,
     "Build a selective, high-information ledger, not an inventory. Prefer evidence that explains the product's purpose, intended users, core mechanisms, data model or interface, guarantees and failure handling, verification strategy, operational model, performance methodology, tradeoffs, and current limitations. Aim for coverage across the supplied areas rather than many claims from one file.",
     "Do not include raw enum numbers, incidental test literals, support addresses, legal boilerplate, package wiring, or unexplained script commands unless they establish a paper-relevant design property. A technically true detail is not useful evidence merely because it is easy to quote.",
@@ -60,7 +60,7 @@ export function createEvidenceCorrectionPrompt(input: {
     evidenceResponseShape(),
     "Correction diagnostics:",
     input.diagnostics.map((diagnostic) => `- ${diagnostic}`).join("\n"),
-    "Use only source IDs already supplied in this conversation. Every excerpt must be an exact contiguous substring of its source file.",
+    "Use only source IDs and numbered lines already supplied in this conversation. Preserve valid evidence items. Correct or remove only items implicated by the diagnostics, and do not add new evidence during integrity repair.",
   ].join("\n\n");
 }
 
@@ -183,8 +183,8 @@ export function formatSourceBundle(
   ];
   const files = source.files.map((file) =>
     [
-      `<paperbot_file source_id=${JSON.stringify(file.source_id)} path=${JSON.stringify(file.path)} type=${JSON.stringify(file.file_type)}>`,
-      file.content,
+      `<paperbot_file source_id=${JSON.stringify(file.source_id)} path=${JSON.stringify(file.path)} type=${JSON.stringify(file.file_type)} line_count=${sourceLineCount(file.content)}>`,
+      formatNumberedSource(file.content),
       "</paperbot_file>",
     ].join("\n"),
   );
@@ -192,8 +192,8 @@ export function formatSourceBundle(
     .filter((release) => release.notes !== undefined)
     .map((release) =>
       [
-        `<paperbot_github_release source_id=${JSON.stringify(release.source_id)} tag=${JSON.stringify(release.tag_name)} url=${JSON.stringify(release.url)}>`,
-        release.notes,
+        `<paperbot_github_release source_id=${JSON.stringify(release.source_id)} tag=${JSON.stringify(release.tag_name)} url=${JSON.stringify(release.url)} line_count=${sourceLineCount(release.notes ?? "")}>`,
+        formatNumberedSource(release.notes ?? ""),
         "</paperbot_github_release>",
       ].join("\n"),
     );
@@ -229,7 +229,27 @@ export function formatEvidenceBundle(
 }
 
 function evidenceResponseShape(): string {
-  return '```json\n{\n  "evidence": [{"claim":"...","evidence_kind":"repository|external|inference","source_id":"one provided id","excerpt":"exact contiguous source text","confidence":"high|medium|low","note":"optional"}],\n  "contradictions": [{"description":"...","source_ids":["provided id"]}],\n  "unknowns": ["fact the repository cannot establish"],\n  "questions": ["focused question for the authoring session to consider"]\n}\n```';
+  return '```json\n{\n  "evidence": [{"claim":"...","evidence_kind":"repository|external|inference","source_id":"one provided id","locator":{"line_start":1,"line_end":2},"confidence":"high|medium|low","note":"optional"}],\n  "contradictions": [{"description":"...","source_ids":["provided id"]}],\n  "unknowns": ["fact the repository cannot establish"],\n  "questions": ["focused question for the authoring session to consider"]\n}\n```';
+}
+
+function sourceLineCount(content: string): number {
+  return sourceLines(content).length;
+}
+
+function formatNumberedSource(content: string): string {
+  return sourceLines(content)
+    .map(
+      (line, index) => `${(index + 1).toString().padStart(6, "0")} | ${line}`,
+    )
+    .join("\n");
+}
+
+function sourceLines(content: string): string[] {
+  const lines = content.split("\n");
+  if (lines.length > 1 && lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }
 
 function draftResponseShape(): string {

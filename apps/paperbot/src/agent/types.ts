@@ -122,19 +122,23 @@ export interface EvidenceCandidate {
   claim: string;
   evidence_kind: EvidenceKind;
   source_id: string;
-  excerpt: string;
+  locator: EvidenceCandidateLocator;
   confidence: "high" | "medium" | "low";
   note?: string;
 }
 
-export interface EvidenceLocator {
-  path: string;
+export interface EvidenceCandidateLocator {
   line_start: number;
   line_end: number;
 }
 
+export interface EvidenceLocator extends EvidenceCandidateLocator {
+  path: string;
+}
+
 export interface EvidenceItem extends EvidenceCandidate {
   evidence_id: string;
+  excerpt: string;
   excerpt_sha256: string;
   locator: EvidenceLocator;
   status: EvidenceStatus;

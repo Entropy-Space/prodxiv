@@ -487,7 +487,7 @@ async function produceEvidence(input: {
   for (let attempt = 0; attempt <= MAX_EVIDENCE_REPAIR_ATTEMPTS; attempt += 1) {
     const candidateArtifact = `evidence-candidates/candidate-${attempt + 1}.json`;
     await writeJsonArtifact(input.run_path, candidateArtifact, {
-      schema_version: "1",
+      schema_version: "2",
       ...response,
     });
     input.record.state = "evidence_ready";

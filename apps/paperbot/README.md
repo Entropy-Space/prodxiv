@@ -77,9 +77,10 @@ writer metadata, along with narrative content, remain visibly incomplete for
 the Agent Skill and author to resolve.
 
 `agent run` is the optional model-assisted workflow. It creates one isolated
-Pi evidence session, verifies exact repository excerpts and snapshotted
-release-note excerpts into `evidence.jsonl`, then creates one separate author
-session that drafts and self-reviews from that validated ledger. Public GitHub
+Pi evidence session that selects host-numbered source lines and writes neutral
+claims. The host materializes exact repository and snapshotted release-note
+excerpts into `evidence.jsonl`, then creates one separate author session that
+drafts and self-reviews from that complete validated ledger. Public GitHub
 runs use a bounded, coverage-aware file selection across architecture, core
 implementation, interfaces, verification, performance, and operations when
 available. The evidence prompt favors product-defining claims over incidental

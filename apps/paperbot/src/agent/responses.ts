@@ -17,7 +17,6 @@ const EVIDENCE_KINDS = new Set<EvidenceKind>([
 ]);
 const CONFIDENCES = new Set(["high", "medium", "low"]);
 const MAX_EVIDENCE_ITEMS = 64;
-const MAX_EVIDENCE_EXCERPT_CHARACTERS = 2_000;
 const MAX_CONTRADICTIONS = 16;
 const MAX_UNKNOWN_ITEMS = 24;
 const MAX_QUESTIONS_PER_ROUND = 5;
@@ -251,7 +250,7 @@ function evidenceCandidate(value: unknown, path: string): EvidenceCandidate {
   }
   assertOnlyFields(
     value,
-    ["claim", "evidence_kind", "source_id", "excerpt", "confidence", "note"],
+    ["claim", "evidence_kind", "source_id", "locator", "confidence", "note"],
     path,
   );
   const evidenceKind = requiredString(
@@ -265,11 +264,24 @@ function evidenceCandidate(value: unknown, path: string): EvidenceCandidate {
   if (!CONFIDENCES.has(confidence)) {
     invalidResponse(`${path}.confidence is not recognized`);
   }
-  const excerpt = requiredString(value.excerpt, `${path}.excerpt`);
-  if (excerpt.length > MAX_EVIDENCE_EXCERPT_CHARACTERS) {
-    invalidResponse(
-      `${path}.excerpt must contain at most ${MAX_EVIDENCE_EXCERPT_CHARACTERS} characters`,
-    );
+  if (!isRecord(value.locator)) {
+    invalidResponse(`${path}.locator must be an object`);
+  }
+  assertOnlyFields(
+    value.locator,
+    ["line_start", "line_end"],
+    `${path}.locator`,
+  );
+  const lineStart = requiredPositiveInteger(
+    value.locator.line_start,
+    `${path}.locator.line_start`,
+  );
+  const lineEnd = requiredPositiveInteger(
+    value.locator.line_end,
+    `${path}.locator.line_end`,
+  );
+  if (lineEnd < lineStart) {
+    invalidResponse(`${path}.locator.line_end must not precede line_start`);
   }
   const note = optionalString(
     value.note,
@@ -284,7 +296,7 @@ function evidenceCandidate(value: unknown, path: string): EvidenceCandidate {
     ),
     evidence_kind: evidenceKind as EvidenceKind,
     source_id: boundedString(value.source_id, `${path}.source_id`, 500),
-    excerpt,
+    locator: { line_start: lineStart, line_end: lineEnd },
     confidence: confidence as EvidenceCandidate["confidence"],
     ...(note === undefined ? {} : { note }),
   };
@@ -376,6 +388,13 @@ function requiredString(value: unknown, path: string): string {
     invalidResponse(`${path} must be a non-empty string`);
   }
   return value;
+}
+
+function requiredPositiveInteger(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    invalidResponse(`${path} must be a positive safe integer`);
+  }
+  return value as number;
 }
 
 function boundedString(
