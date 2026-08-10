@@ -3,9 +3,12 @@ import { sha256 } from "./artifacts.ts";
 import type {
   AgentSource,
   EvidenceCandidate,
+  EvidenceCandidateLocator,
   EvidenceItem,
   EvidenceStatus,
 } from "./types.ts";
+
+const MAX_EVIDENCE_EXCERPT_CHARACTERS = 2_000;
 
 export interface AuthorEvidenceSource {
   source_id: string;
@@ -38,22 +41,25 @@ export function buildValidatedEvidence(
     const duplicateKey = [
       candidate.source_id,
       candidate.claim,
-      candidate.excerpt,
+      candidate.locator.line_start,
+      candidate.locator.line_end,
     ].join("\u0000");
     if (seen.has(duplicateKey)) {
       invalidEvidence(`duplicate evidence item at index ${index}`);
     }
     seen.add(duplicateKey);
-    const locator = locateExcerpt(
+    const excerpt = extractSourceSpan(
       sourceFile.content,
-      candidate.excerpt,
+      candidate.locator,
       sourceFile.path,
     );
+    const { locator: selectedLocator, ...candidateFields } = candidate;
     return {
       evidence_id: formatEvidenceId(index + 1),
-      ...candidate,
-      excerpt_sha256: sha256(candidate.excerpt),
-      locator,
+      ...candidateFields,
+      excerpt,
+      excerpt_sha256: sha256(excerpt),
+      locator: { path: sourceFile.path, ...selectedLocator },
       status:
         candidate.evidence_kind === "repository" ||
         candidate.evidence_kind === "external"
@@ -137,19 +143,32 @@ export function parseStoredEvidence(
         `evidence excerpt digest does not match: ${item.evidence_id}`,
       );
     }
-    const locator = locateExcerpt(
-      content,
-      item.excerpt,
-      path,
-      invalidStoredEvidence,
-    );
-    if (
-      locator.path !== item.locator.path ||
-      locator.line_start !== item.locator.line_start ||
-      locator.line_end !== item.locator.line_end
+    if (item.locator.path !== path) {
+      invalidStoredEvidence(
+        `evidence path does not match: ${item.evidence_id}`,
+      );
+    }
+    if (item.evidence_kind === "author") {
+      const locator = locateExcerpt(
+        content,
+        item.excerpt,
+        path,
+        invalidStoredEvidence,
+      );
+      if (
+        locator.line_start !== item.locator.line_start ||
+        locator.line_end !== item.locator.line_end
+      ) {
+        invalidStoredEvidence(
+          `evidence locator does not match its source: ${item.evidence_id}`,
+        );
+      }
+    } else if (
+      extractSourceSpan(content, item.locator, path, invalidStoredEvidence) !==
+      item.excerpt
     ) {
       invalidStoredEvidence(
-        `evidence locator does not match its source: ${item.evidence_id}`,
+        `evidence excerpt does not match its selected lines: ${item.evidence_id}`,
       );
     }
     return item;
@@ -321,6 +340,48 @@ function locateExcerpt(
     line_start: lineStart,
     line_end: lineStart + countNewlines(excerpt),
   };
+}
+
+function extractSourceSpan(
+  content: string,
+  locator: EvidenceCandidateLocator,
+  path: string,
+  reject: (message: string) => never = invalidEvidence,
+): string {
+  const lineStarts = [0];
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] === "\n" && index + 1 < content.length) {
+      lineStarts.push(index + 1);
+    }
+  }
+  if (
+    locator.line_start > lineStarts.length ||
+    locator.line_end > lineStarts.length
+  ) {
+    reject(
+      `selected lines ${locator.line_start}-${locator.line_end} exceed ${path}'s ${lineStarts.length} lines`,
+    );
+  }
+  const startOffset = lineStarts[locator.line_start - 1];
+  const finalLineStart = lineStarts[locator.line_end - 1];
+  if (startOffset === undefined || finalLineStart === undefined) {
+    reject(`selected lines are not available in source: ${path}`);
+  }
+  const newlineOffset = content.indexOf("\n", finalLineStart);
+  let endOffset = newlineOffset === -1 ? content.length : newlineOffset;
+  if (endOffset > finalLineStart && content[endOffset - 1] === "\r") {
+    endOffset -= 1;
+  }
+  const excerpt = content.slice(startOffset, endOffset);
+  if (excerpt.trim().length === 0) {
+    reject(`selected lines contain no evidence text: ${path}`);
+  }
+  if (excerpt.length > MAX_EVIDENCE_EXCERPT_CHARACTERS) {
+    reject(
+      `selected lines exceed ${MAX_EVIDENCE_EXCERPT_CHARACTERS} characters: ${path}`,
+    );
+  }
+  return excerpt;
 }
 
 function countLines(value: string): number {

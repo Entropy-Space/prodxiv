@@ -80,6 +80,12 @@ describe("runAgent", () => {
       'Refer to the product explicitly as "Fixture Product"',
     );
     expect(runtime.prompts[0]?.prompt).toContain("never use we, our, or us");
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "000003 | This repository exercises Paperbot's deterministic scanner.",
+    );
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "The host—not you—extracts the exact original text",
+    );
     expect(runtime.prompts[1]?.prompt).toContain("<paperbot_evidence_bundle>");
     expect(runtime.prompts[1]?.prompt).toContain(
       "Write a product explanation, not an evidence inventory",
@@ -282,11 +288,11 @@ describe("runAgent", () => {
     );
   });
 
-  test("repairs evidence whose excerpt is not an exact source substring", async () => {
+  test("repairs evidence whose selected lines are outside the source", async () => {
     const outputPath = join(workspacePath, "run");
     const runtime = new FakeRuntime({
       evidence: [
-        evidenceResponse({ excerpt: "This text is not in the repository." }),
+        evidenceResponse({ locator: { line_start: 99, line_end: 99 } }),
         evidenceResponse(),
       ],
       author: [draftResponse(), draftResponse()],
@@ -297,7 +303,9 @@ describe("runAgent", () => {
     });
 
     expect(runtime.prompts[1]?.prompt).toContain("failed integrity validation");
-    expect(runtime.prompts[1]?.prompt).toContain("exact contiguous substring");
+    expect(runtime.prompts[1]?.prompt).toContain(
+      "do not add new evidence during integrity repair",
+    );
     expect(
       JSON.parse(
         await readFile(
@@ -306,7 +314,8 @@ describe("runAgent", () => {
         ),
       ),
     ).toMatchObject({
-      evidence: [{ excerpt: "This text is not in the repository." }],
+      schema_version: "2",
+      evidence: [{ locator: { line_start: 99, line_end: 99 } }],
     });
     expect(
       JSON.parse(
@@ -316,8 +325,49 @@ describe("runAgent", () => {
         ),
       ),
     ).toMatchObject({
-      evidence: [{ excerpt: repositoryExcerpt }],
+      schema_version: "2",
+      evidence: [{ locator: { line_start: 3, line_end: 3 } }],
     });
+  });
+
+  test("materializes exact Markdown and CRLF text from model-selected lines", async () => {
+    const outputPath = join(workspacePath, "run");
+    await writeFile(
+      join(repositoryPath, "README.md"),
+      "# Fixture product\r\n\r\n- Evidence keeps its bullet marker.\r\n  Continuation indentation is source text.\r\n",
+    );
+    const selectedEvidence = evidenceResponse({
+      locator: { line_start: 3, line_end: 4 },
+    });
+    const runtime = new FakeRuntime({
+      evidence: [selectedEvidence],
+      author: [draftResponse(), draftResponse()],
+    });
+
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () => runtime,
+    });
+
+    const evidence = JSON.parse(
+      (await readFile(join(outputPath, "evidence.jsonl"), "utf8")).trim(),
+    ) as Record<string, unknown>;
+    expect(evidence).toMatchObject({
+      source_id: "repository:README.md",
+      excerpt:
+        "- Evidence keeps its bullet marker.\r\n  Continuation indentation is source text.",
+      locator: {
+        path: "README.md",
+        line_start: 3,
+        line_end: 4,
+      },
+      excerpt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "000003 | - Evidence keeps its bullet marker.",
+    );
+    expect(runtime.prompts[0]?.prompt).toContain(
+      "000004 |   Continuation indentation is source text.",
+    );
   });
 
   test("fails closed when corrected evidence still has invalid provenance", async () => {
@@ -509,14 +559,14 @@ describe("runAgent", () => {
           claim: "The acquired product has a repository README.",
           evidence_kind: "repository",
           source_id: "repository:README.md",
-          excerpt: "# Acquired Product",
+          locator: { line_start: 1, line_end: 1 },
           confidence: "high",
         },
         {
           claim: "GitHub contains a stable release note.",
           evidence_kind: "external",
           source_id: "github_release:001",
-          excerpt: "First stable release.",
+          locator: { line_start: 1, line_end: 1 },
           confidence: "high",
         },
       ],
@@ -1026,9 +1076,6 @@ function metadata() {
   };
 }
 
-const repositoryExcerpt =
-  "This repository exercises Paperbot's deterministic scanner.";
-
 function evidenceResponse(
   evidenceOverrides: Partial<Record<string, unknown>> = {},
 ): string {
@@ -1038,7 +1085,7 @@ function evidenceResponse(
         claim: "Fixture Product is a deterministic Paperbot scanner fixture.",
         evidence_kind: "repository",
         source_id: "repository:README.md",
-        excerpt: repositoryExcerpt,
+        locator: { line_start: 3, line_end: 3 },
         confidence: "high",
         ...evidenceOverrides,
       },
