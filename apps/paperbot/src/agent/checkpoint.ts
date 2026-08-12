@@ -190,9 +190,12 @@ async function writeCheckpointArchive(
   await secureCheckpointDirectory(directory);
   const date = createdAt.slice(0, 10);
   const runName = safeFilename(basename(runPath));
-  const filename = `${date}_${runName}_${record.run_id}_checkpoint-${checkpointNumber
-    .toString()
-    .padStart(4, "0")}_${reason}.zip`;
+  const filename =
+    record.input.mode === "auto" && reason === "needs_author_review"
+      ? `${date}_${runName}_${record.run_id}_final.zip`
+      : `${date}_${runName}_${record.run_id}_checkpoint-${checkpointNumber
+          .toString()
+          .padStart(4, "0")}_${reason}.zip`;
   const target = join(directory, filename);
 
   try {

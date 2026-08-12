@@ -25,7 +25,13 @@ bun run paperbot agent select-trending \
   --format json
 bun run paperbot agent run https://github.com/tigerbeetle/tigerbeetle \
   --output ./paperbot-runs/tigerbeetle \
-  --allow-remote-model
+  --allow-remote-model \
+  --mode interactive \
+  --feedback sync
+bun run paperbot agent run https://github.com/tigerbeetle/tigerbeetle \
+  --output ./paperbot-runs/tigerbeetle-auto \
+  --allow-remote-model \
+  --mode auto
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -76,7 +82,26 @@ prose, and it never writes or overwrites a paper file. Missing author and
 writer metadata, along with narrative content, remain visibly incomplete for
 the Agent Skill and author to resolve.
 
-`agent run` is the optional model-assisted workflow. It creates one isolated
+`agent run` is the optional model-assisted workflow. It defaults to
+`interactive`, with two feedback transports. `--feedback sync` asks focused
+questions in the terminal and continues in the same invocation; it requires a
+TTY and seals one final ZIP on success. `--feedback async` is the default: it
+writes pending questions, seals an `awaiting_author` ZIP, and later continues
+with `agent resume --answers <answers.md>`. Async resumes preserve every prior
+checkpoint.
+
+`--mode auto` is for unattended runs. It has no feedback transport, never
+stops at `awaiting_author`, and cannot be resumed with author answers. The
+author session must turn unsupported context into visible conditional
+assumptions or unresolved questions rather than fabricated evidence. Paperbot
+writes the structured assumptions to `assumptions.json`, records their digest
+in `events.jsonl`, and ends at `needs_author_review` with exactly one terminal
+`*_final.zip`. Batch reports use schema version 2 and record their requested
+mode. The status still means a human must review the paper before any
+submission. The mode and feedback transport (`none` for auto) are recorded in
+`run.json`.
+
+The workflow creates one isolated
 Pi evidence session that selects host-numbered source lines and writes neutral
 claims. The host materializes exact repository and snapshotted release-note
 excerpts into `evidence.jsonl`, then creates one separate author session that
@@ -89,8 +114,10 @@ The author session writes on behalf of the credited product authors using
 first-person plural voice, organizes the draft around the product problem, and
 does not invent intention merely to make `we` prose sound complete. It can emit a bounded
 `ask_questions` event;
-the host checkpoints it as `awaiting_author`, and `agent resume --answers`
-reopens the same logical author session. Once the loop completes, Paperbot
+in async feedback, the host checkpoints it as `awaiting_author`, and `agent
+resume --answers` reopens the same logical author session. With sync feedback,
+the host records terminal answers directly as author evidence and continues
+the same session without an intermediate ZIP. Once the loop completes, Paperbot
 writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version. Both sessions
 are retained as Pi-native JSONL under the private run directory; `run.json`
@@ -106,7 +133,8 @@ prompt and response digests, model observations, usage, timing, and failures.
 At `awaiting_author`, `needs_author_review`, and `failed`, Paperbot seals a new
 mode-`0600` ZIP under the sibling `checkpoints/` directory with a manifest of
 all archived paths, sizes, and SHA-256 digests. Resuming preserves every older
-ZIP and creates a new numbered checkpoint.
+ZIP and creates a new numbered checkpoint. A successful auto run has no
+intermediate stopping point, so its sole archive is named `*_final.zip`.
 
 For a public GitHub URL, `agent run` uses the repository owner as the default
 organization author and never derives authors from commits or contributors. It
@@ -143,9 +171,10 @@ endorsement.
 
 The repository's scheduled `Evaluate Paperbot` workflow uses the selection as
 a discovery lane alongside three exact-revision canaries. It generates six
-private drafts per day, accepts `awaiting_author` as a successful honest
-checkpoint, and uploads the run directories and sealed ZIPs for 30 days. The
-workflow has no publication step or publishing credentials.
+private auto-mode drafts per day, each with one terminal `*_final.zip`, and
+uploads the run directories and sealed ZIPs for 30 days. Assumptions and
+unresolved questions remain review inputs rather than evidence. The workflow
+has no publication step or publishing credentials.
 
 Every Paperbot-started Pi session file is created before its first model turn,
 is mode `0600` inside a mode-`0700` run directory, and stays local. Session

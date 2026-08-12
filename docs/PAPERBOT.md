@@ -212,8 +212,38 @@ public GitHub repository URL:
 bun run paperbot agent run https://github.com/different-ai/openwork \
   --output ./paperbot-runs/openwork \
   --allow-remote-model \
+  --mode interactive \
+  --feedback sync \
   --model deepseek-v4-flash
 ```
+
+Paperbot exposes an interactive drafting mode with two feedback transports,
+and an unattended auto mode:
+
+- `--feedback sync` requires an interactive terminal. When the author session
+  asks questions, Paperbot shows each question and its reason, records the
+  answers as private author evidence, and continues in the same invocation.
+  A successful invocation ends at `needs_author_review` and seals exactly one
+  final ZIP. Up to three question rounds may occur before that checkpoint.
+- `--feedback async` is the default and works without an interactive terminal.
+  Paperbot writes `questions.md`, ends at `awaiting_author`, and seals a ZIP.
+  The author later supplies a Markdown answer file with `agent resume
+<run-directory> --answers <answers.md> --allow-remote-model`. Each async
+  resume is a new audited invocation and preserves every earlier ZIP.
+- `--mode auto` has no feedback transport and rejects `--feedback`. Paperbot
+  never enters `awaiting_author` or accepts a later author-answer resume. It
+  records material working assumptions in `assumptions.json`, renders them as
+  explicitly unverified and conditional in the private paper, and keeps open
+  issues in `questions.md`. A successful run ends at `needs_author_review` and
+  seals exactly one `*_final.zip`.
+
+The run record stores `mode` and the selected `feedback` value; auto uses
+`feedback: none`.
+Runs created before these fields existed are interpreted as interactive async
+runs and remain safely resumable. `agent run` defaults to interactive async;
+`agent batch` defaults to auto and accepts `--mode interactive` when a queued
+author interview is desired instead. Batch manifests remain schema version 1;
+batch reports are schema version 2 and record the requested mode.
 
 For a public GitHub source, Paperbot uses the repository owner as the default
 organization author, represented by a namespaced ID such as `github:owner`.
@@ -297,6 +327,8 @@ The agent writes a new private run directory with:
   draft checkpoints with deterministic validation reports;
 - `questions.jsonl`, `questions.md`, and `answers/` — the bounded author
   interview protocol and copied answer checkpoints;
+- `assumptions.json` — structured material assumptions, their reasons, and the
+  evidence IDs that bound them; assumptions are never promoted to evidence;
 - `paper.md` and `validation.json` — the final generated private paper and
   current deterministic validation report.
 
@@ -307,6 +339,8 @@ and a `manifest.json` listing every archived path, byte count, and SHA-256
 digest. Resume never overwrites an earlier ZIP; it creates the next numbered
 checkpoint and retains the live directory for continued work. Checkpoint ZIPs
 are private debugging artifacts and are never published or submitted.
+Successful auto runs have no intermediate stop, so their single terminal
+archive is named `*_final.zip`.
 If a process was interrupted after persisting a resumable stopping state but
 before recording its ZIP, the next `agent resume` first creates a `recovered`
 checkpoint before mutating that run.
@@ -330,9 +364,13 @@ review; an independent final evidence review is intentionally deferred.
 
 During review, the author session emits one of two host-controlled protocol
 events: `submit_draft` or `ask_questions`. `ask_questions` is not a public
-deterministic CLI tool. Paperbot checkpoints the questions, moves to
-`awaiting_author`, and later reopens the same logical author session through
-`agent resume`. The workflow permits at most three question rounds, two
+deterministic CLI tool. With async feedback, Paperbot checkpoints the questions,
+moves to `awaiting_author`, and later reopens the same logical author session
+through `agent resume`. With sync feedback, it collects bounded terminal
+answers, records their digests in the rollout, and continues without sealing
+an intermediate ZIP. In auto mode, author questions are unavailable; the
+author session must submit a draft and record any material working assumptions
+or unresolved issues explicitly. The workflow permits at most three question rounds, two
 host-directed draft repair attempts per stage, and twelve author-session
 turns. Every submitted draft is checked for evidence IDs, fields, links, raw
 HTML, benchmark policy, and canonical paper structure before it is accepted.
@@ -342,14 +380,17 @@ interpretation, or lessons. If review approves an unchanged draft, Paperbot
 keeps the original immutable checkpoint instead of creating a duplicate
 revision.
 
-When no questions remain, Paperbot writes `paper.md` and ends in
+When no questions remain, or when auto mode completes its assumption-aware
+review, Paperbot writes `paper.md` and ends in
 `needs_author_review`. A run waiting for answers has a validated draft
 checkpoint but no `paper.md` yet. Neither state submits or publishes. If a
 model response or restored artifact fails validation, Paperbot fails closed
 without replacing an accepted checkpoint. Run schema version 1 used the old
 multi-session draft/review protocol, version 2 predates structured attribution
-and release provenance, and version 3 predates producer provenance, rollout
-integrity, and checkpoint ZIPs. None is resumable as a schema-version-4 run.
+and release provenance, version 3 predates producer provenance, rollout
+integrity, and checkpoint ZIPs, and version 4 predates explicit auto mode and
+structured assumptions. Valid version-4 interactive runs are migrated in
+memory and remain resumable; earlier versions are rejected.
 
 The initial agent has no general web-search or page-fetch capability. Use
 `--source <public-url>` only to provide a citeable URL; it is not fetched and
@@ -448,10 +489,11 @@ three non-canary repositories from that day's validated Trending selection.
 The fixed lane makes regressions comparable across Paperbot builds; the
 rotating lane exposes new repository shapes and failure modes.
 
-Each of the six repositories runs through the normal private `agent batch`
-workflow. `awaiting_author` is a successful evaluation checkpoint because
-Paperbot must not fabricate intention merely to force a final paper. Failures
-remain valuable outputs and retain their checkpoint ZIPs. GitHub Actions keeps
+Each of the six repositories runs through the normal private auto-mode `agent
+batch` workflow. Every successful project produces one terminal `*_final.zip`;
+unsupported intention remains a visible assumption or unresolved question
+rather than fabricated evidence. Failures remain valuable outputs and retain
+their checkpoint ZIPs. GitHub Actions keeps
 the private run directories, ZIPs, selection, batch report, and workflow
 metadata as one access-controlled artifact for 30 days. The workflow requires
 the `DEEPSEEK_API_KEY` repository secret, receives no publishing credentials,
@@ -487,6 +529,7 @@ status inference:
 bun run paperbot agent batch ./projects.json \
   --output ./paperbot-runs/trending \
   --allow-remote-model \
+  --mode auto \
   --model deepseek-v4-flash \
   --concurrency 2
 ```
@@ -494,13 +537,15 @@ bun run paperbot agent batch ./projects.json \
 Project-level `authors` and `status` override optional command defaults. When
 they are absent, each project uses its GitHub owner and release snapshot. A
 batch supports up to 100 repositories and
-one to four concurrent runs. It creates one isolated child directory per
+one to four concurrent runs. Batch defaults to auto mode. It creates one
+isolated child directory per
 repository plus an incrementally updated `batch.json` report. One project
 failure does not stop other projects, but the command exits nonzero if any
-project fails or its generated draft does not pass validation. A project that
-reaches `awaiting_author` is a successful private checkpoint; its result
-reports the pending question count and requires a later individual
-`agent resume`. The batch workflow never submits or publishes.
+project fails or its generated draft does not pass validation. With `--mode
+interactive`, a project that reaches `awaiting_author` is a successful private
+checkpoint; its result reports the pending question count and requires a later
+individual `agent resume`. An auto batch rejects that state as a contract
+violation. The batch workflow never submits or publishes.
 
 To answer the current bounded question round and continue the same logical
 author session:

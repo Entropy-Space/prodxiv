@@ -72,6 +72,7 @@ jobs:
           bun run paperbot agent batch evaluation-manifest.json \
             --output evaluation/runs \
             --allow-remote-model \
+            --mode auto \
             --model "${PAPERBOT_MODEL}" \
             --concurrency 2 \
             --format json > evaluation-batch-result.json

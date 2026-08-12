@@ -13,6 +13,8 @@ export type AgentPaperStatus =
   | "public_beta"
   | "launched"
   | "discontinued";
+export type AgentRunMode = "interactive" | "auto";
+export type AgentFeedbackMode = "sync" | "async" | "none";
 
 export interface PublishArguments {
   command: "publish";
@@ -90,6 +92,8 @@ export interface AgentRunArguments {
   repository: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode: AgentRunMode;
+  feedback: AgentFeedbackMode;
   metadata: {
     title: string;
     product_name: string;
@@ -120,6 +124,7 @@ export interface AgentBatchArguments {
   input_path: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode: AgentRunMode;
   authors?: string[];
   status?: AgentPaperStatus;
   model?: string;
@@ -239,6 +244,8 @@ function parseAgentRunArguments(
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let mode: AgentRunMode = "interactive";
+  let feedback: AgentFeedbackMode | undefined;
   const authors: string[] = [];
   const external_sources: string[] = [];
 
@@ -252,6 +259,28 @@ function parseAgentRunArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--mode") {
+      mode = parseAgentRunMode(requiredFollowingValue(args, index, "--mode"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--mode=")) {
+      mode = parseAgentRunMode(requiredInlineValue(argument, "--mode"));
+      continue;
+    }
+    if (argument === "--feedback") {
+      feedback = parseAgentFeedbackMode(
+        requiredFollowingValue(args, index, "--feedback"),
+      );
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--feedback=")) {
+      feedback = parseAgentFeedbackMode(
+        requiredInlineValue(argument, "--feedback"),
+      );
       continue;
     }
     if (argument === "--format") {
@@ -324,6 +353,11 @@ function parseAgentRunArguments(
       "agent run requires --allow-remote-model before source content is sent to a model",
     );
   }
+  if (mode === "auto" && feedback !== undefined) {
+    throw usageError(
+      "agent run --feedback is only valid with --mode interactive",
+    );
+  }
 
   const defaultProductName = defaultAgentProductName(repository);
   return {
@@ -332,6 +366,8 @@ function parseAgentRunArguments(
     repository,
     output_path,
     allow_remote_model,
+    mode,
+    feedback: mode === "auto" ? "none" : (feedback ?? "async"),
     metadata: {
       title: title ?? `${defaultProductName} research draft`,
       product_name: product_name ?? defaultProductName,
@@ -436,6 +472,7 @@ function parseAgentBatchArguments(
   let concurrency: number | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let mode: AgentRunMode = "auto";
   const authors: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -448,6 +485,15 @@ function parseAgentBatchArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--mode") {
+      mode = parseAgentRunMode(requiredFollowingValue(args, index, "--mode"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--mode=")) {
+      mode = parseAgentRunMode(requiredInlineValue(argument, "--mode"));
       continue;
     }
     if (argument === "--format") {
@@ -537,6 +583,7 @@ function parseAgentBatchArguments(
     input_path,
     output_path,
     allow_remote_model,
+    mode,
     ...(authors.length === 0 ? {} : { authors }),
     ...(status === undefined ? {} : { status }),
     ...(model === undefined ? {} : { model }),
@@ -1136,6 +1183,20 @@ function parseAgentStatus(value: string): AgentPaperStatus {
     return value;
   }
   throw usageError(`unsupported product status: ${value}`);
+}
+
+function parseAgentRunMode(value: string): AgentRunMode {
+  if (value !== "interactive" && value !== "auto") {
+    throw usageError("agent --mode must be interactive or auto");
+  }
+  return value;
+}
+
+function parseAgentFeedbackMode(value: string): AgentFeedbackMode {
+  if (value !== "sync" && value !== "async") {
+    throw usageError("agent run --feedback must be sync or async");
+  }
+  return value;
 }
 
 function parseAgentConcurrency(value: string): number {

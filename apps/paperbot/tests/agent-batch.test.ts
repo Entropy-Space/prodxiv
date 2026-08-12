@@ -67,6 +67,8 @@ describe("runAgentBatch", () => {
         repository: "https://github.com/Example/first-project",
         output_path: join(outputPath, "example__first-project"),
         allow_remote_model: true,
+        mode: "auto",
+        feedback: "none",
         metadata: {
           title: "first project research draft",
           product_name: "first project",
@@ -82,6 +84,8 @@ describe("runAgentBatch", () => {
         repository: "https://github.com/example/second_project",
         output_path: join(outputPath, "example__second_project"),
         allow_remote_model: true,
+        mode: "auto",
+        feedback: "none",
         metadata: {
           title: "Second Project Paper",
           product_name: "Second Project",
@@ -111,9 +115,10 @@ describe("runAgentBatch", () => {
       await readFile(join(outputPath, "batch.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(report).toMatchObject({
-      schema_version: "1",
+      schema_version: "2",
       input: {
         allow_remote_model: true,
+        mode: "auto",
         authors: ["Batch Author"],
         status: "concept",
         model: "deepseek-v4-flash",
@@ -244,6 +249,7 @@ describe("runAgentBatch", () => {
         input_path: inputPath,
         output_path: join(workspace, "runs"),
         allow_remote_model: true,
+        mode: "interactive",
       },
       {
         run_agent: async (options) => ({
@@ -278,10 +284,13 @@ describe("runAgentBatch", () => {
         input_path: inputPath,
         output_path: join(workspace, "runs"),
         allow_remote_model: true,
+        mode: "interactive",
       },
       {
         run_agent: async (options) => ({
           ...successfulRun(options.output_path),
+          mode: "interactive",
+          feedback: "async",
           state: "awaiting_author",
           questions: { pending: 2, round: 1 },
         }),
@@ -295,6 +304,43 @@ describe("runAgentBatch", () => {
         state: "awaiting_author",
         questions: { pending: 2, round: 1 },
       },
+    });
+  });
+
+  test("rejects an awaiting-author state from default auto batch mode", async () => {
+    const workspace = await createWorkspace();
+    const inputPath = await writeManifest(workspace, {
+      schema_version: "1",
+      projects: [
+        {
+          repository_url: "https://github.com/example/needs-context",
+          authors: ["Author"],
+          status: "concept",
+        },
+      ],
+    });
+
+    const result = await runAgentBatch(
+      {
+        input_path: inputPath,
+        output_path: join(workspace, "runs"),
+        allow_remote_model: true,
+      },
+      {
+        run_agent: async (options) => ({
+          ...successfulRun(options.output_path),
+          mode: "auto",
+          feedback: "none",
+          state: "awaiting_author",
+          questions: { pending: 2, round: 1 },
+        }),
+      },
+    );
+
+    expect(result.report.summary).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(result.report.projects[0]).toMatchObject({
+      state: "failed",
+      error: { message: expect.stringContaining("unexpected terminal state") },
     });
   });
 
@@ -369,6 +415,8 @@ function successfulRun(outputPath: string): AgentRunResult {
   return {
     run_id: "00000000-0000-4000-8000-000000000001",
     run_path: outputPath,
+    mode: "auto",
+    feedback: "none",
     state: "needs_author_review",
     validation: { valid: true, diagnostics: 0 },
     questions: { pending: 0, round: 0 },

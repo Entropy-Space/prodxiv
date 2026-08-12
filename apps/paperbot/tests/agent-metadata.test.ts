@@ -143,8 +143,8 @@ function producer(): AgentProducerProvenance {
     build_id: "c".repeat(64),
     bun_version: Bun.version,
     dependency_lock_sha256: "d".repeat(64),
-    run_schema_version: "4",
-    prompt_set_version: "2",
+    run_schema_version: "5",
+    prompt_set_version: "3",
     prompt_set_sha256: "e".repeat(64),
   };
 }

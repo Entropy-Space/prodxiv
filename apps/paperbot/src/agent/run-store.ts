@@ -12,18 +12,22 @@ import { evidenceIds, type AuthorEvidenceSource } from "./evidence.ts";
 import { normalizeAnonymousHttpUrl } from "./input.ts";
 import {
   parseEvidenceResponse,
+  parseDraftResponse,
   validateConflictSourceIds,
 } from "./responses.ts";
 import {
   AGENT_RUN_SCHEMA_VERSION,
   type AgentPaperRequestMetadata,
+  type AgentFeedbackMode,
   type AgentProducerProvenance,
+  type AgentRunMode,
   type AgentRunRecord,
   type AgentRunSourceRecord,
   type AgentSessionRecord,
   type AgentSessionRole,
   type AgentSource,
   type AuthorQuestion,
+  type DraftResponse,
   type EvidenceItem,
   type EvidenceResponse,
 } from "./types.ts";
@@ -46,7 +50,12 @@ export interface StoredEvidenceAnalysis {
 }
 
 export function createRunRecord(
-  options: { repository: string; metadata: AgentPaperRequestMetadata },
+  options: {
+    repository: string;
+    metadata: AgentPaperRequestMetadata;
+    mode?: AgentRunMode;
+    feedback?: AgentFeedbackMode;
+  },
   model: string,
   externalSources: string[],
   timestamp: string,
@@ -65,6 +74,8 @@ export function createRunRecord(
     input: {
       repository: options.repository,
       allow_remote_model: true,
+      mode: options.mode ?? "interactive",
+      feedback: options.feedback ?? "async",
       external_sources: externalSources,
       metadata: options.metadata,
     },
@@ -141,6 +152,23 @@ export async function readRunRecord(runPath: string): Promise<AgentRunRecord> {
     ) as unknown;
   } catch {
     throw invalidRunRecord(runPath);
+  }
+  if (isRecord(value) && isRecord(value.input)) {
+    if (
+      value.schema_version === "4" &&
+      (value.input.mode === undefined || value.input.mode === "interactive") &&
+      (value.input.feedback === undefined ||
+        value.input.feedback === "sync" ||
+        value.input.feedback === "async")
+    ) {
+      value.schema_version = AGENT_RUN_SCHEMA_VERSION;
+    }
+    if (value.input.mode === undefined) {
+      value.input.mode = "interactive";
+    }
+    if (value.input.feedback === undefined) {
+      value.input.feedback = "async";
+    }
   }
   if (!isRunRecord(value)) {
     throw invalidRunRecord(runPath);
@@ -430,6 +458,43 @@ export async function readCurrentDraft(
   );
 }
 
+export async function readCurrentDraftResponse(
+  runPath: string,
+  record: AgentRunRecord,
+): Promise<DraftResponse> {
+  const firstCheckpoint = record.artifacts.drafts?.[0];
+  const current = record.workflow.current_draft ?? firstCheckpoint;
+  if (current === undefined || !current.endsWith(".md")) {
+    throw new PaperbotError(
+      `agent run is missing its current draft response: ${runPath}`,
+      ExitCode.io,
+    );
+  }
+  const responseArtifact = current.replace(/\.md$/, ".json");
+  const serialized = await readArtifact(
+    artifactPath(runPath, responseArtifact),
+    "current draft response",
+    MAX_RESUME_DRAFT_BYTES,
+  );
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized) as unknown;
+  } catch {
+    throw new PaperbotError(
+      `agent current draft response is invalid: ${runPath}`,
+      ExitCode.io,
+    );
+  }
+  if (
+    isRecord(value) &&
+    value.action === "submit_draft" &&
+    value.assumptions === undefined
+  ) {
+    value.assumptions = [];
+  }
+  return parseDraftResponse(JSON.stringify(value));
+}
+
 export function assertResumableRecord(
   record: AgentRunRecord,
   runPath: string,
@@ -521,6 +586,14 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     Array.isArray(value.producer_history) &&
     value.producer_history.every(isProducerProvenance) &&
     isRecord(value.input) &&
+    (value.input.mode === "interactive" || value.input.mode === "auto") &&
+    (value.input.feedback === "sync" ||
+      value.input.feedback === "async" ||
+      value.input.feedback === "none") &&
+    ((value.input.mode === "auto" && value.input.feedback === "none") ||
+      (value.input.mode === "interactive" &&
+        (value.input.feedback === "sync" ||
+          value.input.feedback === "async"))) &&
     isRecord(value.agent) &&
     isRecord(value.artifacts) &&
     value.artifacts.rollout === "events.jsonl" &&
@@ -565,7 +638,8 @@ function isProducerProvenance(value: unknown): boolean {
     value.bun_version.length > 0 &&
     typeof value.dependency_lock_sha256 === "string" &&
     SHA256_PATTERN.test(value.dependency_lock_sha256) &&
-    value.run_schema_version === AGENT_RUN_SCHEMA_VERSION &&
+    (value.run_schema_version === "4" ||
+      value.run_schema_version === AGENT_RUN_SCHEMA_VERSION) &&
     typeof value.prompt_set_version === "string" &&
     value.prompt_set_version.length > 0 &&
     typeof value.prompt_set_sha256 === "string" &&

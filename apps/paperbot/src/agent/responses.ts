@@ -3,6 +3,7 @@ import type {
   AskQuestionsResponse,
   AuthoringResponse,
   DraftResponse,
+  DraftAssumption,
   EvidenceCandidate,
   EvidenceConflict,
   EvidenceKind,
@@ -207,6 +208,7 @@ function parseDraftObject(object: Record<string, unknown>): DraftResponse {
       "topics",
       "markdown",
       "evidence_ids",
+      "assumptions",
       "unresolved_questions",
     ],
     "authoring",
@@ -235,6 +237,7 @@ function parseDraftObject(object: Record<string, unknown>): DraftResponse {
       MAX_EVIDENCE_ITEMS,
       100,
     ),
+    assumptions: parseDraftAssumptions(object.assumptions),
     unresolved_questions: boundedStringArray(
       object.unresolved_questions,
       "authoring.unresolved_questions",
@@ -242,6 +245,49 @@ function parseDraftObject(object: Record<string, unknown>): DraftResponse {
       MAX_RESPONSE_TEXT_CHARACTERS,
     ),
   };
+}
+
+function parseDraftAssumptions(value: unknown): DraftAssumption[] {
+  if (!Array.isArray(value)) {
+    invalidResponse("authoring.assumptions must be an array");
+  }
+  if (value.length > MAX_UNKNOWN_ITEMS) {
+    invalidResponse(
+      `authoring.assumptions must contain at most ${MAX_UNKNOWN_ITEMS} items`,
+    );
+  }
+  const assumptions = value.map((item, index) => {
+    const path = `authoring.assumptions[${index}]`;
+    if (!isRecord(item)) {
+      invalidResponse(`${path} must be an object`);
+    }
+    assertOnlyFields(item, ["assumption", "reason", "evidence_ids"], path);
+    return {
+      assumption: boundedString(
+        item.assumption,
+        `${path}.assumption`,
+        MAX_RESPONSE_TEXT_CHARACTERS,
+      ),
+      reason: boundedString(
+        item.reason,
+        `${path}.reason`,
+        MAX_RESPONSE_TEXT_CHARACTERS,
+      ),
+      evidence_ids: boundedStringArray(
+        item.evidence_ids,
+        `${path}.evidence_ids`,
+        MAX_EVIDENCE_ITEMS,
+        100,
+      ),
+    };
+  });
+  if (
+    new Set(assumptions.map((assumption) => assumption.assumption)).size !==
+    assumptions.length
+  ) {
+    invalidResponse("authoring.assumptions must not contain duplicates");
+  }
+  return assumptions;
 }
 
 function evidenceCandidate(value: unknown, path: string): EvidenceCandidate {

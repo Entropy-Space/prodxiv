@@ -17,6 +17,18 @@ type RolloutEvent =
       kind: "run_started" | "run_resumed";
     }
   | {
+      kind: "author_answers_recorded";
+      round: number;
+      feedback: "sync" | "async";
+      answer_sha256: string;
+      answer_byte_count: number;
+    }
+  | {
+      kind: "assumptions_recorded";
+      assumption_count: number;
+      artifact_sha256: string;
+    }
+  | {
       kind: "model_turn_started";
       role: AgentSessionRole;
       turn_number: number;

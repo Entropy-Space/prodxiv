@@ -76,6 +76,7 @@ import {
   readArtifact,
   readAuthorEvidenceSources,
   readCurrentDraft,
+  readCurrentDraftResponse,
   readEvidenceAnalysis,
   readQuestions,
   readQuestionsIfPresent,
@@ -102,9 +103,11 @@ import {
 import type {
   AgentPaperMetadata,
   AgentPaperRequestMetadata,
+  AgentFeedbackMode,
   AgentProducerProvenance,
   AgentRunRecord,
   AgentRunResult,
+  AgentRunMode,
   AgentSessionRole,
   AgentSource,
   AskQuestionsResponse,
@@ -128,6 +131,12 @@ export interface AgentRunOptions {
   repository: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode?: AgentRunMode;
+  feedback?: AgentFeedbackMode;
+  collect_author_answers?: (
+    questions: AuthorQuestion[],
+    round: number,
+  ) => Promise<string>;
   metadata: AgentPaperRequestMetadata;
   external_sources?: string[];
   ref?: string;
@@ -159,6 +168,31 @@ export async function runAgent(
       ExitCode.usage,
     );
   }
+  const mode = options.mode ?? "interactive";
+  const feedback = options.feedback ?? (mode === "auto" ? "none" : "async");
+  if (mode !== "interactive" && mode !== "auto") {
+    throw new PaperbotError(
+      "agent run mode must be interactive or auto",
+      ExitCode.usage,
+    );
+  }
+  if (
+    (mode === "auto" && feedback !== "none") ||
+    (mode === "interactive" && feedback !== "sync" && feedback !== "async")
+  ) {
+    throw new PaperbotError(
+      mode === "auto"
+        ? "auto agent runs do not accept author feedback"
+        : "interactive agent run feedback must be sync or async",
+      ExitCode.usage,
+    );
+  }
+  if (feedback === "sync" && options.collect_author_answers === undefined) {
+    throw new PaperbotError(
+      "synchronous interactive feedback requires an answer collector",
+      ExitCode.usage,
+    );
+  }
   const requestedMetadata = normalizeAgentRequestMetadata(options.metadata);
   const externalSources = normalizeExternalSources(
     options.external_sources ?? [],
@@ -169,7 +203,7 @@ export async function runAgent(
   const runId = (dependencies.run_id ?? (() => crypto.randomUUID()))();
   const startedAt = now(dependencies).toISOString();
   let record = createRunRecord(
-    { ...options, metadata: requestedMetadata },
+    { ...options, mode, feedback, metadata: requestedMetadata },
     model,
     externalSources,
     startedAt,
@@ -282,6 +316,7 @@ export async function runAgent(
         analysis,
         draft: initialResolution.draft,
         remaining_question_rounds: remainingQuestionRounds(record),
+        mode,
       }),
       runPath,
       record,
@@ -291,7 +326,8 @@ export async function runAgent(
     );
     const reviewResolution = await resolveDraftResponse({
       initial_response: reviewResponse,
-      allow_questions: remainingQuestionRounds(record) > 0,
+      allow_questions:
+        mode === "interactive" && remainingQuestionRounds(record) > 0,
       session: authorSession,
       source,
       metadata,
@@ -302,15 +338,60 @@ export async function runAgent(
       dependencies,
     });
     if (reviewResolution.action === "ask_questions") {
-      await checkpointQuestions(
+      if (feedback === "async") {
+        await checkpointQuestions(
+          runPath,
+          record,
+          reviewResolution,
+          [],
+          dependencies,
+        );
+        await sealRunCheckpoint(
+          runPath,
+          record,
+          "awaiting_author",
+          dependencies,
+        );
+        return runResult(runPath, record, initialResolution.validation, source);
+      }
+      const synchronousResolution = await completeSynchronousInterview({
+        initial_questions: reviewResolution,
+        current_draft: initialResolution.draft,
+        question_history: [],
+        session: authorSession,
+        source,
+        metadata,
+        external_sources: externalSources,
+        evidence,
+        analysis,
+        run_path: runPath,
+        record,
+        dependencies,
+        collect_author_answers: options.collect_author_answers!,
+      });
+      if (
+        !sameDraftResponse(initialResolution.draft, synchronousResolution.draft)
+      ) {
+        await checkpointDraft(
+          runPath,
+          record,
+          synchronousResolution,
+          dependencies,
+        );
+      }
+      await finalizePaper(runPath, record, synchronousResolution, dependencies);
+      await sealRunCheckpoint(
         runPath,
         record,
-        reviewResolution,
-        [],
+        "needs_author_review",
         dependencies,
       );
-      await sealRunCheckpoint(runPath, record, "awaiting_author", dependencies);
-      return runResult(runPath, record, initialResolution.validation, source);
+      return runResult(
+        runPath,
+        record,
+        synchronousResolution.validation,
+        source,
+      );
     }
 
     if (!sameDraftResponse(initialResolution.draft, reviewResolution.draft)) {
@@ -353,6 +434,12 @@ export async function resumeAgent(
   }
   const runPath = await resolveExistingRun(options.run_path);
   const record = await readRunRecord(runPath);
+  if (record.input.mode === "auto") {
+    throw new PaperbotError(
+      `auto agent runs cannot be resumed with author answers: ${runPath}`,
+      ExitCode.usage,
+    );
+  }
   assertResumableRecord(record, runPath);
   await verifyRolloutArtifact(runPath, record);
   if (!hasCurrentCheckpoint(record)) {
@@ -406,41 +493,8 @@ export async function resumeAgent(
     MAX_AUTHOR_ANSWERS_BYTES,
   );
   const currentPaper = await readCurrentDraft(runPath, record);
-  const currentDraft = draftFromPaper(currentPaper, evidence);
-  const answerRound = record.workflow.question_rounds;
-  const answerArtifact = `answers/round-${answerRound}.md`;
-  if (record.artifacts.answers?.includes(answerArtifact)) {
-    const storedAnswers = await readArtifact(
-      artifactPath(runPath, answerArtifact),
-      "stored answers",
-      MAX_AUTHOR_ANSWERS_BYTES,
-    );
-    if (storedAnswers !== answers) {
-      throw new PaperbotError(
-        `author answers for round ${answerRound} were already recorded`,
-        ExitCode.io,
-      );
-    }
-  } else {
-    await writeTextArtifact(runPath, answerArtifact, answers);
-    record.artifacts.answers = [
-      ...(record.artifacts.answers ?? []),
-      answerArtifact,
-    ];
-  }
-  const authorSource: AuthorEvidenceSource = {
-    source_id: `author:answers:round-${answerRound}`,
-    path: answerArtifact,
-    content: answers,
-  };
-  if (!evidence.some((item) => item.source_id === authorSource.source_id)) {
-    evidence = appendAuthorEvidence(evidence, authorSource, answerRound);
-    await writeTextArtifact(
-      runPath,
-      "evidence.jsonl",
-      formatEvidenceJsonLines(evidence),
-    );
-  }
+  const storedDraft = await readCurrentDraftResponse(runPath, record);
+  const currentDraft = draftFromPaper(currentPaper, evidence, storedDraft);
   record.state = "authoring";
   record.updated_at = now(dependencies).toISOString();
   delete record.error;
@@ -448,6 +502,14 @@ export async function resumeAgent(
     kind: "run_resumed",
   });
   await persistRunRecord(runPath, record);
+  evidence = await recordAuthorAnswers(
+    runPath,
+    record,
+    evidence,
+    answers,
+    "async",
+    dependencies,
+  );
 
   const runtime = runtimeFor(
     normalizeModelName(options.model ?? record.agent.model),
@@ -538,6 +600,161 @@ export async function resumeAgent(
   } finally {
     await authorSession?.dispose();
   }
+}
+
+async function completeSynchronousInterview(input: {
+  initial_questions: AskQuestionsResponse;
+  current_draft: DraftResponse;
+  question_history: AuthorQuestion[];
+  session: AuthoringSession;
+  source: AgentSource;
+  metadata: AgentPaperMetadata;
+  external_sources: string[];
+  evidence: EvidenceItem[];
+  analysis: StoredEvidenceAnalysis;
+  run_path: string;
+  record: AgentRunRecord;
+  dependencies: AgentRunnerDependencies;
+  collect_author_answers: (
+    questions: AuthorQuestion[],
+    round: number,
+  ) => Promise<string>;
+}): Promise<DraftAssessment> {
+  let questionResponse = input.initial_questions;
+  let questionHistory = input.question_history;
+  let evidence = input.evidence;
+
+  while (true) {
+    questionHistory = await checkpointQuestions(
+      input.run_path,
+      input.record,
+      questionResponse,
+      questionHistory,
+      input.dependencies,
+    );
+    const pendingQuestions = pendingQuestionsFor(input.record, questionHistory);
+    const answers = await input.collect_author_answers(
+      pendingQuestions,
+      input.record.workflow.question_rounds,
+    );
+    evidence = await recordAuthorAnswers(
+      input.run_path,
+      input.record,
+      evidence,
+      answers,
+      "sync",
+      input.dependencies,
+    );
+    const response = await parseWithOneRetry(
+      input.session,
+      "author",
+      createAnswersPrompt({
+        source: input.source,
+        metadata: input.metadata,
+        external_sources: input.external_sources,
+        evidence,
+        analysis: input.analysis,
+        draft: input.current_draft,
+        questions: pendingQuestions,
+        answers,
+        remaining_question_rounds: remainingQuestionRounds(input.record),
+      }),
+      input.run_path,
+      input.record,
+      input.dependencies,
+      parseAuthoringResponse,
+      "synchronous author-guided revision",
+    );
+    const resolution = await resolveDraftResponse({
+      initial_response: response,
+      allow_questions: remainingQuestionRounds(input.record) > 0,
+      session: input.session,
+      source: input.source,
+      metadata: input.metadata,
+      external_sources: input.external_sources,
+      evidence,
+      run_path: input.run_path,
+      record: input.record,
+      dependencies: input.dependencies,
+    });
+    if (resolution.action === "submit_draft") {
+      return resolution;
+    }
+    questionResponse = resolution;
+  }
+}
+
+async function recordAuthorAnswers(
+  runPath: string,
+  record: AgentRunRecord,
+  evidence: EvidenceItem[],
+  rawAnswers: string,
+  feedback: Exclude<AgentFeedbackMode, "none">,
+  dependencies: AgentRunnerDependencies,
+): Promise<EvidenceItem[]> {
+  const answers = normalizeAuthorAnswers(rawAnswers);
+  const answerRound = record.workflow.question_rounds;
+  const answerArtifact = `answers/round-${answerRound}.md`;
+  if (record.artifacts.answers?.includes(answerArtifact)) {
+    const storedAnswers = await readArtifact(
+      artifactPath(runPath, answerArtifact),
+      "stored answers",
+      MAX_AUTHOR_ANSWERS_BYTES,
+    );
+    if (storedAnswers !== answers) {
+      throw new PaperbotError(
+        `author answers for round ${answerRound} were already recorded`,
+        ExitCode.io,
+      );
+    }
+  } else {
+    await writeTextArtifact(runPath, answerArtifact, answers);
+    record.artifacts.answers = [
+      ...(record.artifacts.answers ?? []),
+      answerArtifact,
+    ];
+  }
+  const authorSource: AuthorEvidenceSource = {
+    source_id: `author:answers:round-${answerRound}`,
+    path: answerArtifact,
+    content: answers,
+  };
+  let updatedEvidence = evidence;
+  if (!evidence.some((item) => item.source_id === authorSource.source_id)) {
+    updatedEvidence = appendAuthorEvidence(evidence, authorSource, answerRound);
+    await writeTextArtifact(
+      runPath,
+      "evidence.jsonl",
+      formatEvidenceJsonLines(updatedEvidence),
+    );
+  }
+  const timestamp = now(dependencies).toISOString();
+  record.state = "authoring";
+  record.updated_at = timestamp;
+  await appendRolloutEvent(runPath, record, timestamp, {
+    kind: "author_answers_recorded",
+    round: answerRound,
+    feedback,
+    answer_sha256: sha256(answers),
+    answer_byte_count: Buffer.byteLength(answers),
+  });
+  await persistRunRecord(runPath, record);
+  return updatedEvidence;
+}
+
+function normalizeAuthorAnswers(value: string): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    Buffer.byteLength(value) > MAX_AUTHOR_ANSWERS_BYTES ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)
+  ) {
+    throw new PaperbotError(
+      `author answers must contain valid text within ${MAX_AUTHOR_ANSWERS_BYTES} bytes`,
+      ExitCode.usage,
+    );
+  }
+  return value;
 }
 
 async function produceEvidence(input: {
@@ -782,7 +999,7 @@ async function checkpointQuestions(
   response: AskQuestionsResponse,
   history: AuthorQuestion[],
   dependencies: AgentRunnerDependencies,
-): Promise<void> {
+): Promise<AuthorQuestion[]> {
   if (remainingQuestionRounds(record) <= 0) {
     throw new PaperbotError(
       `agent author questions are limited to ${MAX_AUTHOR_QUESTION_ROUNDS} rounds`,
@@ -810,6 +1027,7 @@ async function checkpointQuestions(
   record.artifacts.questions = "questions.jsonl";
   record.updated_at = now(dependencies).toISOString();
   await persistRunRecord(runPath, record);
+  return allQuestions;
 }
 
 async function finalizePaper(
@@ -820,6 +1038,13 @@ async function finalizePaper(
 ): Promise<void> {
   const questionHistory = await readQuestionsIfPresent(runPath, record);
   await writeTextArtifact(runPath, "paper.md", assessment.paper);
+  const assumptions = {
+    schema_version: "1",
+    mode: record.input.mode,
+    generated_without_author: record.input.mode === "auto",
+    assumptions: assessment.draft.assumptions,
+  } as const;
+  await writeJsonArtifact(runPath, "assumptions.json", assumptions);
   await writeQuestionsArtifacts(
     runPath,
     questionHistory,
@@ -830,8 +1055,14 @@ async function finalizePaper(
   record.workflow.pending_question_ids = [];
   record.artifacts.paper = "paper.md";
   record.artifacts.questions = "questions.jsonl";
+  record.artifacts.assumptions = "assumptions.json";
   record.paper_sha256 = sha256(assessment.paper);
   record.updated_at = now(dependencies).toISOString();
+  await appendRolloutEvent(runPath, record, record.updated_at, {
+    kind: "assumptions_recorded",
+    assumption_count: assessment.draft.assumptions.length,
+    artifact_sha256: sha256(`${JSON.stringify(assumptions, null, 2)}\n`),
+  });
   await persistRunRecord(runPath, record);
 }
 
@@ -1069,6 +1300,7 @@ function sameDraftResponse(left: DraftResponse, right: DraftResponse): boolean {
     left.markdown === right.markdown &&
     arraysEqual(left.topics, right.topics) &&
     arraysEqual(left.evidence_ids, right.evidence_ids) &&
+    JSON.stringify(left.assumptions) === JSON.stringify(right.assumptions) &&
     arraysEqual(left.unresolved_questions, right.unresolved_questions)
   );
 }
@@ -1099,6 +1331,8 @@ function runResult(
   return {
     run_id: record.run_id,
     run_path: runPath,
+    mode: record.input.mode,
+    feedback: record.input.feedback,
     state: record.state,
     validation: {
       valid: validation.report.valid,

@@ -21,8 +21,10 @@ import { initializeRunDirectory, writeJsonArtifact } from "./artifacts.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import { runAgent, type AgentRunOptions } from "./runner.ts";
 import type { AgentPaperRequestMetadata, AgentRunResult } from "./types.ts";
+import type { AgentRunMode } from "./types.ts";
 
 export const AGENT_BATCH_SCHEMA_VERSION = "1";
+export const AGENT_BATCH_REPORT_SCHEMA_VERSION = "2";
 export const MAX_AGENT_BATCH_PROJECTS = 100;
 export const MAX_AGENT_BATCH_CONCURRENCY = 4;
 
@@ -50,6 +52,7 @@ export interface AgentBatchOptions {
   input_path: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode?: AgentRunMode;
   authors?: string[];
   status?: AgentPaperStatus;
   model?: string;
@@ -79,12 +82,13 @@ export interface AgentBatchProjectReport {
 }
 
 export interface AgentBatchReport {
-  schema_version: typeof AGENT_BATCH_SCHEMA_VERSION;
+  schema_version: typeof AGENT_BATCH_REPORT_SCHEMA_VERSION;
   started_at: string;
   updated_at: string;
   input: {
     input_path: string;
     allow_remote_model: true;
+    mode: AgentRunMode;
     concurrency: number;
     authors?: string[];
     status?: AgentPaperStatus;
@@ -136,12 +140,13 @@ export async function runAgentBatch(
   );
   const startedAt = now(dependencies).toISOString();
   const report: AgentBatchReport = {
-    schema_version: AGENT_BATCH_SCHEMA_VERSION,
+    schema_version: AGENT_BATCH_REPORT_SCHEMA_VERSION,
     started_at: startedAt,
     updated_at: startedAt,
     input: {
       input_path: resolve(normalizedOptions.input_path),
       allow_remote_model: true,
+      mode: normalizedOptions.mode,
       concurrency: normalizedOptions.concurrency,
       ...(normalizedOptions.authors === undefined
         ? {}
@@ -197,6 +202,8 @@ export async function runAgentBatch(
         repository: project.repository.canonical_url,
         output_path: projectReport.output_path,
         allow_remote_model: true,
+        mode: normalizedOptions.mode,
+        feedback: normalizedOptions.mode === "auto" ? "none" : "async",
         metadata,
         external_sources: project.external_sources ?? [],
         ...(project.ref === undefined ? {} : { ref: project.ref }),
@@ -211,8 +218,18 @@ export async function runAgentBatch(
           message: `agent draft did not pass validation (${result.validation.diagnostics} diagnostics)`,
         };
       } else if (
+        result.mode !== normalizedOptions.mode ||
+        result.feedback !==
+          (normalizedOptions.mode === "auto" ? "none" : "async")
+      ) {
+        projectReport.state = "failed";
+        projectReport.error = {
+          message: `agent returned an unexpected mode: ${result.mode}/${result.feedback}`,
+        };
+      } else if (
         result.state !== "needs_author_review" &&
-        result.state !== "awaiting_author"
+        (normalizedOptions.mode === "auto" ||
+          result.state !== "awaiting_author")
       ) {
         projectReport.state = "failed";
         projectReport.error = {
@@ -412,6 +429,7 @@ function normalizeOptions(options: AgentBatchOptions): {
   input_path: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode: AgentRunMode;
   authors?: string[];
   status?: AgentPaperStatus;
   model?: string;
@@ -443,6 +461,10 @@ function normalizeOptions(options: AgentBatchOptions): {
     MAX_AGENT_TEXT_LENGTH,
   );
   const concurrency = options.concurrency ?? 1;
+  const mode = options.mode ?? "auto";
+  if (mode !== "auto" && mode !== "interactive") {
+    throw usageError("agent batch mode must be interactive or auto");
+  }
   if (
     !Number.isSafeInteger(concurrency) ||
     concurrency < 1 ||
@@ -457,6 +479,7 @@ function normalizeOptions(options: AgentBatchOptions): {
     input_path: options.input_path,
     output_path: options.output_path,
     allow_remote_model: options.allow_remote_model,
+    mode,
     ...(authors === undefined ? {} : { authors }),
     ...(status === undefined ? {} : { status }),
     ...(model === undefined ? {} : { model }),
