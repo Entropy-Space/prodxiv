@@ -185,6 +185,10 @@
     "PaperWriter": {
       "type": "object",
       "properties": {
+        "generation_id": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
         "kind": {
           "$ref": "#/$defs/WriterKind"
         },
@@ -194,6 +198,10 @@
         },
         "name": {
           "type": "string",
+          "minLength": 1
+        },
+        "tool_version": {
+          "type": ["string", "null"],
           "minLength": 1
         }
       },

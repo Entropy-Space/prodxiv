@@ -336,7 +336,7 @@ function createSelectionArtifact(
     selection_policy: TREND_SELECTION_POLICY,
     snapshot: createSnapshotSummary(snapshot, sourceCandidates.length),
     agent: {
-      provider,
+      provider: finalCompletion.provider || provider,
       model: finalCompletion.model,
       session_id: session.session_id,
       session_artifact: session.artifact,

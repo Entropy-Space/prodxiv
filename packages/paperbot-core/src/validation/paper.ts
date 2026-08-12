@@ -319,6 +319,18 @@ function validateWritersAndContact(
       );
     }
     if (
+      writer.kind === "human" &&
+      (writer.tool_version != null || writer.generation_id != null)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "writers.human_provenance_forbidden",
+          `metadata.writers[${index}]`,
+          "human writers must not specify agent generation provenance",
+        ),
+      );
+    }
+    if (
       writer.kind === "agent" &&
       (typeof writer.model !== "string" || writer.model.trim().length === 0)
     ) {
@@ -327,6 +339,34 @@ function validateWritersAndContact(
           "writers.agent_model_required",
           `metadata.writers[${index}].model`,
           "agent writers must identify their model",
+        ),
+      );
+    }
+    if (
+      writer.kind === "agent" &&
+      writer.tool_version != null &&
+      (typeof writer.tool_version !== "string" ||
+        writer.tool_version.trim().length === 0)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "writers.agent_tool_version_invalid",
+          `metadata.writers[${index}].tool_version`,
+          "agent writer tool_version must not be empty",
+        ),
+      );
+    }
+    if (
+      writer.kind === "agent" &&
+      writer.generation_id != null &&
+      (typeof writer.generation_id !== "string" ||
+        writer.generation_id.trim().length === 0)
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "writers.agent_generation_id_invalid",
+          `metadata.writers[${index}].generation_id`,
+          "agent writer generation_id must not be empty",
         ),
       );
     }

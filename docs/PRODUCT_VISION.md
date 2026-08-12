@@ -67,6 +67,8 @@ writers:
   - kind: human | agent
     name:
     model: # required for an agent writer
+    tool_version: # optional public agent-tool provenance
+    generation_id: # optional safe public lineage identifier
 communication_email: # optional; only for a human-written paper
 organization:
 published_at:
@@ -110,7 +112,8 @@ Authors are the people or organizations attributed to the paper. A repository
 owner may be represented by a namespaced external identity such as
 `github:owner`; repository commits and commit email addresses are not an
 authorship source. Writers record who produced the prose. An agent writer names
-both the authoring tool and model, while `communication_email` is optional and
+the authoring tool and model and may include its tool version plus a safe
+generation lineage identifier, while `communication_email` is optional and
 available only when at least one human writer chooses to provide a contact.
 
 A product paper speaks on behalf of its credited authors. Its narrative should

@@ -7,6 +7,7 @@ import type { TrendSelectionRunResult } from "../src/agent/trend-selection.ts";
 import { run } from "../src/cli.ts";
 
 const agentResult: AgentRunResult = {
+  run_id: "00000000-0000-4000-8000-000000000001",
   run_path: "/tmp/paperbot-openwork",
   state: "needs_author_review",
   validation: {
@@ -20,6 +21,18 @@ const agentResult: AgentRunResult = {
   source: {
     resolved_revision: "abc123",
     selected_file_count: 12,
+  },
+  checkpoint: {
+    checkpoint_number: 1,
+    reason: "needs_author_review",
+    state: "needs_author_review",
+    created_at: "2026-08-01T00:00:00.000Z",
+    archive:
+      "../checkpoints/2026-08-01_paperbot-openwork_00000000-0000-4000-8000-000000000001_checkpoint-0001_needs_author_review.zip",
+    archive_sha256: "a".repeat(64),
+    archive_byte_count: 1024,
+    manifest_sha256: "b".repeat(64),
+    checkpoint_basis_sha256: "c".repeat(64),
   },
 };
 

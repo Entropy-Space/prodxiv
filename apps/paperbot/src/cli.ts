@@ -44,8 +44,7 @@ import { ProdxivApiError } from "@prodxiv/api-client";
 import type { ScanResult } from "@prodxiv/paperbot-source";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-
-const VERSION = "0.0.1";
+import { PAPERBOT_VERSION } from "./version.ts";
 
 const HELP = `Paperbot — repository-assisted product paper drafting
 
@@ -165,7 +164,7 @@ export async function run(
       return ExitCode.success;
     }
     if (parsed.command === "version") {
-      io.stdout(VERSION);
+      io.stdout(PAPERBOT_VERSION);
       return ExitCode.success;
     }
 
@@ -588,11 +587,13 @@ function writeAgentResult(
           ? "Paperbot agent paper prepared"
           : "Paperbot agent paper revision prepared",
       `Run: ${result.run_path}`,
+      `Generation ID: ${result.run_id}`,
       `State: ${result.state}`,
       `Validation: ${result.validation.valid ? "passed" : "needs author attention"} (${result.validation.diagnostics} diagnostics)`,
       `Author questions: ${result.questions.pending} pending (round ${result.questions.round})`,
       `Source revision: ${result.source.resolved_revision}`,
       `Selected files: ${result.source.selected_file_count}`,
+      `Checkpoint: ${result.checkpoint.archive}`,
       "Publication: not attempted. Review paper.md or answer the pending questions before any submission.",
     ].join("\n"),
   );

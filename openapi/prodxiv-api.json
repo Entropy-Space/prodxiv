@@ -1049,6 +1049,12 @@
           "name"
         ],
         "properties": {
+          "generation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/WriterKind"
           },
@@ -1060,6 +1066,12 @@
           },
           "name": {
             "type": "string"
+          },
+          "tool_version": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false

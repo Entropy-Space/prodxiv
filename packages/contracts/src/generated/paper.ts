@@ -76,7 +76,9 @@ export interface ProductStatusEvidence {
   url: string;
 }
 export interface PaperWriter {
+  generation_id?: string | null;
   kind: WriterKind;
   model?: string | null;
   name: string;
+  tool_version?: string | null;
 }

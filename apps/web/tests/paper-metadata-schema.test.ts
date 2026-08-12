@@ -53,6 +53,8 @@ describe("paperMetadataSchema", () => {
           kind: "agent",
           name: "paperbot",
           model: "deepseek-v4-flash",
+          tool_version: "0.0.1",
+          generation_id: "7b5a1f38-8b40-4df6-91a3-609d03f08f03",
         },
       ],
       status: {

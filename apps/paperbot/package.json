@@ -7,7 +7,7 @@
     "paperbot": "./src/cli.ts"
   },
   "scripts": {
-    "build": "bun build --compile --target=bun --outfile dist/paperbot src/cli.ts",
+    "build": "bun run scripts/build.ts",
     "check": "tsc --noEmit",
     "test": "bun test tests/*.test.ts"
   },

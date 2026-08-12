@@ -1,6 +1,6 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 
-export const AGENT_RUN_SCHEMA_VERSION = "3";
+export const AGENT_RUN_SCHEMA_VERSION = "4";
 
 export type EvidenceKind = "repository" | "external" | "author" | "inference";
 export type EvidenceStatus =
@@ -21,6 +21,21 @@ export type PiSessionRole = AgentSessionRole | "trend_selection";
 export interface AgentModelConfig {
   provider: "pi";
   model: string;
+}
+
+export interface AgentProducerProvenance {
+  name: "paperbot";
+  version: string;
+  git_revision: string;
+  git_dirty: boolean;
+  source_state_sha256: string;
+  build_id: string;
+  bun_version: string;
+  dependency_lock_sha256: string;
+  run_schema_version: typeof AGENT_RUN_SCHEMA_VERSION;
+  prompt_set_version: string;
+  prompt_set_sha256: string;
+  built_at?: string;
 }
 
 export type AgentPaperStatusValue =
@@ -51,6 +66,8 @@ export interface AgentWriter {
   kind: "agent";
   name: "paperbot";
   model: string;
+  tool_version: string;
+  generation_id: string;
 }
 
 export interface AgentProductStatusEvidence {
@@ -181,7 +198,9 @@ export type AuthoringResponse = AskQuestionsResponse | DraftResponse;
 
 export interface ModelCompletion {
   final_text: string;
+  provider: string;
   model: string;
+  response_model?: string;
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -226,11 +245,44 @@ export interface AgentWorkflowRecord {
   pending_question_ids: string[];
 }
 
+export type AgentCheckpointReason =
+  "awaiting_author" | "needs_author_review" | "failed" | "recovered";
+
+export interface AgentCheckpointRecord {
+  checkpoint_number: number;
+  reason: AgentCheckpointReason;
+  state: AgentRunState;
+  created_at: string;
+  archive: string;
+  archive_sha256: string;
+  archive_byte_count: number;
+  manifest_sha256: string;
+  checkpoint_basis_sha256: string;
+}
+
+export interface AgentObservedModel {
+  provider: string;
+  model: string;
+  response_model?: string;
+}
+
+export interface AgentRolloutSummary {
+  event_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  observed_models: AgentObservedModel[];
+  artifact_sha256: string;
+  last_event_sha256?: string;
+}
+
 export interface AgentRunRecord {
   schema_version: typeof AGENT_RUN_SCHEMA_VERSION;
+  run_id: string;
   state: AgentRunState;
   started_at: string;
   updated_at: string;
+  producer: AgentProducerProvenance;
+  producer_history: AgentProducerProvenance[];
   agent: AgentModelConfig;
   input: {
     repository: string;
@@ -256,7 +308,10 @@ export interface AgentRunRecord {
     questions?: string;
     answers?: string[];
     validation?: string;
+    rollout: string;
   };
+  rollout: AgentRolloutSummary;
+  checkpoints: AgentCheckpointRecord[];
   draft_sha256?: string;
   paper_sha256?: string;
   error?: {
@@ -274,6 +329,7 @@ export interface AgentRunSourceRecord {
 }
 
 export interface AgentRunResult {
+  run_id: string;
   run_path: string;
   state: AgentRunState;
   validation: {
@@ -288,4 +344,5 @@ export interface AgentRunResult {
     resolved_revision: string;
     selected_file_count: number;
   };
+  checkpoint: AgentCheckpointRecord;
 }

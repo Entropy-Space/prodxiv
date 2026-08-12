@@ -5,6 +5,7 @@ import { normalizeAgentMetadata, normalizeAnonymousHttpUrl } from "./input.ts";
 import type {
   AgentPaperMetadata,
   AgentPaperRequestMetadata,
+  AgentProducerProvenance,
   AgentSource,
 } from "./types.ts";
 
@@ -13,6 +14,8 @@ export function completeAgentMetadata(
   source: AgentSource,
   model: string,
   timestamp: string,
+  producer: AgentProducerProvenance,
+  runId: string,
 ): AgentPaperMetadata {
   const repositoryUrl = normalizeOptionalSourceUrl(source.canonical_url);
   const homepageUrl = normalizeOptionalSourceUrl(source.homepage_url);
@@ -50,7 +53,15 @@ export function completeAgentMetadata(
   return normalizeAgentMetadata({
     ...requested,
     authors: completeAuthors(requested, source),
-    writers: [{ kind: "agent", name: "paperbot", model }],
+    writers: [
+      {
+        kind: "agent",
+        name: "paperbot",
+        model,
+        tool_version: producer.version,
+        generation_id: runId,
+      },
+    ],
     status: completeStatus(requested, source, timestamp),
     ...(requested.repository_url === undefined && repositoryUrl !== undefined
       ? { repository_url: repositoryUrl }

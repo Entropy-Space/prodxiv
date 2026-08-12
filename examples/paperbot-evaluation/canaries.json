@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "projects": [
+    {
+      "repository_url": "https://github.com/different-ai/openwork",
+      "ref": "0e84c10fb5c40ed38a64495104c33db3e4de0865"
+    },
+    {
+      "repository_url": "https://github.com/tigerbeetle/tigerbeetle",
+      "ref": "97c7a8ef385270ebe0e1b75959d3d21d134629df"
+    },
+    {
+      "repository_url": "https://github.com/zhaoxuya520/reverse-skill",
+      "ref": "7b3bfdee898f8fa4b25d0e2fc685e0176f46ce87"
+    }
+  ]
+}

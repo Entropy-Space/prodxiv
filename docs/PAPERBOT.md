@@ -231,8 +231,10 @@ inference with an explicit declaration. Paperbot does not infer `concept`,
 analysis remains network-free: it may use a GitHub origin for owner attribution
 but leaves status unknown unless `--status` is supplied.
 
-Every generated paper records `paperbot` plus the requested model as its agent
-writer. Agent-only papers omit `communication_email`; that optional field is
+Every generated paper records `paperbot`, its version, a safe generation ID,
+and the requested model as its agent writer. The private run record separately
+preserves the exact build, prompt-set, lockfile, and observed-model provenance.
+Agent-only papers omit `communication_email`; that optional field is
 reserved for papers with a credited human writer and is never inferred.
 
 `--allow-remote-model` is required even for a public source and a loopback
@@ -270,8 +272,14 @@ variables, or call `publish`.
 The agent writes a new private run directory with:
 
 - `run.json` — schema-versioned state, requested model, source revision,
-  bounded workflow counters, session records, artifact paths, and draft/paper
-  SHA-256 values;
+  generation ID, exact Paperbot producer provenance, bounded workflow counters,
+  session records, checkpoint records, artifact paths, rollout totals, and
+  draft/paper SHA-256 values. A run resumed by a different build retains the
+  prior producer in `producer_history` and uses the new build for later events;
+- `events.jsonl` — a Paperbot-owned, hash-chained rollout log with workflow-state snapshots,
+  prompt and response digests, durations, provider/model observations, token
+  usage, failures, and checkpoint boundaries. Full private prompts and replies
+  remain in the Pi session artifacts;
 - `source.json`, `scan.json`, and `source/` — the bounded private source
   snapshot, original scan inventory, repository-owner context, and any bounded
   GitHub release metadata and notes used for status inference;
@@ -291,6 +299,17 @@ The agent writes a new private run directory with:
   interview protocol and copied answer checkpoints;
 - `paper.md` and `validation.json` — the final generated private paper and
   current deterministic validation report.
+
+At every `awaiting_author`, `needs_author_review`, or `failed` stopping point,
+Paperbot writes a new immutable ZIP beside the live run directory under a
+private `checkpoints/` directory. The ZIP contains the complete run snapshot
+and a `manifest.json` listing every archived path, byte count, and SHA-256
+digest. Resume never overwrites an earlier ZIP; it creates the next numbered
+checkpoint and retains the live directory for continued work. Checkpoint ZIPs
+are private debugging artifacts and are never published or submitted.
+If a process was interrupted after persisting a resumable stopping state but
+before recording its ZIP, the next `agent resume` first creates a `recovered`
+checkpoint before mutating that run.
 
 The evidence session sees the bounded source bundle and returns evidence, not
 paper Markdown. The host gives every source line a display-only absolute number.
@@ -329,7 +348,8 @@ checkpoint but no `paper.md` yet. Neither state submits or publishes. If a
 model response or restored artifact fails validation, Paperbot fails closed
 without replacing an accepted checkpoint. Run schema version 1 used the old
 multi-session draft/review protocol, version 2 predates structured attribution
-and release provenance, and neither is resumable as a schema-version-3 run.
+and release provenance, and version 3 predates producer provenance, rollout
+integrity, and checkpoint ZIPs. None is resumable as a schema-version-4 run.
 
 The initial agent has no general web-search or page-fetch capability. Use
 `--source <public-url>` only to provide a citeable URL; it is not fetched and
@@ -418,6 +438,24 @@ ten unique candidates make selection impossible.
 This command does not download repository contents, start paper-drafting
 sessions, create a batch manifest, submit, or publish. Its ten results are a
 research queue, not endorsements.
+
+### Daily evaluation corpus
+
+The `Evaluate Paperbot` GitHub Actions workflow runs once per day and may also
+be dispatched manually. It combines three public repositories pinned to exact
+commit SHAs from `examples/paperbot-evaluation/canaries.json` with the first
+three non-canary repositories from that day's validated Trending selection.
+The fixed lane makes regressions comparable across Paperbot builds; the
+rotating lane exposes new repository shapes and failure modes.
+
+Each of the six repositories runs through the normal private `agent batch`
+workflow. `awaiting_author` is a successful evaluation checkpoint because
+Paperbot must not fabricate intention merely to force a final paper. Failures
+remain valuable outputs and retain their checkpoint ZIPs. GitHub Actions keeps
+the private run directories, ZIPs, selection, batch report, and workflow
+metadata as one access-controlled artifact for 30 days. The workflow requires
+the `DEEPSEEK_API_KEY` repository secret, receives no publishing credentials,
+and never submits or publishes a paper.
 
 ### Batch public repositories
 

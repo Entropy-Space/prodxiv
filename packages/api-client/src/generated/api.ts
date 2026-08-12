@@ -214,9 +214,11 @@ export interface components {
       | components["schemas"]["ProductStatus"]
       | components["schemas"]["ProductStatusObservation"];
     PaperWriter: {
+      generation_id?: string | null;
       kind: components["schemas"]["WriterKind"];
       model?: string | null;
       name: string;
+      tool_version?: string | null;
     };
     ProductRelationship: {
       kind: components["schemas"]["RelationshipKind"];
