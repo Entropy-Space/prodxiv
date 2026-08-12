@@ -17,6 +17,7 @@ import {
 import {
   AGENT_RUN_SCHEMA_VERSION,
   type AgentPaperRequestMetadata,
+  type AgentProducerProvenance,
   type AgentRunRecord,
   type AgentRunSourceRecord,
   type AgentSessionRecord,
@@ -49,12 +50,17 @@ export function createRunRecord(
   model: string,
   externalSources: string[],
   timestamp: string,
+  producer: AgentProducerProvenance,
+  runId: string,
 ): AgentRunRecord {
   return {
     schema_version: AGENT_RUN_SCHEMA_VERSION,
+    run_id: runId,
     state: "initialized",
     started_at: timestamp,
     updated_at: timestamp,
+    producer,
+    producer_history: [],
     agent: { provider: "pi", model },
     input: {
       repository: options.repository,
@@ -70,7 +76,15 @@ export function createRunRecord(
       repair_attempts: 0,
       pending_question_ids: [],
     },
-    artifacts: {},
+    artifacts: { rollout: "events.jsonl" },
+    rollout: {
+      event_count: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      observed_models: [],
+      artifact_sha256: sha256(""),
+    },
+    checkpoints: [],
   };
 }
 
@@ -500,10 +514,16 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
   return (
     isRecord(value) &&
     value.schema_version === AGENT_RUN_SCHEMA_VERSION &&
+    typeof value.run_id === "string" &&
+    UUID_PATTERN.test(value.run_id) &&
     typeof value.state === "string" &&
+    isProducerProvenance(value.producer) &&
+    Array.isArray(value.producer_history) &&
+    value.producer_history.every(isProducerProvenance) &&
     isRecord(value.input) &&
     isRecord(value.agent) &&
     isRecord(value.artifacts) &&
+    value.artifacts.rollout === "events.jsonl" &&
     isRecord(value.sessions) &&
     isOptionalSessionRecord(value.sessions.evidence, "evidence") &&
     isOptionalSessionRecord(value.sessions.author, "author") &&
@@ -514,10 +534,92 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     value.workflow.question_rounds <= MAX_AUTHOR_QUESTION_ROUNDS &&
     isNonNegativeInteger(value.workflow.draft_revision) &&
     isNonNegativeInteger(value.workflow.repair_attempts) &&
+    isRolloutSummary(value.rollout) &&
+    Array.isArray(value.checkpoints) &&
+    value.checkpoints.every(isCheckpointRecord) &&
     Array.isArray(value.workflow.pending_question_ids) &&
     value.workflow.pending_question_ids.every(
       (item) => typeof item === "string",
     )
+  );
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+function isProducerProvenance(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.name === "paperbot" &&
+    typeof value.version === "string" &&
+    value.version.length > 0 &&
+    typeof value.git_revision === "string" &&
+    value.git_revision.length > 0 &&
+    typeof value.git_dirty === "boolean" &&
+    typeof value.source_state_sha256 === "string" &&
+    SHA256_PATTERN.test(value.source_state_sha256) &&
+    typeof value.build_id === "string" &&
+    SHA256_PATTERN.test(value.build_id) &&
+    typeof value.bun_version === "string" &&
+    value.bun_version.length > 0 &&
+    typeof value.dependency_lock_sha256 === "string" &&
+    SHA256_PATTERN.test(value.dependency_lock_sha256) &&
+    value.run_schema_version === AGENT_RUN_SCHEMA_VERSION &&
+    typeof value.prompt_set_version === "string" &&
+    value.prompt_set_version.length > 0 &&
+    typeof value.prompt_set_sha256 === "string" &&
+    SHA256_PATTERN.test(value.prompt_set_sha256) &&
+    (value.built_at === undefined || typeof value.built_at === "string")
+  );
+}
+
+function isRolloutSummary(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.event_count) &&
+    isNonNegativeInteger(value.total_input_tokens) &&
+    isNonNegativeInteger(value.total_output_tokens) &&
+    typeof value.artifact_sha256 === "string" &&
+    SHA256_PATTERN.test(value.artifact_sha256) &&
+    (value.last_event_sha256 === undefined ||
+      (typeof value.last_event_sha256 === "string" &&
+        SHA256_PATTERN.test(value.last_event_sha256))) &&
+    Array.isArray(value.observed_models) &&
+    value.observed_models.every(
+      (model) =>
+        isRecord(model) &&
+        typeof model.provider === "string" &&
+        model.provider.length > 0 &&
+        typeof model.model === "string" &&
+        model.model.length > 0 &&
+        (model.response_model === undefined ||
+          typeof model.response_model === "string"),
+    )
+  );
+}
+
+function isCheckpointRecord(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.checkpoint_number) &&
+    (value.checkpoint_number as number) >= 1 &&
+    (value.reason === "awaiting_author" ||
+      value.reason === "needs_author_review" ||
+      value.reason === "failed" ||
+      value.reason === "recovered") &&
+    typeof value.state === "string" &&
+    typeof value.created_at === "string" &&
+    typeof value.archive === "string" &&
+    value.archive.startsWith("../checkpoints/") &&
+    value.archive.endsWith(".zip") &&
+    typeof value.archive_sha256 === "string" &&
+    SHA256_PATTERN.test(value.archive_sha256) &&
+    isNonNegativeInteger(value.archive_byte_count) &&
+    typeof value.manifest_sha256 === "string" &&
+    SHA256_PATTERN.test(value.manifest_sha256) &&
+    typeof value.checkpoint_basis_sha256 === "string" &&
+    SHA256_PATTERN.test(value.checkpoint_basis_sha256)
   );
 }
 

@@ -61,7 +61,13 @@ test("validates completed owner, writer, and status metadata", () => {
         },
       ],
       writers: [
-        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+        {
+          kind: "agent",
+          name: "paperbot",
+          model: "deepseek-v4-flash",
+          tool_version: "0.0.1",
+          generation_id: "00000000-0000-4000-8000-000000000001",
+        },
       ],
       status: {
         value: "launched",
@@ -82,7 +88,13 @@ test("validates completed owner, writer, and status metadata", () => {
     expect.objectContaining({
       authors: [expect.objectContaining({ id: "github:example" })],
       writers: [
-        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+        {
+          kind: "agent",
+          name: "paperbot",
+          model: "deepseek-v4-flash",
+          tool_version: "0.0.1",
+          generation_id: "00000000-0000-4000-8000-000000000001",
+        },
       ],
       status: expect.objectContaining({
         value: "launched",
@@ -98,7 +110,13 @@ test("validates completed owner, writer, and status metadata", () => {
       product_name: "Product",
       authors: [{ kind: "organization", name: "example" }],
       writers: [
-        { kind: "agent", name: "paperbot", model: "deepseek-v4-flash" },
+        {
+          kind: "agent",
+          name: "paperbot",
+          model: "deepseek-v4-flash",
+          tool_version: "0.0.1",
+          generation_id: "00000000-0000-4000-8000-000000000001",
+        },
       ],
       status: {
         value: "launched",

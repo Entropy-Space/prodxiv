@@ -166,12 +166,28 @@ export function normalizeAgentMetadata(value: unknown): AgentPaperMetadata {
     throw usageError("completed agent metadata has an invalid Paperbot writer");
   }
   const model = normalizeModelName(writer.model);
+  const toolVersion = normalizeText(
+    writer.tool_version,
+    "completed agent metadata writer tool_version",
+  );
+  const generationId = normalizeText(
+    writer.generation_id,
+    "completed agent metadata writer generation_id",
+  );
   const status = normalizeAgentProductStatus(value.status);
   return {
     title: request.title,
     product_name: request.product_name,
     authors,
-    writers: [{ kind: "agent", name: "paperbot", model }],
+    writers: [
+      {
+        kind: "agent",
+        name: "paperbot",
+        model,
+        tool_version: toolVersion,
+        generation_id: generationId,
+      },
+    ],
     status,
     ...(request.product_url === undefined
       ? {}

@@ -1,0 +1,113 @@
+name: Evaluate Paperbot
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: DeepSeek model used for the evaluation.
+        required: false
+        default: deepseek-v4-flash
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evaluate-paperbot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: generate daily private drafts
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PAPERBOT_MODEL: ${{ inputs.model || 'deepseek-v4-flash' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Validate model configuration
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "${DEEPSEEK_API_KEY}" ]; then
+            echo "::error::Add the DEEPSEEK_API_KEY repository secret for daily Paperbot evaluation."
+            exit 1
+          fi
+
+      - name: Select discovery repositories
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+        run: |
+          bun run paperbot agent select-trending \
+            --output evaluation/trend-selection \
+            --allow-remote-model \
+            --model "${PAPERBOT_MODEL}" \
+            --format json > evaluation-selection.json
+
+      - name: Prepare fixed and rotating evaluation corpus
+        run: |
+          bun run scripts/paperbot-evaluation/prepare-manifest.ts \
+            examples/paperbot-evaluation/canaries.json \
+            evaluation-selection.json \
+            evaluation-manifest.json
+
+      - name: Generate private evaluation drafts
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          bun run paperbot agent batch evaluation-manifest.json \
+            --output evaluation/runs \
+            --allow-remote-model \
+            --model "${PAPERBOT_MODEL}" \
+            --concurrency 2 \
+            --format json > evaluation-batch-result.json
+
+      - name: Record evaluation metadata
+        if: always()
+        run: |
+          mkdir -p evaluation
+          cp evaluation-manifest.json evaluation/manifest.json 2>/dev/null || true
+          cp evaluation-batch-result.json evaluation/batch-result.json 2>/dev/null || true
+          printf '{"workflow_run_id":"%s","repository_revision":"%s","model":"%s"}\n' \
+            "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${PAPERBOT_MODEL}" \
+            > evaluation/workflow.json
+
+      - name: Upload private evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paperbot-evaluation-${{ github.run_id }}
+          path: evaluation
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 30
+
+      - name: Publish evaluation summary
+        if: always()
+        run: |
+          {
+            echo "## Daily Paperbot evaluation"
+            echo
+            echo "Model: \`${PAPERBOT_MODEL}\`"
+            echo "Repository revision: \`${GITHUB_SHA}\`"
+            if [ -f evaluation/runs/batch.json ]; then
+              echo
+              echo '```json'
+              jq '.summary' evaluation/runs/batch.json
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { validation_policy } from "@prodxiv/contracts/validation-policy";
-import { validatePaperFile } from "@prodxiv/paperbot-core";
+import { validatePaperFile, validatePaperSource } from "@prodxiv/paperbot-core";
 
 import { parseArguments } from "../src/arguments.ts";
 import { run } from "../src/cli.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "../../..");
 const fixtureRoot = resolve(import.meta.dir, "fixtures/validation");
+const validPaperPath = resolve(fixtureRoot, "valid-paper.md");
 
 describe("validatePaperFile", () => {
   test("accepts the exemplary paper under the publication profile", async () => {
@@ -164,6 +165,38 @@ describe("validatePaperFile", () => {
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }
+  });
+
+  test("allows agent provenance and rejects it on human writers", async () => {
+    const source = await readFile(validPaperPath, "utf8");
+    const agentSource = source
+      .replace(
+        '  - kind: "human"\n    name: "Fixture writer"',
+        [
+          '  - kind: "agent"',
+          '    name: "paperbot"',
+          '    model: "fixture-model"',
+          '    tool_version: "0.0.1"',
+          '    generation_id: "00000000-0000-4000-8000-000000000001"',
+        ].join("\n"),
+      )
+      .replace(/^communication_email:.*\n/m, "");
+    expect(
+      validatePaperSource(agentSource, validPaperPath, "draft").report.valid,
+    ).toBe(true);
+
+    const humanSource = source.replace(
+      '    name: "Fixture writer"',
+      '    name: "Fixture writer"\n    tool_version: "0.0.1"',
+    );
+    expect(
+      validatePaperSource(humanSource, validPaperPath, "draft").report
+        .diagnostics,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "writers.human_provenance_forbidden" }),
+      ]),
+    );
   });
 
   test("rejects an impossible inferred-status observation date", async () => {

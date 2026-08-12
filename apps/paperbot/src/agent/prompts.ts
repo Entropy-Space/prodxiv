@@ -7,6 +7,8 @@ import type {
   EvidenceResponse,
 } from "./types.ts";
 
+export const PAPERBOT_PROMPT_SET_VERSION = "2";
+
 export const PAPERBOT_SYSTEM_PROMPT = `You are Paperbot's evidence-led product-paper assistant.
 
 You work only on a private draft. You never publish, submit, authenticate to a

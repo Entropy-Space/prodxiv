@@ -89,6 +89,9 @@ jobs:
       - name: Test Paperbot
         run: bun run test:paperbot
 
+      - name: Test Paperbot evaluation manifest
+        run: bun run test:evaluation
+
   web:
     name: web
     runs-on: ubuntu-latest

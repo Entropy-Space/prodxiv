@@ -17,6 +17,7 @@ import {
   writeJsonArtifact,
   writeTextArtifact,
 } from "./artifacts.ts";
+import { createRunCheckpoint } from "./checkpoint.ts";
 import {
   appendAuthorEvidence,
   buildValidatedEvidence,
@@ -40,6 +41,7 @@ import {
   type DraftAssessment,
 } from "./paper.ts";
 import { PiAuthoringRuntime } from "./pi.ts";
+import { resolveProducerProvenance } from "./provenance.ts";
 import {
   createAnswersPrompt,
   createDraftCorrectionPrompt,
@@ -56,6 +58,12 @@ import {
   validateConflictSourceIds,
   validateEvidenceCandidateSourceIds,
 } from "./responses.ts";
+import {
+  appendRolloutEvent,
+  modelTurnCompletedEvent,
+  modelTurnStartedEvent,
+  verifyRolloutArtifact,
+} from "./rollout.ts";
 import {
   assertRestoredSourceMatchesRunRecord,
   assertResumableRecord,
@@ -94,6 +102,7 @@ import {
 import type {
   AgentPaperMetadata,
   AgentPaperRequestMetadata,
+  AgentProducerProvenance,
   AgentRunRecord,
   AgentRunResult,
   AgentSessionRole,
@@ -136,6 +145,8 @@ export interface AgentRunnerDependencies {
   create_runtime?: (model: string) => AuthoringRuntime;
   fetch?: GitHubSourceFetch;
   now?: () => Date;
+  producer?: () => Promise<AgentProducerProvenance>;
+  run_id?: () => string;
 }
 
 export async function runAgent(
@@ -152,16 +163,25 @@ export async function runAgent(
   const externalSources = normalizeExternalSources(
     options.external_sources ?? [],
   );
-  const runPath = await initializeRunDirectory(options.output_path);
   const model = normalizeModelName(options.model ?? "deepseek-v4-flash");
+  const producer = await (dependencies.producer ?? resolveProducerProvenance)();
+  const runPath = await initializeRunDirectory(options.output_path);
+  const runId = (dependencies.run_id ?? (() => crypto.randomUUID()))();
+  const startedAt = now(dependencies).toISOString();
   let record = createRunRecord(
     { ...options, metadata: requestedMetadata },
     model,
     externalSources,
-    now(dependencies).toISOString(),
+    startedAt,
+    producer,
+    runId,
   );
   let evidenceSession: AuthoringSession | undefined;
   let authorSession: AuthoringSession | undefined;
+  await persistRunRecord(runPath, record);
+  await appendRolloutEvent(runPath, record, startedAt, {
+    kind: "run_started",
+  });
   await persistRunRecord(runPath, record);
 
   try {
@@ -171,6 +191,8 @@ export async function runAgent(
       source,
       model,
       now(dependencies).toISOString(),
+      producer,
+      runId,
     );
     const sourceArtifacts = await writeSourceArtifacts(runPath, source);
     record.input.metadata = metadata;
@@ -287,6 +309,7 @@ export async function runAgent(
         [],
         dependencies,
       );
+      await sealRunCheckpoint(runPath, record, "awaiting_author", dependencies);
       return runResult(runPath, record, initialResolution.validation, source);
     }
 
@@ -294,12 +317,23 @@ export async function runAgent(
       await checkpointDraft(runPath, record, reviewResolution, dependencies);
     }
     await finalizePaper(runPath, record, reviewResolution, dependencies);
+    await sealRunCheckpoint(
+      runPath,
+      record,
+      "needs_author_review",
+      dependencies,
+    );
     return runResult(runPath, record, reviewResolution.validation, source);
   } catch (error) {
     record.state = "failed";
     record.updated_at = now(dependencies).toISOString();
     record.error = { message: safeErrorMessage(error) };
+    await appendRolloutEvent(runPath, record, record.updated_at, {
+      kind: "run_failed",
+      error: record.error.message,
+    }).catch(() => undefined);
     await persistRunRecord(runPath, record).catch(() => undefined);
+    await sealRunCheckpoint(runPath, record, "failed", dependencies);
     throw error;
   } finally {
     await evidenceSession?.dispose();
@@ -320,7 +354,33 @@ export async function resumeAgent(
   const runPath = await resolveExistingRun(options.run_path);
   const record = await readRunRecord(runPath);
   assertResumableRecord(record, runPath);
+  await verifyRolloutArtifact(runPath, record);
+  if (!hasCurrentCheckpoint(record)) {
+    await sealRunCheckpoint(runPath, record, "recovered", dependencies);
+  }
+  const resumedProducer = await (
+    dependencies.producer ?? resolveProducerProvenance
+  )();
+  if (resumedProducer.build_id !== record.producer.build_id) {
+    if (
+      !record.producer_history.some(
+        (producer) => producer.build_id === record.producer.build_id,
+      )
+    ) {
+      record.producer_history.push(record.producer);
+    }
+    record.producer = resumedProducer;
+  }
   const metadata = normalizeAgentMetadata(record.input.metadata);
+  const writer = metadata.writers[0];
+  if (writer === undefined) {
+    throw new PaperbotError(
+      "agent run metadata is missing its Paperbot writer",
+      ExitCode.io,
+    );
+  }
+  writer.tool_version = resumedProducer.version;
+  record.input.metadata = metadata;
   const externalSources = normalizeExternalSources(
     record.input.external_sources,
   );
@@ -384,6 +444,9 @@ export async function resumeAgent(
   record.state = "authoring";
   record.updated_at = now(dependencies).toISOString();
   delete record.error;
+  await appendRolloutEvent(runPath, record, record.updated_at, {
+    kind: "run_resumed",
+  });
   await persistRunRecord(runPath, record);
 
   const runtime = runtimeFor(
@@ -449,16 +512,28 @@ export async function resumeAgent(
         questionHistory,
         dependencies,
       );
+      await sealRunCheckpoint(runPath, record, "awaiting_author", dependencies);
       return runResult(runPath, record, currentValidation, source);
     }
     await checkpointDraft(runPath, record, resolution, dependencies);
     await finalizePaper(runPath, record, resolution, dependencies);
+    await sealRunCheckpoint(
+      runPath,
+      record,
+      "needs_author_review",
+      dependencies,
+    );
     return runResult(runPath, record, resolution.validation, source);
   } catch (error) {
     record.state = "failed";
     record.updated_at = now(dependencies).toISOString();
     record.error = { message: safeErrorMessage(error) };
+    await appendRolloutEvent(runPath, record, record.updated_at, {
+      kind: "run_failed",
+      error: record.error.message,
+    }).catch(() => undefined);
     await persistRunRecord(runPath, record).catch(() => undefined);
+    await sealRunCheckpoint(runPath, record, "failed", dependencies);
     throw error;
   } finally {
     await authorSession?.dispose();
@@ -817,6 +892,16 @@ async function completeModelTurn(
     );
   }
   let completion;
+  const turnNumber = currentTurns + 1;
+  const startedAt = now(dependencies);
+  await appendRolloutEvent(
+    runPath,
+    record,
+    startedAt.toISOString(),
+    modelTurnStartedEvent(role, turnNumber, prompt),
+  );
+  record.updated_at = startedAt.toISOString();
+  await persistRunRecord(runPath, record);
   try {
     completion = await session.complete({ prompt });
   } catch (error) {
@@ -831,8 +916,31 @@ async function completeModelTurn(
       currentTurns + 1,
       dependencies,
     );
+    const failedAt = now(dependencies);
+    await appendRolloutEvent(runPath, record, failedAt.toISOString(), {
+      kind: "model_turn_failed",
+      role,
+      turn_number: turnNumber,
+      duration_ms: elapsedMilliseconds(startedAt, failedAt),
+      error: safeErrorMessage(error),
+    });
+    record.updated_at = failedAt.toISOString();
+    await persistRunRecord(runPath, record);
     throw error;
   }
+  const completedAt = now(dependencies);
+  await appendRolloutEvent(
+    runPath,
+    record,
+    completedAt.toISOString(),
+    modelTurnCompletedEvent(
+      record,
+      role,
+      turnNumber,
+      elapsedMilliseconds(startedAt, completedAt),
+      completion,
+    ),
+  );
   await checkpointSession(
     runPath,
     record,
@@ -942,6 +1050,10 @@ function now(dependencies: AgentRunnerDependencies): Date {
   return (dependencies.now ?? (() => new Date()))();
 }
 
+function elapsedMilliseconds(startedAt: Date, completedAt: Date): number {
+  return Math.max(0, completedAt.valueOf() - startedAt.valueOf());
+}
+
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return redactModelSecrets(message);
@@ -977,7 +1089,15 @@ function runResult(
   validation: PaperValidationResult,
   source: AgentSource,
 ): AgentRunResult {
+  const checkpoint = record.checkpoints.at(-1);
+  if (checkpoint === undefined) {
+    throw new PaperbotError(
+      "agent run reached a stopping point without a checkpoint archive",
+      ExitCode.io,
+    );
+  }
   return {
+    run_id: record.run_id,
     run_path: runPath,
     state: record.state,
     validation: {
@@ -992,5 +1112,39 @@ function runResult(
       resolved_revision: source.resolved_revision,
       selected_file_count: source.files.length,
     },
+    checkpoint,
   };
+}
+
+async function sealRunCheckpoint(
+  runPath: string,
+  record: AgentRunRecord,
+  reason: "awaiting_author" | "needs_author_review" | "failed" | "recovered",
+  dependencies: AgentRunnerDependencies,
+): Promise<void> {
+  const timestamp = now(dependencies).toISOString();
+  await appendRolloutEvent(runPath, record, timestamp, {
+    kind: "checkpoint_sealing",
+    checkpoint_number: record.checkpoints.length + 1,
+    reason,
+  });
+  record.updated_at = timestamp;
+  await persistRunRecord(runPath, record);
+  const checkpoint = await createRunCheckpoint(
+    runPath,
+    record,
+    reason,
+    timestamp,
+  );
+  record.checkpoints.push(checkpoint);
+  await persistRunRecord(runPath, record);
+}
+
+function hasCurrentCheckpoint(record: AgentRunRecord): boolean {
+  const checkpoint = record.checkpoints.at(-1);
+  return (
+    checkpoint !== undefined &&
+    checkpoint.state === record.state &&
+    checkpoint.created_at === record.updated_at
+  );
 }

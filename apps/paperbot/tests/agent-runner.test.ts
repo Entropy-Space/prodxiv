@@ -4,6 +4,7 @@ import {
   cp,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
@@ -15,6 +16,7 @@ import { PaperbotError } from "@prodxiv/paperbot-core";
 import { resumeAgent, runAgent } from "../src/agent/runner.ts";
 import { readSourceArtifact } from "../src/agent/source.ts";
 import type {
+  AgentProducerProvenance,
   AgentSessionRole,
   AuthoringRuntime,
   ModelCompletion,
@@ -51,9 +53,12 @@ describe("runAgent", () => {
     const result = await runAgent(runOptions(outputPath), {
       create_runtime: () => runtime,
       now: () => new Date("2026-08-01T00:00:00.000Z"),
+      producer: async () => testProducer(),
+      run_id: () => RUN_ID,
     });
 
     expect(result).toEqual({
+      run_id: "00000000-0000-4000-8000-000000000001",
       run_path: outputPath,
       state: "needs_author_review",
       validation: { valid: true, diagnostics: 0 },
@@ -62,6 +67,13 @@ describe("runAgent", () => {
         resolved_revision: expect.stringMatching(/^[0-9a-f]{40}$/),
         selected_file_count: expect.any(Number),
       },
+      checkpoint: expect.objectContaining({
+        checkpoint_number: 1,
+        reason: "needs_author_review",
+        state: "needs_author_review",
+        archive_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        manifest_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      }),
     });
     expect(runtime.started_roles).toEqual(["evidence", "author"]);
     expect(runtime.prompts.map((item) => item.role)).toEqual([
@@ -133,7 +145,8 @@ describe("runAgent", () => {
       excerpt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(JSON.parse(runText)).toMatchObject({
-      schema_version: "3",
+      schema_version: "4",
+      run_id: RUN_ID,
       state: "needs_author_review",
       sessions: {
         evidence: {
@@ -158,6 +171,79 @@ describe("runAgent", () => {
       },
     });
     expect(questions).toContain("author review is still required");
+    expect(paper).toContain('tool_version: "0.0.1"');
+    expect(paper).toContain(`generation_id: "${RUN_ID}"`);
+    const parsedRun = JSON.parse(runText) as {
+      checkpoint: unknown;
+      checkpoints: Array<{
+        archive: string;
+        archive_sha256: string;
+        manifest_sha256: string;
+      }>;
+      rollout: {
+        artifact_sha256: string;
+        last_event_sha256: string;
+        event_count: number;
+      };
+    };
+    expect(parsedRun.checkpoints).toHaveLength(1);
+    const checkpointPath = resolve(
+      outputPath,
+      parsedRun.checkpoints[0]!.archive,
+    );
+    const checkpointBytes = await readFile(checkpointPath);
+    expect(
+      new Bun.CryptoHasher("sha256").update(checkpointBytes).digest("hex"),
+    ).toBe(parsedRun.checkpoints[0]!.archive_sha256);
+    expect((await stat(checkpointPath)).mode & 0o777).toBe(0o600);
+    const archiveEntries = readStoredZip(checkpointBytes);
+    expect([...archiveEntries.keys()]).toContain("manifest.json");
+    expect([...archiveEntries.keys()]).toContain("run.json");
+    expect([...archiveEntries.keys()]).toContain("events.jsonl");
+    expect([...archiveEntries.keys()]).toContain(
+      "sessions/evidence/fake-evidence.jsonl",
+    );
+    const manifestFile = archiveEntries.get("manifest.json");
+    expect(manifestFile).toBeDefined();
+    const manifestText = manifestFile!.toString("utf8");
+    expect(
+      new Bun.CryptoHasher("sha256").update(manifestText).digest("hex"),
+    ).toBe(parsedRun.checkpoints[0]!.manifest_sha256);
+    const manifest = JSON.parse(manifestText) as {
+      run_id: string;
+      files: Array<{ path: string; sha256: string }>;
+    };
+    expect(manifest.run_id).toBe(RUN_ID);
+    expect(manifest.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "paper.md",
+          sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        }),
+      ]),
+    );
+    const eventsText = await readFile(join(outputPath, "events.jsonl"), "utf8");
+    const events = eventsText
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events).toHaveLength(parsedRun.rollout.event_count);
+    expect(events.map((event) => event.kind)).toEqual([
+      "run_started",
+      "model_turn_started",
+      "model_turn_completed",
+      "model_turn_started",
+      "model_turn_completed",
+      "model_turn_started",
+      "model_turn_completed",
+      "checkpoint_sealing",
+    ]);
+    expect(events.at(-1)?.event_sha256).toBe(
+      parsedRun.rollout.last_event_sha256,
+    );
+    expect(
+      new Bun.CryptoHasher("sha256").update(eventsText).digest("hex"),
+    ).toBe(parsedRun.rollout.artifact_sha256);
     expect(
       (await stat(join(outputPath, "sessions", "evidence"))).mode & 0o777,
     ).toBe(0o700);
@@ -286,6 +372,11 @@ describe("runAgent", () => {
     expect(await readFile(join(outputPath, "paper.md"), "utf8")).toContain(
       "Private research draft",
     );
+    const checkpointDirectory = join(workspacePath, "checkpoints");
+    const checkpointFiles = (await readdir(checkpointDirectory)).sort();
+    expect(checkpointFiles).toHaveLength(2);
+    expect(checkpointFiles[0]).toContain("awaiting_author.zip");
+    expect(checkpointFiles[1]).toContain("needs_author_review.zip");
   });
 
   test("repairs evidence whose selected lines are outside the source", async () => {
@@ -962,6 +1053,36 @@ describe("resumeAgent", () => {
     expect(runtime.started_roles).toEqual([]);
   });
 
+  test("rejects a changed rollout audit log before reopening Pi", async () => {
+    const outputPath = join(workspacePath, "run");
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () =>
+        new FakeRuntime({
+          evidence: [evidenceResponse()],
+          author: [draftResponse(), askQuestionsResponse()],
+        }),
+    });
+    await appendFile(join(outputPath, "events.jsonl"), '{"tampered":true}\n');
+    const answersPath = join(workspacePath, "answers.md");
+    await writeFile(answersPath, "Author context.\n");
+    const runtime = new FakeRuntime({ author: [draftResponse()] });
+
+    await expect(
+      resumeAgent(
+        {
+          run_path: outputPath,
+          answers_path: answersPath,
+          allow_remote_model: true,
+        },
+        { create_runtime: () => runtime },
+      ),
+    ).rejects.toMatchObject({
+      exit_code: 4,
+      message: expect.stringContaining("rollout artifact"),
+    });
+    expect(runtime.started_roles).toEqual([]);
+  });
+
   test("rejects legacy run records instead of reconstructing an unsafe session", async () => {
     const outputPath = join(workspacePath, "run");
     await runAgent(runOptions(outputPath), {
@@ -1037,6 +1158,7 @@ class FakeRuntime implements AuthoringRuntime {
         }
         return {
           final_text: response,
+          provider: this.provider,
           model: this.model,
           usage: { input_tokens: 1, output_tokens: 1 },
         } satisfies ModelCompletion;
@@ -1064,6 +1186,47 @@ function runOptions(outputPath: string) {
     allow_remote_model: true,
     metadata: metadata(),
   };
+}
+
+const RUN_ID = "00000000-0000-4000-8000-000000000001";
+
+function testProducer(): AgentProducerProvenance {
+  return {
+    name: "paperbot",
+    version: "0.0.1",
+    git_revision: "a".repeat(40),
+    git_dirty: false,
+    source_state_sha256: "b".repeat(64),
+    build_id: "c".repeat(64),
+    bun_version: Bun.version,
+    dependency_lock_sha256: "d".repeat(64),
+    run_schema_version: "4",
+    prompt_set_version: "2",
+    prompt_set_sha256: "e".repeat(64),
+  };
+}
+
+function readStoredZip(bytes: Uint8Array): Map<string, Buffer> {
+  const buffer = Buffer.from(bytes);
+  const entries = new Map<string, Buffer>();
+  let offset = 0;
+  while (offset + 4 <= buffer.byteLength) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature === 0x02014b50 || signature === 0x06054b50) {
+      break;
+    }
+    expect(signature).toBe(0x04034b50);
+    expect(buffer.readUInt16LE(offset + 8)).toBe(0);
+    const byteCount = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString();
+    entries.set(name, buffer.subarray(dataStart, dataStart + byteCount));
+    offset = dataStart + byteCount;
+  }
+  return entries;
 }
 
 function metadata() {

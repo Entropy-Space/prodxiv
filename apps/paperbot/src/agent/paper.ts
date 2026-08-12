@@ -53,6 +53,8 @@ export function renderPaper(
       `  - kind: ${JSON.stringify(writer.kind)}`,
       `    name: ${JSON.stringify(writer.name)}`,
       `    model: ${JSON.stringify(writer.model)}`,
+      `    tool_version: ${JSON.stringify(writer.tool_version)}`,
+      `    generation_id: ${JSON.stringify(writer.generation_id)}`,
     ]),
     "status:",
     `  value: ${JSON.stringify(metadata.status.value)}`,

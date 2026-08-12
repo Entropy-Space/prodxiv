@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import { completeAgentMetadata } from "../src/agent/metadata.ts";
-import type { AgentGitHubRelease, AgentSource } from "../src/agent/types.ts";
+import type {
+  AgentGitHubRelease,
+  AgentProducerProvenance,
+  AgentSource,
+} from "../src/agent/types.ts";
 
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
 const OBSERVED_AT = "2026-08-05T00:00:00.000Z";
@@ -16,6 +20,8 @@ describe("completeAgentMetadata", () => {
       ]),
       "deepseek-v4-flash",
       OBSERVED_AT,
+      producer(),
+      "00000000-0000-4000-8000-000000000001",
     );
 
     expect(metadata).toMatchObject({
@@ -52,6 +58,8 @@ describe("completeAgentMetadata", () => {
       ]),
       "model",
       OBSERVED_AT,
+      producer(),
+      "00000000-0000-4000-8000-000000000001",
     );
 
     expect(metadata.status).toMatchObject({
@@ -68,6 +76,8 @@ describe("completeAgentMetadata", () => {
       githubSource([]),
       "model",
       OBSERVED_AT,
+      producer(),
+      "00000000-0000-4000-8000-000000000001",
     );
 
     expect(metadata.status).toEqual({
@@ -88,6 +98,8 @@ describe("completeAgentMetadata", () => {
       githubSource([release("v1.0.0", false, OBSERVED_AT)]),
       "model",
       OBSERVED_AT,
+      producer(),
+      "00000000-0000-4000-8000-000000000001",
     );
 
     expect(metadata.authors).toEqual([
@@ -114,10 +126,28 @@ describe("completeAgentMetadata", () => {
         source,
         "model",
         OBSERVED_AT,
+        producer(),
+        "00000000-0000-4000-8000-000000000001",
       ),
     ).toThrow("provide --author explicitly");
   });
 });
+
+function producer(): AgentProducerProvenance {
+  return {
+    name: "paperbot",
+    version: "0.0.1",
+    git_revision: "a".repeat(40),
+    git_dirty: false,
+    source_state_sha256: "b".repeat(64),
+    build_id: "c".repeat(64),
+    bun_version: Bun.version,
+    dependency_lock_sha256: "d".repeat(64),
+    run_schema_version: "4",
+    prompt_set_version: "2",
+    prompt_set_sha256: "e".repeat(64),
+  };
+}
 
 function githubSource(releases: AgentGitHubRelease[]): AgentSource {
   return {

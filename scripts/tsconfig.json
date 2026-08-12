@@ -14,5 +14,5 @@
     "target": "ES2024",
     "types": ["bun"]
   },
-  "include": ["github-trending/**/*.ts"]
+  "include": ["github-trending/**/*.ts", "paperbot-evaluation/**/*.ts"]
 }

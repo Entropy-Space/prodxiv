@@ -254,7 +254,11 @@ class PiConversation implements AuthoringSession {
       await secureSessionArtifact(this.session.sessionFile);
       return {
         final_text: assistantText(final),
+        provider: final.provider,
         model: final.model,
+        ...(final.responseModel === undefined
+          ? {}
+          : { response_model: final.responseModel }),
         usage: {
           input_tokens: final.usage.input,
           output_tokens: final.usage.output,

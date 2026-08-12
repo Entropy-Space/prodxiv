@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const repositoryRoot = resolve(packageRoot, "../..");
-const cliPath = resolve(packageRoot, "src/cli.ts");
 const fixturePath = resolve(
   packageRoot,
   "tests/fixtures/validation/valid-paper.md",
@@ -34,16 +33,12 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
   await Promise.all([mkdir(cleanPath), mkdir(homePath)]);
 
   const build = await runProcess(
-    [
-      "bun",
-      "build",
-      "--compile",
-      "--target=bun",
-      "--outfile",
-      binaryPath,
-      cliPath,
-    ],
+    ["bun", resolve(packageRoot, "scripts/build.ts")],
     repositoryRoot,
+    {
+      ...environment,
+      PAPERBOT_BUILD_OUTPUT: binaryPath,
+    },
   );
   expect(build.exit_code).toBe(0);
 

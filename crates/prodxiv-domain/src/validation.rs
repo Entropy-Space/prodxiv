@@ -457,12 +457,24 @@ fn validate_writers_and_contact(paper: &PaperDocument, diagnostics: &mut Vec<Dia
             diagnostics,
         );
         match writer.kind {
-            WriterKind::Human if writer.model.is_some() => error(
-                diagnostics,
-                "writers.human_model_forbidden",
-                &format!("metadata.writers[{index}].model"),
-                "human writers must not specify a model",
-            ),
+            WriterKind::Human => {
+                if writer.model.is_some() {
+                    error(
+                        diagnostics,
+                        "writers.human_model_forbidden",
+                        &format!("metadata.writers[{index}].model"),
+                        "human writers must not specify a model",
+                    );
+                }
+                if writer.tool_version.is_some() || writer.generation_id.is_some() {
+                    error(
+                        diagnostics,
+                        "writers.human_provenance_forbidden",
+                        &format!("metadata.writers[{index}]"),
+                        "human writers must not specify agent generation provenance",
+                    );
+                }
+            }
             WriterKind::Agent
                 if writer
                     .model
@@ -476,7 +488,32 @@ fn validate_writers_and_contact(paper: &PaperDocument, diagnostics: &mut Vec<Dia
                     "agent writers must identify their model",
                 );
             }
-            WriterKind::Human | WriterKind::Agent => {}
+            WriterKind::Agent => {
+                if writer
+                    .tool_version
+                    .as_ref()
+                    .is_some_and(|value| value.trim().is_empty())
+                {
+                    error(
+                        diagnostics,
+                        "writers.agent_tool_version_invalid",
+                        &format!("metadata.writers[{index}].tool_version"),
+                        "agent writer tool_version must not be empty",
+                    );
+                }
+                if writer
+                    .generation_id
+                    .as_ref()
+                    .is_some_and(|value| value.trim().is_empty())
+                {
+                    error(
+                        diagnostics,
+                        "writers.agent_generation_id_invalid",
+                        &format!("metadata.writers[{index}].generation_id"),
+                        "agent writer generation_id must not be empty",
+                    );
+                }
+            }
         }
     }
     if let Some(email) = &metadata.communication_email {

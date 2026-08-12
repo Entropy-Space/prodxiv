@@ -98,14 +98,25 @@ records their relative paths, IDs, and SHA-256 digests.
 An unchanged self-review approves the existing draft checkpoint without
 creating a duplicate immutable revision.
 
+`run.json` records a UUID generation ID plus the exact Paperbot version, Git
+revision and dirty-source digest, build ID, Bun version, lockfile digest, and
+prompt-set digest. Generated paper metadata exposes only the safe Paperbot
+version and generation ID. A hash-chained `events.jsonl` records phase events,
+prompt and response digests, model observations, usage, timing, and failures.
+At `awaiting_author`, `needs_author_review`, and `failed`, Paperbot seals a new
+mode-`0600` ZIP under the sibling `checkpoints/` directory with a manifest of
+all archived paths, sizes, and SHA-256 digests. Resuming preserves every older
+ZIP and creates a new numbered checkpoint.
+
 For a public GitHub URL, `agent run` uses the repository owner as the default
 organization author and never derives authors from commits or contributors. It
 snapshots up to ten releases and bounded release notes: stable release evidence
 supports `launched`, prerelease evidence supports `public_beta`, and no
 supported release produces an explicit `unknown` status. `--author` and
 `--status` remain explicit overrides. Local runs do not contact GitHub. Every
-generated paper credits `paperbot` and the selected model as its agent writer;
-agent-only papers omit the optional human-writer `communication_email`.
+generated paper credits `paperbot`, its version, a safe generation ID, and the
+selected model as its agent writer; agent-only papers omit the optional
+human-writer `communication_email`.
 
 `agent select-trending` is a separate bounded research workflow. By default it
 requests the exact UTC date with `period=daily&language=all` from the hosted
@@ -129,6 +140,12 @@ SHA-256 digest. `--format json` emits the selection object on stdout, never the
 session contents. The model cannot browse repositories, and the command does
 not draft or publish papers. The selection is a research queue, not an
 endorsement.
+
+The repository's scheduled `Evaluate Paperbot` workflow uses the selection as
+a discovery lane alongside three exact-revision canaries. It generates six
+private drafts per day, accepts `awaiting_author` as a successful honest
+checkpoint, and uploads the run directories and sealed ZIPs for 30 days. The
+workflow has no publication step or publishing credentials.
 
 Every Paperbot-started Pi session file is created before its first model turn,
 is mode `0600` inside a mode-`0700` run directory, and stays local. Session

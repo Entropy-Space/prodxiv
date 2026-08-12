@@ -32,7 +32,7 @@ const statusObservation =
 const writerNames = (metadata.writers ?? [])
   .map((writer) =>
     writer.kind === "agent" && writer.model
-      ? `${writer.name} + ${writer.model}`
+      ? `${writer.name}${writer.tool_version ? ` ${writer.tool_version}` : ""} + ${writer.model}`
       : writer.name,
   )
   .join(", ");

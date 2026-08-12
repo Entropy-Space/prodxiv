@@ -367,6 +367,7 @@ describe("runAgentBatch", () => {
 
 function successfulRun(outputPath: string): AgentRunResult {
   return {
+    run_id: "00000000-0000-4000-8000-000000000001",
     run_path: outputPath,
     state: "needs_author_review",
     validation: { valid: true, diagnostics: 0 },
@@ -374,6 +375,18 @@ function successfulRun(outputPath: string): AgentRunResult {
     source: {
       resolved_revision: "0123456789abcdef0123456789abcdef01234567",
       selected_file_count: 3,
+    },
+    checkpoint: {
+      checkpoint_number: 1,
+      reason: "needs_author_review",
+      state: "needs_author_review",
+      created_at: "2026-08-01T00:00:00.000Z",
+      archive:
+        "../checkpoints/2026-08-01_run_00000000-0000-4000-8000-000000000001_checkpoint-0001_needs_author_review.zip",
+      archive_sha256: "a".repeat(64),
+      archive_byte_count: 1024,
+      manifest_sha256: "b".repeat(64),
+      checkpoint_basis_sha256: "c".repeat(64),
     },
   };
 }

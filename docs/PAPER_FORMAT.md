@@ -67,11 +67,18 @@ writers:
   - kind: agent
     name: paperbot
     model: deepseek-v4-flash
+    tool_version: 0.0.1
+    generation_id: 7b5a1f38-8b40-4df6-91a3-609d03f08f03
 ```
 
 A human-written or human-co-written paper may include an explicitly supplied
 `communication_email`. Agent-only papers omit it. The email is a contact for
 paper communication, not an identity key.
+
+`tool_version` and `generation_id` are optional agent-writer provenance.
+`generation_id` is a safe public correlation key. Private prompts, source
+snapshots, rollout logs, and checkpoint archives never enter paper Markdown or
+a publication submission.
 
 ## Product status observations
 

@@ -583,6 +583,7 @@ class FakeTrendRuntime implements TrendSelectionRuntime {
         }
         return {
           final_text: response,
+          provider: this.provider,
           model: this.model,
           usage: { input_tokens: 3, output_tokens: 2 },
         } satisfies ModelCompletion;
