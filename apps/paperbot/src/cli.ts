@@ -56,9 +56,9 @@ Usage:
   paperbot tools repo_scan [repository] [--exclude <glob>] [--include <glob>] [--format text|json]
   paperbot tools paper_scaffold <scan.json> [--title <title>] [--format text|json]
   paperbot tools paper_validate <paper.md> [--profile draft|submission|publication] [--format text|json]
-  paperbot agent run <repository> --output <run-directory> --allow-remote-model [--mode interactive] [--feedback sync|async] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
+  paperbot agent run <repository> --output <run-directory> --allow-remote-model [--mode interactive|auto] [--feedback sync|async] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
   paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
-  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
+  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--mode auto|interactive] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
   paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
@@ -94,8 +94,8 @@ Options:
   --source <url>       Supply a citeable public URL; Paperbot does not fetch it
   --ref <ref>          Request a GitHub revision for an agent run
   --model <model>      Pi model for an agent workflow
-  --mode <mode>        Drafting mode: interactive (default)
-  --feedback <mode>    Author feedback: async (default) or sync terminal interview
+  --mode <mode>        Drafting mode: interactive (run default) or auto (batch default)
+  --feedback <mode>    Interactive feedback: async (default) or sync terminal interview
   --concurrency <1-4>  Concurrent projects for an agent batch (default: 1)
   --allow-remote-model Allow a bounded public snapshot or source bundle to reach the model
   --api-url <url>      Override the hosted archive API, or configure publishing
@@ -291,11 +291,11 @@ export async function run(
           external_sources: parsed.external_sources,
           ...(parsed.ref === undefined ? {} : { ref: parsed.ref }),
           ...(parsed.model === undefined ? {} : { model: parsed.model }),
-          ...(parsed.feedback === "async"
-            ? {}
-            : {
+          ...(parsed.feedback === "sync"
+            ? {
                 collect_author_answers: createTerminalAnswerCollector(io),
-              }),
+              }
+            : {}),
         });
         writeAgentResult(io, parsed.format, parsed.action, result);
         return result.validation.valid ? ExitCode.success : ExitCode.validation;
@@ -335,6 +335,7 @@ export async function run(
         input_path: parsed.input_path,
         output_path: parsed.output_path,
         allow_remote_model: parsed.allow_remote_model,
+        mode: parsed.mode,
         ...(parsed.authors === undefined ? {} : { authors: parsed.authors }),
         ...(parsed.status === undefined ? {} : { status: parsed.status }),
         ...(parsed.model === undefined ? {} : { model: parsed.model }),
@@ -600,7 +601,7 @@ function writeAgentResult(
           : "Paperbot agent paper revision prepared",
       `Run: ${result.run_path}`,
       `Generation ID: ${result.run_id}`,
-      `Mode: ${result.mode} (${result.feedback} feedback)`,
+      `Mode: ${result.mode}${result.feedback === "none" ? " (no author feedback)" : ` (${result.feedback} feedback)`}`,
       `State: ${result.state}`,
       `Validation: ${result.validation.valid ? "passed" : "needs author attention"} (${result.validation.diagnostics} diagnostics)`,
       `Author questions: ${result.questions.pending} pending (round ${result.questions.round})`,

@@ -147,7 +147,7 @@ describe("runAgent", () => {
       excerpt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(JSON.parse(runText)).toMatchObject({
-      schema_version: "4",
+      schema_version: "5",
       run_id: RUN_ID,
       state: "needs_author_review",
       sessions: {
@@ -238,6 +238,7 @@ describe("runAgent", () => {
       "model_turn_completed",
       "model_turn_started",
       "model_turn_completed",
+      "assumptions_recorded",
       "checkpoint_sealing",
     ]);
     expect(events.at(-1)?.event_sha256).toBe(
@@ -381,6 +382,52 @@ describe("runAgent", () => {
     expect(checkpointFiles[1]).toContain("needs_author_review.zip");
   });
 
+  test("preserves structured assumptions across an async author resume", async () => {
+    const outputPath = join(workspacePath, "run");
+    const assumption = {
+      assumption:
+        "The fixture likely exists to keep repository-analysis tests repeatable.",
+      reason: "Implementation evidence does not establish author intent.",
+      evidence_ids: ["evidence:001"],
+    };
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () =>
+        new FakeRuntime({
+          evidence: [evidenceResponse()],
+          author: [
+            draftResponse({ assumptions: [assumption] }),
+            askQuestionsResponse(),
+          ],
+        }),
+    });
+    const answersPath = join(workspacePath, "answers.md");
+    await writeFile(answersPath, "The fixture supports repeatable tests.\n");
+    const resumeRuntime = new FakeRuntime({
+      author: [
+        draftResponse({
+          evidence_ids: ["evidence:001", "evidence:002"],
+          assumptions: [],
+        }),
+      ],
+    });
+
+    await resumeAgent(
+      {
+        run_path: outputPath,
+        answers_path: answersPath,
+        allow_remote_model: true,
+      },
+      { create_runtime: () => resumeRuntime },
+    );
+
+    expect(resumeRuntime.prompts[0]?.prompt).toContain(
+      JSON.stringify(assumption.assumption),
+    );
+    expect(resumeRuntime.prompts[0]?.prompt).not.toContain(
+      "Unverified Paperbot assumptions",
+    );
+  });
+
   test("resumes an existing schema-v4 async run without mode fields", async () => {
     const outputPath = join(workspacePath, "run");
     await runAgent(runOptions(outputPath), {
@@ -393,7 +440,11 @@ describe("runAgent", () => {
     const runPath = join(outputPath, "run.json");
     const record = JSON.parse(await readFile(runPath, "utf8")) as {
       input: Record<string, unknown>;
+      schema_version: string;
+      producer: { run_schema_version: string };
     };
+    record.schema_version = "4";
+    record.producer.run_schema_version = "4";
     delete record.input.mode;
     delete record.input.feedback;
     await writeFile(runPath, `${JSON.stringify(record, null, 2)}\n`);
@@ -500,6 +551,178 @@ describe("runAgent", () => {
       "author_answers_recorded",
     );
     expect(events.map((event) => event.kind)).not.toContain("run_resumed");
+  });
+
+  test("auto mode records assumptions and seals one final ZIP without pausing", async () => {
+    const outputPath = join(workspacePath, "run");
+    const autoAssumption = {
+      assumption:
+        "The stable fixture surface is likely intended to make repository-analysis tests repeatable.",
+      reason: "The repository shows the mechanism but no author intent.",
+      evidence_ids: ["evidence:001"],
+    };
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        draftResponse(),
+        draftResponse({
+          assumptions: [autoAssumption],
+          unresolved_questions: [
+            "The product's original motivation still requires author confirmation.",
+          ],
+        }),
+      ],
+    });
+
+    const result = await runAgent(
+      {
+        ...runOptions(outputPath),
+        mode: "auto",
+        feedback: "none",
+      },
+      {
+        create_runtime: () => runtime,
+        now: () => new Date("2026-08-01T00:00:00.000Z"),
+        producer: async () => testProducer(),
+        run_id: () => RUN_ID,
+      },
+    );
+
+    expect(result).toMatchObject({
+      mode: "auto",
+      feedback: "none",
+      state: "needs_author_review",
+      questions: { pending: 0, round: 0 },
+      checkpoint: {
+        checkpoint_number: 1,
+        reason: "needs_author_review",
+        archive: expect.stringMatching(/_final\.zip$/),
+      },
+    });
+    expect(runtime.prompts.at(-1)?.prompt).toContain(
+      "No human is available in auto mode",
+    );
+    expect(runtime.prompts.at(-1)?.prompt).not.toContain(
+      '"action": "ask_questions"',
+    );
+    const checkpointFiles = await readdir(join(workspacePath, "checkpoints"));
+    expect(checkpointFiles).toEqual([expect.stringMatching(/_final\.zip$/)]);
+    const archiveEntries = readStoredZip(
+      await readFile(join(workspacePath, "checkpoints", checkpointFiles[0]!)),
+    );
+    expect([...archiveEntries.keys()]).toContain("assumptions.json");
+    const paper = await readFile(join(outputPath, "paper.md"), "utf8");
+    expect(paper).toContain("Unverified Paperbot assumptions");
+    expect(paper).toContain(autoAssumption.assumption);
+    expect(
+      JSON.parse(await readFile(join(outputPath, "assumptions.json"), "utf8")),
+    ).toEqual({
+      schema_version: "1",
+      mode: "auto",
+      generated_without_author: true,
+      assumptions: [autoAssumption],
+    });
+    const record = JSON.parse(
+      await readFile(join(outputPath, "run.json"), "utf8"),
+    ) as {
+      input: { mode: string; feedback: string };
+      artifacts: { assumptions: string };
+      checkpoints: unknown[];
+    };
+    expect(record).toMatchObject({
+      input: { mode: "auto", feedback: "none" },
+      artifacts: { assumptions: "assumptions.json" },
+    });
+    expect(record.checkpoints).toHaveLength(1);
+    const answersPath = join(workspacePath, "answers.md");
+    await writeFile(answersPath, "This should never be read.\n");
+    await expect(
+      resumeAgent({
+        run_path: outputPath,
+        answers_path: answersPath,
+        allow_remote_model: true,
+      }),
+    ).rejects.toMatchObject({
+      exit_code: 2,
+      message: expect.stringContaining(
+        "auto agent runs cannot be resumed with author answers",
+      ),
+    });
+  });
+
+  test("auto mode converts an attempted question event into a final draft", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [draftResponse(), askQuestionsResponse(), draftResponse()],
+    });
+
+    const result = await runAgent(
+      { ...runOptions(outputPath), mode: "auto", feedback: "none" },
+      { create_runtime: () => runtime },
+    );
+
+    expect(result).toMatchObject({
+      state: "needs_author_review",
+      questions: { pending: 0, round: 0 },
+    });
+    expect(runtime.prompts.at(-1)?.prompt).toContain(
+      "A full draft is required now; no author-question round is available",
+    );
+    expect(await readdir(join(workspacePath, "checkpoints"))).toHaveLength(1);
+  });
+
+  test("auto mode repairs unsafe assumption markup before rendering", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        draftResponse(),
+        draftResponse({
+          assumptions: [
+            {
+              assumption: "See [untrusted](https://untrusted.example).",
+              reason: "<script>unsafe()</script>",
+              evidence_ids: ["evidence:001"],
+            },
+          ],
+        }),
+        draftResponse({
+          assumptions: [
+            {
+              assumption:
+                "The fixture likely supports repeatable repository analysis.",
+              reason: "Repository evidence establishes behavior, not intent.",
+              evidence_ids: ["evidence:001"],
+            },
+          ],
+        }),
+      ],
+    });
+
+    await runAgent(
+      { ...runOptions(outputPath), mode: "auto", feedback: "none" },
+      { create_runtime: () => runtime },
+    );
+
+    expect(runtime.prompts.at(-1)?.prompt).toContain(
+      "assumptions[0] is unsafe",
+    );
+    const paper = await readFile(join(outputPath, "paper.md"), "utf8");
+    expect(paper).not.toContain("untrusted.example");
+    expect(paper).not.toContain("<script>");
+  });
+
+  test("rejects a feedback transport for auto mode before creating output", async () => {
+    const outputPath = join(workspacePath, "run");
+
+    await expect(
+      runAgent({ ...runOptions(outputPath), mode: "auto", feedback: "async" }),
+    ).rejects.toMatchObject({
+      exit_code: 2,
+      message: "auto agent runs do not accept author feedback",
+    });
+    await expect(stat(outputPath)).rejects.toThrow();
   });
 
   test("repairs evidence whose selected lines are outside the source", async () => {
@@ -1323,8 +1546,8 @@ function testProducer(): AgentProducerProvenance {
     build_id: "c".repeat(64),
     bun_version: Bun.version,
     dependency_lock_sha256: "d".repeat(64),
-    run_schema_version: "4",
-    prompt_set_version: "2",
+    run_schema_version: "5",
+    prompt_set_version: "3",
     prompt_set_sha256: "e".repeat(64),
   };
 }
@@ -1394,6 +1617,7 @@ function draftResponse(
     topics: ["developer_tools", "testing"],
     markdown: paperBody(),
     evidence_ids: ["evidence:001"],
+    assumptions: [],
     unresolved_questions: [],
     ...overrides,
   });

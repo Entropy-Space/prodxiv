@@ -76,6 +76,7 @@ import {
   readArtifact,
   readAuthorEvidenceSources,
   readCurrentDraft,
+  readCurrentDraftResponse,
   readEvidenceAnalysis,
   readQuestions,
   readQuestionsIfPresent,
@@ -106,6 +107,7 @@ import type {
   AgentProducerProvenance,
   AgentRunRecord,
   AgentRunResult,
+  AgentRunMode,
   AgentSessionRole,
   AgentSource,
   AskQuestionsResponse,
@@ -129,7 +131,7 @@ export interface AgentRunOptions {
   repository: string;
   output_path: string;
   allow_remote_model: boolean;
-  mode?: "interactive";
+  mode?: AgentRunMode;
   feedback?: AgentFeedbackMode;
   collect_author_answers?: (
     questions: AuthorQuestion[],
@@ -167,16 +169,21 @@ export async function runAgent(
     );
   }
   const mode = options.mode ?? "interactive";
-  const feedback = options.feedback ?? "async";
-  if (mode !== "interactive") {
+  const feedback = options.feedback ?? (mode === "auto" ? "none" : "async");
+  if (mode !== "interactive" && mode !== "auto") {
     throw new PaperbotError(
-      "agent run mode must be interactive",
+      "agent run mode must be interactive or auto",
       ExitCode.usage,
     );
   }
-  if (feedback !== "sync" && feedback !== "async") {
+  if (
+    (mode === "auto" && feedback !== "none") ||
+    (mode === "interactive" && feedback !== "sync" && feedback !== "async")
+  ) {
     throw new PaperbotError(
-      "agent run feedback must be sync or async",
+      mode === "auto"
+        ? "auto agent runs do not accept author feedback"
+        : "interactive agent run feedback must be sync or async",
       ExitCode.usage,
     );
   }
@@ -309,6 +316,7 @@ export async function runAgent(
         analysis,
         draft: initialResolution.draft,
         remaining_question_rounds: remainingQuestionRounds(record),
+        mode,
       }),
       runPath,
       record,
@@ -318,7 +326,8 @@ export async function runAgent(
     );
     const reviewResolution = await resolveDraftResponse({
       initial_response: reviewResponse,
-      allow_questions: remainingQuestionRounds(record) > 0,
+      allow_questions:
+        mode === "interactive" && remainingQuestionRounds(record) > 0,
       session: authorSession,
       source,
       metadata,
@@ -425,6 +434,12 @@ export async function resumeAgent(
   }
   const runPath = await resolveExistingRun(options.run_path);
   const record = await readRunRecord(runPath);
+  if (record.input.mode === "auto") {
+    throw new PaperbotError(
+      `auto agent runs cannot be resumed with author answers: ${runPath}`,
+      ExitCode.usage,
+    );
+  }
   assertResumableRecord(record, runPath);
   await verifyRolloutArtifact(runPath, record);
   if (!hasCurrentCheckpoint(record)) {
@@ -478,7 +493,8 @@ export async function resumeAgent(
     MAX_AUTHOR_ANSWERS_BYTES,
   );
   const currentPaper = await readCurrentDraft(runPath, record);
-  const currentDraft = draftFromPaper(currentPaper, evidence);
+  const storedDraft = await readCurrentDraftResponse(runPath, record);
+  const currentDraft = draftFromPaper(currentPaper, evidence, storedDraft);
   record.state = "authoring";
   record.updated_at = now(dependencies).toISOString();
   delete record.error;
@@ -673,7 +689,7 @@ async function recordAuthorAnswers(
   record: AgentRunRecord,
   evidence: EvidenceItem[],
   rawAnswers: string,
-  feedback: AgentFeedbackMode,
+  feedback: Exclude<AgentFeedbackMode, "none">,
   dependencies: AgentRunnerDependencies,
 ): Promise<EvidenceItem[]> {
   const answers = normalizeAuthorAnswers(rawAnswers);
@@ -1022,6 +1038,13 @@ async function finalizePaper(
 ): Promise<void> {
   const questionHistory = await readQuestionsIfPresent(runPath, record);
   await writeTextArtifact(runPath, "paper.md", assessment.paper);
+  const assumptions = {
+    schema_version: "1",
+    mode: record.input.mode,
+    generated_without_author: record.input.mode === "auto",
+    assumptions: assessment.draft.assumptions,
+  } as const;
+  await writeJsonArtifact(runPath, "assumptions.json", assumptions);
   await writeQuestionsArtifacts(
     runPath,
     questionHistory,
@@ -1032,8 +1055,14 @@ async function finalizePaper(
   record.workflow.pending_question_ids = [];
   record.artifacts.paper = "paper.md";
   record.artifacts.questions = "questions.jsonl";
+  record.artifacts.assumptions = "assumptions.json";
   record.paper_sha256 = sha256(assessment.paper);
   record.updated_at = now(dependencies).toISOString();
+  await appendRolloutEvent(runPath, record, record.updated_at, {
+    kind: "assumptions_recorded",
+    assumption_count: assessment.draft.assumptions.length,
+    artifact_sha256: sha256(`${JSON.stringify(assumptions, null, 2)}\n`),
+  });
   await persistRunRecord(runPath, record);
 }
 
@@ -1271,6 +1300,7 @@ function sameDraftResponse(left: DraftResponse, right: DraftResponse): boolean {
     left.markdown === right.markdown &&
     arraysEqual(left.topics, right.topics) &&
     arraysEqual(left.evidence_ids, right.evidence_ids) &&
+    JSON.stringify(left.assumptions) === JSON.stringify(right.assumptions) &&
     arraysEqual(left.unresolved_questions, right.unresolved_questions)
   );
 }

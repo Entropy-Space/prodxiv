@@ -131,7 +131,7 @@ pursue their solution, Related Work around other approaches to the same
 problem, and Core Features around the mapping from mechanisms to constraints.
 The author session may emit a bounded `ask_questions` protocol event, but that
 event is not a public deterministic tool. Private artifacts include `draft.md`,
-`drafts/`, `evidence.jsonl`, `questions.md`, session checkpoints,
+`drafts/`, `evidence.jsonl`, `questions.md`, `assumptions.json`, session checkpoints,
 `validation.json`, and—when the interview is complete—`paper.md`. The workflow
 always stops at author review. Do not use `publish` unless the author separately
 and explicitly approves the exact reviewed paper. Every Paperbot-started Pi
@@ -143,6 +143,13 @@ Material author-answerable gaps in motivation, current behavior, tradeoffs,
 history, benchmark interpretation, or lessons should become questions rather
 than being hidden in Limitations. An unchanged self-review preserves the
 existing draft checkpoint instead of creating a duplicate revision.
+
+Use `--mode auto` when no author will be available during the run. Auto mode
+has no feedback transport, never stops at `awaiting_author`, and seals one
+terminal `*_final.zip`. It may form bounded working assumptions, but must
+record them in `assumptions.json`, state them conditionally in the paper, and
+never treat them as evidence or author input. `needs_author_review` remains a
+required later human review boundary, not permission to publish.
 
 Use `PAPERBOT_CMD agent resume <run-directory> --answers <answers.md>
 --allow-remote-model` only when the run is in `awaiting_author`. It copies the
@@ -158,6 +165,7 @@ the batch command:
 PAPERBOT_CMD agent batch ./projects.json \
   --output ./paperbot-runs/trending \
   --allow-remote-model \
+  --mode auto \
   --concurrency 2
 ```
 

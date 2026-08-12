@@ -41,12 +41,13 @@ const agentResult: AgentRunResult = {
 const batchResult: AgentBatchResult = {
   output_path: "/tmp/paperbot-batch",
   report: {
-    schema_version: "1",
+    schema_version: "2",
     started_at: "2026-08-01T00:00:00.000Z",
     updated_at: "2026-08-01T00:00:00.000Z",
     input: {
       input_path: "/tmp/projects.json",
       allow_remote_model: true,
+      mode: "auto",
       concurrency: 2,
       authors: ["Research Team"],
       status: "public_beta",
@@ -216,7 +217,7 @@ test("parses synchronous interactive feedback explicitly", () => {
   );
 });
 
-test("rejects unsupported run and feedback modes", () => {
+test("parses auto mode without a feedback transport", () => {
   expect(() =>
     parseArguments([
       "agent",
@@ -228,7 +229,34 @@ test("rejects unsupported run and feedback modes", () => {
       "--mode",
       "auto",
     ]),
-  ).toThrow("agent run --mode must be interactive");
+  ).not.toThrow();
+  expect(
+    parseArguments([
+      "agent",
+      "run",
+      ".",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--mode",
+      "auto",
+    ]),
+  ).toMatchObject({ mode: "auto", feedback: "none" });
+});
+
+test("rejects unsupported mode and feedback combinations", () => {
+  expect(() =>
+    parseArguments([
+      "agent",
+      "run",
+      ".",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--mode",
+      "scheduled",
+    ]),
+  ).toThrow("agent --mode must be interactive or auto");
   expect(() =>
     parseArguments([
       "agent",
@@ -241,6 +269,20 @@ test("rejects unsupported run and feedback modes", () => {
       "later",
     ]),
   ).toThrow("agent run --feedback must be sync or async");
+  expect(() =>
+    parseArguments([
+      "agent",
+      "run",
+      ".",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--mode",
+      "auto",
+      "--feedback",
+      "async",
+    ]),
+  ).toThrow("agent run --feedback is only valid with --mode interactive");
 });
 
 test("uses a repository identifier only as an explicit draft default", () => {
@@ -316,6 +358,7 @@ test("parses a consented agent batch with manifest defaults", () => {
     input_path: "projects.json",
     output_path: "runs",
     allow_remote_model: true,
+    mode: "auto",
     authors: ["Research Team"],
     status: "public_beta",
     model: "deepseek-v4-flash",
@@ -577,6 +620,41 @@ test("collects synchronous interactive answers through the CLI boundary", async 
   expect(prompts).toEqual(["Answer (finish with a blank line): "]);
   expect(answers).toContain("## question:001");
   expect(answers).toContain("The author supplied this context.");
+});
+
+test("dispatches auto mode without an author answer collector", async () => {
+  let dispatched = false;
+
+  const exitCode = await run(
+    [
+      "agent",
+      "run",
+      "https://github.com/different-ai/openwork",
+      "--output",
+      "runs/openwork",
+      "--allow-remote-model",
+      "--mode",
+      "auto",
+    ],
+    {
+      stdout: () => {},
+      stderr: () => {},
+      read_answer: async () => {
+        throw new Error("auto mode must not read author input");
+      },
+    },
+    {
+      run_agent: async (input) => {
+        dispatched = true;
+        expect(input).toMatchObject({ mode: "auto", feedback: "none" });
+        expect(input.collect_author_answers).toBeUndefined();
+        return { ...agentResult, mode: "auto", feedback: "none" };
+      },
+    },
+  );
+
+  expect(exitCode).toBe(0);
+  expect(dispatched).toBeTrue();
 });
 
 test("rejects synchronous feedback without an interactive answer source", async () => {

@@ -7,7 +7,7 @@ import type {
   EvidenceResponse,
 } from "./types.ts";
 
-export const PAPERBOT_PROMPT_SET_VERSION = "2";
+export const PAPERBOT_PROMPT_SET_VERSION = "3";
 
 export const PAPERBOT_SYSTEM_PROMPT = `You are Paperbot's evidence-led product-paper assistant.
 
@@ -83,14 +83,19 @@ export function createSelfReviewPrompt(
   input: AuthorPromptInput & {
     draft: DraftResponse;
     remaining_question_rounds: number;
+    mode: "interactive" | "auto";
   },
 ): string {
   return [
     "Review the candidate you just drafted against the validated evidence. This is a revision pass in the same authoring conversation, not an independent review.",
-    authoringEventShape(input.remaining_question_rounds),
-    input.remaining_question_rounds > 0
-      ? "Evaluate every candidate author question and visible unknown before submitting. You must choose ask_questions when an author-answerable gap materially affects the product thesis, motivation, current behavior, tradeoffs, history, benchmark interpretation, or lessons. Do not hide such a gap in Limitations merely to finish. Ask one to five focused questions; otherwise submit the full revised draft."
-      : "No author-question rounds remain. Submit the full revised draft and keep unresolved uncertainty visible.",
+    authoringEventShape(
+      input.mode === "auto" ? 0 : input.remaining_question_rounds,
+    ),
+    input.mode === "auto"
+      ? "No human is available in auto mode. You must submit the full revised draft and must not ask questions. Keep unsupported intent out of factual prose. Record every material working assumption in `assumptions`, state it visibly and conditionally in the paper, and preserve unanswered issues in `unresolved_questions`. An assumption is not evidence, author input, or permission to fabricate."
+      : input.remaining_question_rounds > 0
+        ? "Evaluate every candidate author question and visible unknown before submitting. You must choose ask_questions when an author-answerable gap materially affects the product thesis, motivation, current behavior, tradeoffs, history, benchmark interpretation, or lessons. Do not hide such a gap in Limitations merely to finish. Ask one to five focused questions; otherwise submit the full revised draft."
+        : "No author-question rounds remain. Submit the full revised draft and keep unresolved uncertainty visible.",
     "Review for explanatory value as well as factual validity: remove trivia, strengthen the problem-and-solution thesis, ensure Core Features maps mechanisms to problem constraints or user-visible behavior, and keep Related Work limited to actual supported approaches to the same problem. Make concrete evidence-supported improvements.",
     "Review the narrative voice. The paper speaks on behalf of the credited product authors using we, our, and us; revise external-observer references to the authors such as they, the team, or the project. Do not mechanically replace pronouns that refer to users, related works, or other systems. If first-person prose claims why we chose something, what we intended, what we tried, or what we learned without explicit evidence or an author answer, ask a focused author question or keep the uncertainty visible instead of inventing intent.",
     "If no change is warranted and no material author question remains, resubmit the candidate byte-for-byte unchanged as explicit approval; the host will preserve one draft checkpoint.",
@@ -255,7 +260,7 @@ function sourceLines(content: string): string[] {
 }
 
 function draftResponseShape(): string {
-  return '```json\n{\n  "action": "submit_draft",\n  "summary": "one factual sentence",\n  "topics": ["snake_case"],\n  "markdown": "# Summary\\n...",\n  "evidence_ids": ["evidence:001"],\n  "unresolved_questions": ["uncertainty still visible in the draft"]\n}\n```';
+  return '```json\n{\n  "action": "submit_draft",\n  "summary": "one factual sentence",\n  "topics": ["snake_case"],\n  "markdown": "# Summary\\n...",\n  "evidence_ids": ["evidence:001"],\n  "assumptions": [{"assumption":"conditional working assumption visible in the paper","reason":"why evidence cannot establish it","evidence_ids":["relevant evidence ID"]}],\n  "unresolved_questions": ["uncertainty still visible in the draft"]\n}\n```';
 }
 
 function authoringEventShape(remainingQuestionRounds: number): string {
@@ -278,7 +283,7 @@ function draftRules(input: PromptInput): string {
     "Write the paper on behalf of the credited product authors. After identifying the product, use first-person plural voice for the authors' work and decisions: we, our, and us. Do not narrate the authors from outside as they, the team, or the project. Product-name references remain appropriate where needed for clarity. Never convert an observed implementation fact into an unsupported claim about why we chose it, what we intended, what we tried, or what we learned; those claims require explicit source evidence or an author answer.",
     "Make the product problem the organizing idea. Summary states the problem, who experiences it, and the solution thesis. Background explains the problem domain, affected users, constraints, and why the problem is difficult; it is not a product-feature overview. Motivation explains how and why we pursue this solution and which objectives shape the design; missing intention becomes an author question or visible uncertainty. Related Work explains how other identifiable work approaches the same problem, using only supplied evidence, or states briefly that researched comparison evidence is unavailable. Core Features maps important mechanisms, guarantees, data flow, and user-visible behavior back to problem constraints instead of listing constants, literals, or files.",
     "Paper attribution is controlled by the host. Do not derive authors from commits or repository contributors. Topics must be one to five unique lowercase snake_case labels.",
-    "Every factual draft claim must remain within the supplied evidence. `evidence_ids` lists only the evidence items actually used by the draft; do not include the whole ledger by default. Inference evidence must remain explicitly qualified. Unknown intent must not become polished fact.",
+    "Every factual draft claim must remain within the supplied evidence. `evidence_ids` lists only the evidence items actually used by the draft; do not include the whole ledger by default. Inference evidence must remain explicitly qualified. Unknown intent must not become polished fact. `assumptions` must contain every material working assumption that appears in the paper, with why it is uncertain and the evidence IDs that bound it; use an empty array when the paper makes none. Assumptions must remain visibly conditional and must never be presented as author statements or evidence.",
     "Paper metadata controlled by the host:",
     `- title: ${JSON.stringify(input.metadata.title)}`,
     `- product_name: ${JSON.stringify(input.metadata.product_name)}`,

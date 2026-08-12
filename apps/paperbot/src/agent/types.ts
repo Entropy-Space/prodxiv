@@ -1,6 +1,6 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 
-export const AGENT_RUN_SCHEMA_VERSION = "4";
+export const AGENT_RUN_SCHEMA_VERSION = "5";
 
 export type EvidenceKind = "repository" | "external" | "author" | "inference";
 export type EvidenceStatus =
@@ -17,8 +17,8 @@ export type AgentRunState =
 export type AuthorPhase = "drafting" | "reviewing";
 export type AgentSessionRole = "evidence" | "author";
 export type PiSessionRole = AgentSessionRole | "trend_selection";
-export type AgentRunMode = "interactive";
-export type AgentFeedbackMode = "sync" | "async";
+export type AgentRunMode = "interactive" | "auto";
+export type AgentFeedbackMode = "sync" | "async" | "none";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -34,7 +34,7 @@ export interface AgentProducerProvenance {
   build_id: string;
   bun_version: string;
   dependency_lock_sha256: string;
-  run_schema_version: typeof AGENT_RUN_SCHEMA_VERSION;
+  run_schema_version: "4" | typeof AGENT_RUN_SCHEMA_VERSION;
   prompt_set_version: string;
   prompt_set_sha256: string;
   built_at?: string;
@@ -193,7 +193,14 @@ export interface DraftResponse {
   topics: string[];
   markdown: string;
   evidence_ids: string[];
+  assumptions: DraftAssumption[];
   unresolved_questions: string[];
+}
+
+export interface DraftAssumption {
+  assumption: string;
+  reason: string;
+  evidence_ids: string[];
 }
 
 export type AuthoringResponse = AskQuestionsResponse | DraftResponse;
@@ -311,6 +318,7 @@ export interface AgentRunRecord {
     paper?: string;
     questions?: string;
     answers?: string[];
+    assumptions?: string;
     validation?: string;
     rollout: string;
   };

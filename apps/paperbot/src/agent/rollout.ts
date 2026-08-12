@@ -24,6 +24,11 @@ type RolloutEvent =
       answer_byte_count: number;
     }
   | {
+      kind: "assumptions_recorded";
+      assumption_count: number;
+      artifact_sha256: string;
+    }
+  | {
       kind: "model_turn_started";
       role: AgentSessionRole;
       turn_number: number;

@@ -26,7 +26,7 @@ export interface DraftAssessment {
 
 export function renderPaper(
   metadata: AgentPaperMetadata,
-  draft: Pick<DraftResponse, "summary" | "topics" | "markdown">,
+  draft: Pick<DraftResponse, "summary" | "topics" | "markdown" | "assumptions">,
 ): string {
   const frontMatter = [
     'schema_version: "2"',
@@ -86,7 +86,8 @@ export function renderPaper(
     "> **Private research draft.** This paper was generated from bounded repository, release, and author evidence and has not been reviewed or endorsed by the repository owner.",
     "> Repository-owner attribution and inferred product status must be confirmed together with factual claims, related-work comparisons, and publication rights before submission.",
   ].join("\n");
-  return `---\n${frontMatter}\n---\n\n${notice}\n\n${draft.markdown.trim()}\n`;
+  const assumptions = renderAssumptions(draft.assumptions);
+  return `---\n${frontMatter}\n---\n\n${notice}${assumptions}\n\n${draft.markdown.trim()}\n`;
 }
 
 export function assessDraft(
@@ -105,6 +106,7 @@ export function assessDraft(
   } catch (error) {
     diagnostics.push(error instanceof Error ? error.message : String(error));
   }
+  diagnostics.push(...assumptionDiagnostics(draft, evidenceIds(evidence)));
   diagnostics.push(
     ...draftLinkDiagnostics(
       draft.markdown,
@@ -141,6 +143,7 @@ export function emptyDraftResponse(evidence: EvidenceItem[]): DraftResponse {
     topics: ["research_draft"],
     markdown: "# Summary\n\nA corrected draft is required.",
     evidence_ids: evidence.map((item) => item.evidence_id),
+    assumptions: [],
     unresolved_questions: [],
   };
 }
@@ -148,6 +151,7 @@ export function emptyDraftResponse(evidence: EvidenceItem[]): DraftResponse {
 export function draftFromPaper(
   paper: string,
   evidence: EvidenceItem[],
+  storedDraft?: Pick<DraftResponse, "assumptions" | "unresolved_questions">,
 ): DraftResponse {
   const frontMatterEnd = paper.indexOf("\n---\n");
   if (!paper.startsWith("---\n") || frontMatterEnd === -1) {
@@ -158,20 +162,70 @@ export function draftFromPaper(
     readJsonFrontMatterString(frontMatter, "summary") ??
     "Existing private research draft.";
   const topics = readFrontMatterTopics(frontMatter);
-  const markdown = paper
-    .slice(frontMatterEnd + "\n---\n".length)
-    .replace(
-      /^\s*> \*\*Private research draft\.\*\*[\s\S]*?publication rights before submitting it\.\n\n/,
-      "",
+  const body = paper.slice(frontMatterEnd + "\n---\n".length);
+  const summaryStart = body.search(/^# Summary\s*$/m);
+  if (summaryStart === -1) {
+    throw new PaperbotError(
+      "agent draft is missing its Summary section",
+      ExitCode.io,
     );
+  }
+  const markdown = body.slice(summaryStart);
   return {
     action: "submit_draft",
     summary,
     topics: topics.length === 0 ? ["research_draft"] : topics,
     markdown,
     evidence_ids: evidence.map((item) => item.evidence_id),
-    unresolved_questions: [],
+    assumptions: storedDraft?.assumptions ?? [],
+    unresolved_questions: storedDraft?.unresolved_questions ?? [],
   };
+}
+
+function assumptionDiagnostics(
+  draft: DraftResponse,
+  allowedEvidenceIds: ReadonlySet<string>,
+): string[] {
+  const diagnostics: string[] = [];
+  for (const [index, assumption] of draft.assumptions.entries()) {
+    const invalidEvidenceId = assumption.evidence_ids.find(
+      (evidenceId) => !allowedEvidenceIds.has(evidenceId),
+    );
+    if (invalidEvidenceId !== undefined) {
+      diagnostics.push(
+        `assumptions[${index}] uses unavailable evidence_id: ${invalidEvidenceId}`,
+      );
+    }
+    const unsafeMarkup = draftLinkDiagnostics(
+      `${assumption.assumption}\n\n${assumption.reason}`,
+      new Set(),
+    );
+    diagnostics.push(
+      ...unsafeMarkup.map(
+        (diagnostic) => `assumptions[${index}] is unsafe: ${diagnostic}`,
+      ),
+    );
+  }
+  return diagnostics;
+}
+
+function renderAssumptions(assumptions: DraftResponse["assumptions"]): string {
+  if (assumptions.length === 0) {
+    return "";
+  }
+  return [
+    "",
+    "",
+    "> **Unverified Paperbot assumptions.** These conditional assumptions are not evidence or author statements and must be confirmed or removed before submission.",
+    ...assumptions.map(
+      (assumption, index) =>
+        `> ${index + 1}. ${inlineAssumptionText(assumption.assumption)} — ${inlineAssumptionText(assumption.reason)}`,
+    ),
+  ].join("\n");
+}
+
+function inlineAssumptionText(value: string): string {
+  return value.replaceAll(/\s+/g, " ").trim();
 }
 
 function draftFieldDiagnostics(draft: DraftResponse): string[] {

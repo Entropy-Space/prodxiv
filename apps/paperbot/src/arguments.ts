@@ -13,8 +13,8 @@ export type AgentPaperStatus =
   | "public_beta"
   | "launched"
   | "discontinued";
-export type AgentRunMode = "interactive";
-export type AgentFeedbackMode = "sync" | "async";
+export type AgentRunMode = "interactive" | "auto";
+export type AgentFeedbackMode = "sync" | "async" | "none";
 
 export interface PublishArguments {
   command: "publish";
@@ -124,6 +124,7 @@ export interface AgentBatchArguments {
   input_path: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode: AgentRunMode;
   authors?: string[];
   status?: AgentPaperStatus;
   model?: string;
@@ -244,7 +245,7 @@ function parseAgentRunArguments(
   let format: OutputFormat = "text";
   let allow_remote_model = false;
   let mode: AgentRunMode = "interactive";
-  let feedback: AgentFeedbackMode = "async";
+  let feedback: AgentFeedbackMode | undefined;
   const authors: string[] = [];
   const external_sources: string[] = [];
 
@@ -352,6 +353,11 @@ function parseAgentRunArguments(
       "agent run requires --allow-remote-model before source content is sent to a model",
     );
   }
+  if (mode === "auto" && feedback !== undefined) {
+    throw usageError(
+      "agent run --feedback is only valid with --mode interactive",
+    );
+  }
 
   const defaultProductName = defaultAgentProductName(repository);
   return {
@@ -361,7 +367,7 @@ function parseAgentRunArguments(
     output_path,
     allow_remote_model,
     mode,
-    feedback,
+    feedback: mode === "auto" ? "none" : (feedback ?? "async"),
     metadata: {
       title: title ?? `${defaultProductName} research draft`,
       product_name: product_name ?? defaultProductName,
@@ -466,6 +472,7 @@ function parseAgentBatchArguments(
   let concurrency: number | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let mode: AgentRunMode = "auto";
   const authors: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -478,6 +485,15 @@ function parseAgentBatchArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--mode") {
+      mode = parseAgentRunMode(requiredFollowingValue(args, index, "--mode"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--mode=")) {
+      mode = parseAgentRunMode(requiredInlineValue(argument, "--mode"));
       continue;
     }
     if (argument === "--format") {
@@ -567,6 +583,7 @@ function parseAgentBatchArguments(
     input_path,
     output_path,
     allow_remote_model,
+    mode,
     ...(authors.length === 0 ? {} : { authors }),
     ...(status === undefined ? {} : { status }),
     ...(model === undefined ? {} : { model }),
@@ -1169,8 +1186,8 @@ function parseAgentStatus(value: string): AgentPaperStatus {
 }
 
 function parseAgentRunMode(value: string): AgentRunMode {
-  if (value !== "interactive") {
-    throw usageError("agent run --mode must be interactive");
+  if (value !== "interactive" && value !== "auto") {
+    throw usageError("agent --mode must be interactive or auto");
   }
   return value;
 }
