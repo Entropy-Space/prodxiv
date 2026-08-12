@@ -25,7 +25,9 @@ bun run paperbot agent select-trending \
   --format json
 bun run paperbot agent run https://github.com/tigerbeetle/tigerbeetle \
   --output ./paperbot-runs/tigerbeetle \
-  --allow-remote-model
+  --allow-remote-model \
+  --mode interactive \
+  --feedback sync
 bun run paperbot auth
 bun run paperbot auth set \
   --api-url https://api.prodxiv.example \
@@ -76,7 +78,15 @@ prose, and it never writes or overwrites a paper file. Missing author and
 writer metadata, along with narrative content, remain visibly incomplete for
 the Agent Skill and author to resolve.
 
-`agent run` is the optional model-assisted workflow. It creates one isolated
+`agent run` is the optional model-assisted workflow. Its current mode is
+`interactive`, with two feedback transports. `--feedback sync` asks focused
+questions in the terminal and continues in the same invocation; it requires a
+TTY and seals one final ZIP on success. `--feedback async` is the default: it
+writes pending questions, seals an `awaiting_author` ZIP, and later continues
+with `agent resume --answers <answers.md>`. Async resumes preserve every prior
+checkpoint. The mode and feedback transport are recorded in `run.json`.
+
+The workflow creates one isolated
 Pi evidence session that selects host-numbered source lines and writes neutral
 claims. The host materializes exact repository and snapshotted release-note
 excerpts into `evidence.jsonl`, then creates one separate author session that
@@ -89,8 +99,10 @@ The author session writes on behalf of the credited product authors using
 first-person plural voice, organizes the draft around the product problem, and
 does not invent intention merely to make `we` prose sound complete. It can emit a bounded
 `ask_questions` event;
-the host checkpoints it as `awaiting_author`, and `agent resume --answers`
-reopens the same logical author session. Once the loop completes, Paperbot
+in async feedback, the host checkpoints it as `awaiting_author`, and `agent
+resume --answers` reopens the same logical author session. With sync feedback,
+the host records terminal answers directly as author evidence and continues
+the same session without an intermediate ZIP. Once the loop completes, Paperbot
 writes `paper.md` and stops at `needs_author_review`. It never publishes, and
 independent final evidence review is not part of this version. Both sessions
 are retained as Pi-native JSONL under the private run directory; `run.json`

@@ -46,7 +46,12 @@ export interface StoredEvidenceAnalysis {
 }
 
 export function createRunRecord(
-  options: { repository: string; metadata: AgentPaperRequestMetadata },
+  options: {
+    repository: string;
+    metadata: AgentPaperRequestMetadata;
+    mode?: "interactive";
+    feedback?: "sync" | "async";
+  },
   model: string,
   externalSources: string[],
   timestamp: string,
@@ -65,6 +70,8 @@ export function createRunRecord(
     input: {
       repository: options.repository,
       allow_remote_model: true,
+      mode: options.mode ?? "interactive",
+      feedback: options.feedback ?? "async",
       external_sources: externalSources,
       metadata: options.metadata,
     },
@@ -141,6 +148,14 @@ export async function readRunRecord(runPath: string): Promise<AgentRunRecord> {
     ) as unknown;
   } catch {
     throw invalidRunRecord(runPath);
+  }
+  if (isRecord(value) && isRecord(value.input)) {
+    if (value.input.mode === undefined) {
+      value.input.mode = "interactive";
+    }
+    if (value.input.feedback === undefined) {
+      value.input.feedback = "async";
+    }
   }
   if (!isRunRecord(value)) {
     throw invalidRunRecord(runPath);
@@ -521,6 +536,8 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     Array.isArray(value.producer_history) &&
     value.producer_history.every(isProducerProvenance) &&
     isRecord(value.input) &&
+    value.input.mode === "interactive" &&
+    (value.input.feedback === "sync" || value.input.feedback === "async") &&
     isRecord(value.agent) &&
     isRecord(value.artifacts) &&
     value.artifacts.rollout === "events.jsonl" &&

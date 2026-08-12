@@ -212,8 +212,30 @@ public GitHub repository URL:
 bun run paperbot agent run https://github.com/different-ai/openwork \
   --output ./paperbot-runs/openwork \
   --allow-remote-model \
+  --mode interactive \
+  --feedback sync \
   --model deepseek-v4-flash
 ```
+
+Paperbot currently exposes `interactive` drafting mode. It supports two
+feedback transports:
+
+- `--feedback sync` requires an interactive terminal. When the author session
+  asks questions, Paperbot shows each question and its reason, records the
+  answers as private author evidence, and continues in the same invocation.
+  A successful invocation ends at `needs_author_review` and seals exactly one
+  final ZIP. Up to three question rounds may occur before that checkpoint.
+- `--feedback async` is the default and works without an interactive terminal.
+  Paperbot writes `questions.md`, ends at `awaiting_author`, and seals a ZIP.
+  The author later supplies a Markdown answer file with `agent resume
+<run-directory> --answers <answers.md> --allow-remote-model`. Each async
+  resume is a new audited invocation and preserves every earlier ZIP.
+
+The run record stores `mode: interactive` and the selected `feedback` value.
+Runs created before these fields existed are interpreted as interactive async
+runs and remain safely resumable. Auto mode is deliberately outside this
+slice; batch and scheduled evaluation retain their existing asynchronous
+behavior until the separate auto-mode contract is implemented.
 
 For a public GitHub source, Paperbot uses the repository owner as the default
 organization author, represented by a namespaced ID such as `github:owner`.
@@ -330,9 +352,11 @@ review; an independent final evidence review is intentionally deferred.
 
 During review, the author session emits one of two host-controlled protocol
 events: `submit_draft` or `ask_questions`. `ask_questions` is not a public
-deterministic CLI tool. Paperbot checkpoints the questions, moves to
-`awaiting_author`, and later reopens the same logical author session through
-`agent resume`. The workflow permits at most three question rounds, two
+deterministic CLI tool. With async feedback, Paperbot checkpoints the questions,
+moves to `awaiting_author`, and later reopens the same logical author session
+through `agent resume`. With sync feedback, it collects bounded terminal
+answers, records their digests in the rollout, and continues without sealing
+an intermediate ZIP. The workflow permits at most three question rounds, two
 host-directed draft repair attempts per stage, and twelve author-session
 turns. Every submitted draft is checked for evidence IDs, fields, links, raw
 HTML, benchmark policy, and canonical paper structure before it is accepted.

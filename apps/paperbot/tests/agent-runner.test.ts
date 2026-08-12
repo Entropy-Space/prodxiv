@@ -60,6 +60,8 @@ describe("runAgent", () => {
     expect(result).toEqual({
       run_id: "00000000-0000-4000-8000-000000000001",
       run_path: outputPath,
+      mode: "interactive",
+      feedback: "async",
       state: "needs_author_review",
       validation: { valid: true, diagnostics: 0 },
       questions: { pending: 0, round: 0 },
@@ -377,6 +379,127 @@ describe("runAgent", () => {
     expect(checkpointFiles).toHaveLength(2);
     expect(checkpointFiles[0]).toContain("awaiting_author.zip");
     expect(checkpointFiles[1]).toContain("needs_author_review.zip");
+  });
+
+  test("resumes an existing schema-v4 async run without mode fields", async () => {
+    const outputPath = join(workspacePath, "run");
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () =>
+        new FakeRuntime({
+          evidence: [evidenceResponse()],
+          author: [draftResponse(), askQuestionsResponse()],
+        }),
+    });
+    const runPath = join(outputPath, "run.json");
+    const record = JSON.parse(await readFile(runPath, "utf8")) as {
+      input: Record<string, unknown>;
+    };
+    delete record.input.mode;
+    delete record.input.feedback;
+    await writeFile(runPath, `${JSON.stringify(record, null, 2)}\n`);
+    const answersPath = join(workspacePath, "legacy-answers.md");
+    await writeFile(answersPath, "Legacy author context.\n");
+
+    const result = await resumeAgent(
+      {
+        run_path: outputPath,
+        answers_path: answersPath,
+        allow_remote_model: true,
+      },
+      {
+        create_runtime: () =>
+          new FakeRuntime({
+            author: [
+              draftResponse({ evidence_ids: ["evidence:001", "evidence:002"] }),
+            ],
+          }),
+      },
+    );
+
+    expect(result.state).toBe("needs_author_review");
+    expect(
+      JSON.parse(await readFile(runPath, "utf8")) as {
+        input: Record<string, unknown>;
+      },
+    ).toMatchObject({
+      input: { mode: "interactive", feedback: "async" },
+    });
+  });
+
+  test("completes synchronous feedback in one invocation and seals one ZIP", async () => {
+    const outputPath = join(workspacePath, "run");
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        draftResponse(),
+        askQuestionsResponse(),
+        draftResponse({
+          evidence_ids: ["evidence:001", "evidence:002"],
+        }),
+      ],
+    });
+    const collectedRounds: number[] = [];
+
+    const result = await runAgent(
+      {
+        ...runOptions(outputPath),
+        mode: "interactive",
+        feedback: "sync",
+        collect_author_answers: async (questions, round) => {
+          collectedRounds.push(round);
+          expect(questions.map((question) => question.question_id)).toEqual([
+            "question:001",
+          ]);
+          return "The product began as a deterministic scanner for local repositories.\n";
+        },
+      },
+      {
+        create_runtime: () => runtime,
+        now: () => new Date("2026-08-01T00:00:00.000Z"),
+        producer: async () => testProducer(),
+        run_id: () => RUN_ID,
+      },
+    );
+
+    expect(result).toMatchObject({
+      mode: "interactive",
+      feedback: "sync",
+      state: "needs_author_review",
+      questions: { pending: 0, round: 1 },
+      checkpoint: {
+        checkpoint_number: 1,
+        reason: "needs_author_review",
+      },
+    });
+    expect(collectedRounds).toEqual([1]);
+    expect(runtime.started_session_ids).toEqual([
+      "fake-evidence",
+      "fake-author",
+    ]);
+    expect(runtime.prompts.at(-1)?.prompt).toContain(
+      "The product began as a deterministic scanner",
+    );
+    expect(runtime.prompts.at(-1)?.prompt).toContain("author:answers:round-1");
+    expect(await readdir(join(workspacePath, "checkpoints"))).toHaveLength(1);
+    const record = JSON.parse(
+      await readFile(join(outputPath, "run.json"), "utf8"),
+    ) as {
+      input: { mode: string; feedback: string };
+      checkpoints: unknown[];
+    };
+    expect(record.input).toMatchObject({
+      mode: "interactive",
+      feedback: "sync",
+    });
+    expect(record.checkpoints).toHaveLength(1);
+    const events = (await readFile(join(outputPath, "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.map((event) => event.kind)).toContain(
+      "author_answers_recorded",
+    );
+    expect(events.map((event) => event.kind)).not.toContain("run_resumed");
   });
 
   test("repairs evidence whose selected lines are outside the source", async () => {

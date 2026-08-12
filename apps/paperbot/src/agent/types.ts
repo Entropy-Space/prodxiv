@@ -17,6 +17,8 @@ export type AgentRunState =
 export type AuthorPhase = "drafting" | "reviewing";
 export type AgentSessionRole = "evidence" | "author";
 export type PiSessionRole = AgentSessionRole | "trend_selection";
+export type AgentRunMode = "interactive";
+export type AgentFeedbackMode = "sync" | "async";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -287,6 +289,8 @@ export interface AgentRunRecord {
   input: {
     repository: string;
     allow_remote_model: true;
+    mode: AgentRunMode;
+    feedback: AgentFeedbackMode;
     external_sources: string[];
     metadata: AgentPaperRequestMetadata | AgentPaperMetadata;
   };
@@ -331,6 +335,8 @@ export interface AgentRunSourceRecord {
 export interface AgentRunResult {
   run_id: string;
   run_path: string;
+  mode: AgentRunMode;
+  feedback: AgentFeedbackMode;
   state: AgentRunState;
   validation: {
     valid: boolean;

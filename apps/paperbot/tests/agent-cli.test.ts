@@ -9,6 +9,8 @@ import { run } from "../src/cli.ts";
 const agentResult: AgentRunResult = {
   run_id: "00000000-0000-4000-8000-000000000001",
   run_path: "/tmp/paperbot-openwork",
+  mode: "interactive",
+  feedback: "async",
   state: "needs_author_review",
   validation: {
     valid: true,
@@ -151,6 +153,8 @@ test("parses explicit author and status overrides", () => {
     repository: "https://github.com/different-ai/openwork",
     output_path: "runs/openwork",
     allow_remote_model: true,
+    mode: "interactive",
+    feedback: "async",
     metadata: {
       title: "OpenWork research draft",
       product_name: "OpenWork",
@@ -185,8 +189,58 @@ test("accepts an agent run with inferred GitHub metadata", () => {
         title: "product research draft",
         product_name: "product",
       },
+      mode: "interactive",
+      feedback: "async",
     }),
   );
+});
+
+test("parses synchronous interactive feedback explicitly", () => {
+  expect(
+    parseArguments([
+      "agent",
+      "run",
+      "https://github.com/example/product",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--mode",
+      "interactive",
+      "--feedback=sync",
+    ]),
+  ).toEqual(
+    expect.objectContaining({
+      mode: "interactive",
+      feedback: "sync",
+    }),
+  );
+});
+
+test("rejects unsupported run and feedback modes", () => {
+  expect(() =>
+    parseArguments([
+      "agent",
+      "run",
+      ".",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--mode",
+      "auto",
+    ]),
+  ).toThrow("agent run --mode must be interactive");
+  expect(() =>
+    parseArguments([
+      "agent",
+      "run",
+      ".",
+      "--output",
+      "runs/product",
+      "--allow-remote-model",
+      "--feedback",
+      "later",
+    ]),
+  ).toThrow("agent run --feedback must be sync or async");
 });
 
 test("uses a repository identifier only as an explicit draft default", () => {
@@ -467,6 +521,96 @@ test("reports a validated author-question checkpoint as a successful run", async
   expect(exitCode).toBe(0);
   expect(stdout[0]).toContain("waiting for author answers");
   expect(stdout[0]).toContain("Author questions: 3 pending (round 1)");
+});
+
+test("collects synchronous interactive answers through the CLI boundary", async () => {
+  const prompts: string[] = [];
+  let collector:
+    | NonNullable<
+        import("../src/agent/runner.ts").AgentRunOptions["collect_author_answers"]
+      >
+    | undefined;
+
+  const exitCode = await run(
+    [
+      "agent",
+      "run",
+      "https://github.com/different-ai/openwork",
+      "--output",
+      "runs/openwork",
+      "--allow-remote-model",
+      "--feedback",
+      "sync",
+    ],
+    {
+      stdout: () => {},
+      stderr: () => {},
+      read_answer: async (prompt) => {
+        prompts.push(prompt);
+        return "The author supplied this context.";
+      },
+    },
+    {
+      run_agent: async (input) => {
+        collector = input.collect_author_answers;
+        expect(input).toMatchObject({
+          mode: "interactive",
+          feedback: "sync",
+        });
+        return agentResult;
+      },
+    },
+  );
+
+  const answers = await collector?.(
+    [
+      {
+        question_id: "question:001",
+        question: "What motivated the product?",
+        reason: "The repository cannot establish intent.",
+        evidence_ids: ["evidence:001"],
+      },
+    ],
+    1,
+  );
+  expect(exitCode).toBe(0);
+  expect(prompts).toEqual(["Answer (finish with a blank line): "]);
+  expect(answers).toContain("## question:001");
+  expect(answers).toContain("The author supplied this context.");
+});
+
+test("rejects synchronous feedback without an interactive answer source", async () => {
+  const stderr: string[] = [];
+  let dispatched = false;
+
+  const exitCode = await run(
+    [
+      "agent",
+      "run",
+      "https://github.com/different-ai/openwork",
+      "--output",
+      "runs/openwork",
+      "--allow-remote-model",
+      "--feedback",
+      "sync",
+    ],
+    {
+      stdout: () => {},
+      stderr: (message) => stderr.push(message),
+    },
+    {
+      run_agent: async () => {
+        dispatched = true;
+        return agentResult;
+      },
+    },
+  );
+
+  expect(exitCode).toBe(2);
+  expect(dispatched).toBeFalse();
+  expect(stderr).toEqual([
+    "paperbot: synchronous interactive feedback requires a TTY; use --feedback async",
+  ]);
 });
 
 test("dispatches an agent resume without a network runtime in tests", async () => {

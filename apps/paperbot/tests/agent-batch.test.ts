@@ -369,6 +369,8 @@ function successfulRun(outputPath: string): AgentRunResult {
   return {
     run_id: "00000000-0000-4000-8000-000000000001",
     run_path: outputPath,
+    mode: "interactive",
+    feedback: "async",
     state: "needs_author_review",
     validation: { valid: true, diagnostics: 0 },
     questions: { pending: 0, round: 0 },

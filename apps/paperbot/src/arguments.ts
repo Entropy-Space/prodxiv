@@ -13,6 +13,8 @@ export type AgentPaperStatus =
   | "public_beta"
   | "launched"
   | "discontinued";
+export type AgentRunMode = "interactive";
+export type AgentFeedbackMode = "sync" | "async";
 
 export interface PublishArguments {
   command: "publish";
@@ -90,6 +92,8 @@ export interface AgentRunArguments {
   repository: string;
   output_path: string;
   allow_remote_model: boolean;
+  mode: AgentRunMode;
+  feedback: AgentFeedbackMode;
   metadata: {
     title: string;
     product_name: string;
@@ -239,6 +243,8 @@ function parseAgentRunArguments(
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let mode: AgentRunMode = "interactive";
+  let feedback: AgentFeedbackMode = "async";
   const authors: string[] = [];
   const external_sources: string[] = [];
 
@@ -252,6 +258,28 @@ function parseAgentRunArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--mode") {
+      mode = parseAgentRunMode(requiredFollowingValue(args, index, "--mode"));
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--mode=")) {
+      mode = parseAgentRunMode(requiredInlineValue(argument, "--mode"));
+      continue;
+    }
+    if (argument === "--feedback") {
+      feedback = parseAgentFeedbackMode(
+        requiredFollowingValue(args, index, "--feedback"),
+      );
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--feedback=")) {
+      feedback = parseAgentFeedbackMode(
+        requiredInlineValue(argument, "--feedback"),
+      );
       continue;
     }
     if (argument === "--format") {
@@ -332,6 +360,8 @@ function parseAgentRunArguments(
     repository,
     output_path,
     allow_remote_model,
+    mode,
+    feedback,
     metadata: {
       title: title ?? `${defaultProductName} research draft`,
       product_name: product_name ?? defaultProductName,
@@ -1136,6 +1166,20 @@ function parseAgentStatus(value: string): AgentPaperStatus {
     return value;
   }
   throw usageError(`unsupported product status: ${value}`);
+}
+
+function parseAgentRunMode(value: string): AgentRunMode {
+  if (value !== "interactive") {
+    throw usageError("agent run --mode must be interactive");
+  }
+  return value;
+}
+
+function parseAgentFeedbackMode(value: string): AgentFeedbackMode {
+  if (value !== "sync" && value !== "async") {
+    throw usageError("agent run --feedback must be sync or async");
+  }
+  return value;
 }
 
 function parseAgentConcurrency(value: string): number {
