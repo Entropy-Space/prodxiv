@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, PaperDocument, PaperDraft, PaperDraftRevision,
-    PaperDraftRevisionSummary, PaperDraftSummary, PaperMetadata, PublicationIdentity,
-    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, canonicalize_product_id,
-    encode_paper_id_suffix, prepare_publication, product_id_from_paper_id,
+    PaperDraftRevisionSummary, PaperDraftSummary, PaperMetadata, PaperParseError,
+    PublicationIdentity, PublicationPreparationError, PublishedPaper, PublishedPaperSummary,
+    ValidationProfile, canonicalize_product_id, encode_paper_id_suffix, prepare_publication,
+    product_id_from_paper_id, validate_paper,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::json;
@@ -731,6 +732,147 @@ impl PostgresStorage {
         Ok(true)
     }
 
+    /// Publishes the locked current revision of one draft and removes its
+    /// mutable content.
+    ///
+    /// The immutable publication, UUID provenance, idempotency record, audit
+    /// events, and draft deletion are committed atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the draft changed, its Markdown cannot be
+    /// published, the request conflicts with an idempotency record, identifier
+    /// allocation fails, or PostgreSQL rejects the transaction.
+    pub async fn publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+        idempotency_key: &str,
+        requested_product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StorageError> {
+        validate_publication_request(actor, idempotency_key)?;
+        let requested_product_id = canonical_requested_product_id(requested_product_id)?;
+        let request_sha256 = draft_publication_request_sha256(
+            paper_uuid,
+            expected_revision,
+            requested_product_id.as_deref(),
+        );
+        let expected_revision = i32::try_from(expected_revision)
+            .map_err(|_| StorageError::CorruptRevision(i32::MAX))?;
+        let mut transaction = self.pool.begin().await?;
+
+        if let Some(replayed) = replayed_publication_in_transaction(
+            &mut transaction,
+            actor,
+            idempotency_key,
+            &request_sha256,
+        )
+        .await?
+        {
+            transaction.commit().await?;
+            return Ok(Some(replayed));
+        }
+
+        let draft = sqlx::query(
+            r#"
+            SELECT
+              paper_drafts.current_revision,
+              paper_draft_revisions.source_markdown
+            FROM paper_drafts
+            JOIN paper_draft_revisions
+              ON paper_draft_revisions.paper_uuid = paper_drafts.paper_uuid
+              AND paper_draft_revisions.revision = paper_drafts.current_revision
+            WHERE paper_drafts.paper_uuid = $1::uuid
+            FOR UPDATE OF paper_drafts
+            "#,
+        )
+        .bind(paper_uuid)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(draft) = draft else {
+            transaction.rollback().await?;
+            return Ok(None);
+        };
+        let current_revision: i32 = draft.try_get("current_revision")?;
+        if current_revision != expected_revision {
+            transaction.rollback().await?;
+            return Err(StorageError::DraftRevisionConflict {
+                current_revision: decode_revision(current_revision)?,
+            });
+        }
+        let submitted_markdown: String = draft.try_get("source_markdown")?;
+        let paper = PaperDocument::from_markdown(&submitted_markdown)?;
+        let report = validate_paper(&paper, ValidationProfile::Submission);
+        if !report.valid {
+            return Err(StorageError::Publication(
+                PublicationPreparationError::Invalid(report),
+            ));
+        }
+
+        let published = persist_publication_in_transaction(
+            &mut transaction,
+            paper,
+            &submitted_markdown,
+            actor,
+            idempotency_key,
+            requested_product_id.as_deref(),
+            &request_sha256,
+        )
+        .await?;
+        let paper_revision =
+            i32::try_from(published.revision).expect("publication revision one fits in i32");
+
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_publications (
+              paper_uuid,
+              draft_revision,
+              paper_id,
+              paper_revision
+            )
+            VALUES ($1::uuid, $2, $3, $4)
+            "#,
+        )
+        .bind(paper_uuid)
+        .bind(current_revision)
+        .bind(&published.paper_id)
+        .bind(paper_revision)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_audit_log (
+              action,
+              actor,
+              paper_uuid,
+              revision,
+              details
+            )
+            VALUES ('draft.published', $1, $2::uuid, $3, $4)
+            "#,
+        )
+        .bind(actor)
+        .bind(paper_uuid)
+        .bind(current_revision)
+        .bind(Json(json!({
+          "paper_id": published.paper_id,
+          "paper_revision": published.revision,
+        })))
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM paper_drafts WHERE paper_uuid = $1::uuid")
+            .bind(paper_uuid)
+            .execute(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
+        Ok(Some(PublishOutcome {
+            paper: published,
+            replayed: false,
+        }))
+    }
+
     /// Publishes the first immutable revision of a new paper.
     ///
     /// Identifier allocation, publication preparation, persistence, and audit
@@ -750,245 +892,34 @@ impl PostgresStorage {
         idempotency_key: &str,
         requested_product_id: Option<&str>,
     ) -> Result<PublishOutcome, StorageError> {
-        if actor.trim().is_empty() {
-            return Err(StorageError::InvalidActor);
-        }
-        if !is_valid_idempotency_key(idempotency_key) {
-            return Err(StorageError::InvalidIdempotencyKey);
-        }
-        let requested_product_id = requested_product_id
-            .map(|product_id| {
-                canonicalize_product_id(product_id).ok_or(StorageError::InvalidProductId)
-            })
-            .transpose()?;
-        let creates_product = requested_product_id.is_none();
-
+        validate_publication_request(actor, idempotency_key)?;
+        let requested_product_id = canonical_requested_product_id(requested_product_id)?;
+        let request_sha256 =
+            publication_request_sha256(submitted_markdown, requested_product_id.as_deref());
         let mut transaction = self.pool.begin().await?;
-        let mut request_hasher = Sha256::new();
-        request_hasher.update(submitted_markdown.as_bytes());
-        request_hasher.update([0]);
-        request_hasher.update(
-            requested_product_id
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-        );
-        let request_sha256 = format!("{:x}", request_hasher.finalize());
-        let lock_key = format!("{}:{actor}{idempotency_key}", actor.len());
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(lock_key)
-            .execute(&mut *transaction)
-            .await?;
 
-        let existing = sqlx::query(
-            r#"
-            SELECT
-              publication_requests.request_sha256,
-              papers.product_id,
-              paper_revisions.paper_id,
-              paper_revisions.revision,
-              paper_revisions.published_at::text AS published_at,
-              paper_revisions.metadata,
-              paper_revisions.source_markdown
-            FROM publication_requests
-            JOIN paper_revisions USING (paper_id, revision)
-            JOIN papers USING (paper_id)
-            WHERE publication_requests.actor = $1
-              AND publication_requests.idempotency_key = $2
-            "#,
+        if let Some(replayed) = replayed_publication_in_transaction(
+            &mut transaction,
+            actor,
+            idempotency_key,
+            &request_sha256,
         )
-        .bind(actor)
-        .bind(idempotency_key)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(row) = existing {
-            let existing_sha256: String = row.try_get("request_sha256")?;
-            if existing_sha256 != request_sha256 {
-                return Err(StorageError::IdempotencyConflict);
-            }
-            let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
-            let revision: i32 = row.try_get("revision")?;
-            let paper = PublishedPaper {
-                schema_version: metadata.schema_version.clone(),
-                paper_id: row.try_get("paper_id")?,
-                product_id: row.try_get("product_id")?,
-                revision: u32::try_from(revision)
-                    .map_err(|_| StorageError::CorruptRevision(revision))?,
-                published_at: row.try_get("published_at")?,
-                metadata: metadata.0,
-                source_markdown: row.try_get("source_markdown")?,
-            };
+        .await?
+        {
             transaction.commit().await?;
-            return Ok(PublishOutcome {
-                paper,
-                replayed: true,
-            });
+            return Ok(replayed);
         }
 
-        let clock = sqlx::query(
-            "SELECT to_char(CURRENT_DATE, 'YYMM') AS period, CURRENT_DATE::text AS published_at",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        let period: String = clock.try_get("period")?;
-        let published_at: String = clock.try_get("published_at")?;
-
-        let sequence = sqlx::query(
-            r#"
-            INSERT INTO paper_id_sequences (period, last_value)
-            VALUES ($1, 1)
-            ON CONFLICT (period) DO UPDATE
-            SET last_value = paper_id_sequences.last_value + 1
-            WHERE paper_id_sequences.last_value < 1073741823
-            RETURNING last_value
-            "#,
-        )
-        .bind(&period)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        let Some(sequence) = sequence else {
-            return Err(StorageError::IdentifierSpaceExhausted { period });
-        };
-        let sequence: i64 = sequence.try_get("last_value")?;
-        let encoded = u32::try_from(sequence)
-            .ok()
-            .and_then(encode_paper_id_suffix)
-            .ok_or_else(|| StorageError::IdentifierSpaceExhausted {
-                period: period.clone(),
-            })?;
-        let paper_id = format!("prodxiv:{period}.{encoded}");
-        let product_id = if let Some(product_id) = requested_product_id.as_ref() {
-            let exists = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM products WHERE product_id = $1)",
-            )
-            .bind(product_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !exists {
-                return Err(StorageError::UnknownProduct(product_id.clone()));
-            }
-            product_id.clone()
-        } else {
-            product_id_from_paper_id(&paper_id).expect("allocated paper identifiers are canonical")
-        };
-
-        let published = prepare_publication(
+        let published = persist_publication_in_transaction(
+            &mut transaction,
             paper,
-            PublicationIdentity {
-                paper_id: paper_id.clone(),
-                revision: 1,
-                published_at,
-            },
-            product_id.clone(),
-        )?;
-
-        if creates_product {
-            sqlx::query("INSERT INTO products (product_id, initial_name) VALUES ($1, $2)")
-                .bind(&product_id)
-                .bind(
-                    published
-                        .metadata
-                        .product_name
-                        .as_deref()
-                        .expect("publication validation requires a product name"),
-                )
-                .execute(&mut *transaction)
-                .await?;
-        }
-
-        sqlx::query("INSERT INTO papers (paper_id, product_id) VALUES ($1, $2)")
-            .bind(&paper_id)
-            .bind(&product_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO paper_revisions (
-              paper_id,
-              revision,
-              published_at,
-              published_by,
-              metadata,
-              submitted_markdown,
-              source_markdown
-            )
-            VALUES ($1, $2, $3::date, $4, $5, $6, $7)
-            "#,
+            submitted_markdown,
+            actor,
+            idempotency_key,
+            requested_product_id.as_deref(),
+            &request_sha256,
         )
-        .bind(&published.paper_id)
-        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
-        .bind(&published.published_at)
-        .bind(actor)
-        .bind(Json(published.metadata.clone()))
-        .bind(submitted_markdown)
-        .bind(&published.source_markdown)
-        .execute(&mut *transaction)
         .await?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO audit_log (action, actor, paper_id, revision, details)
-            VALUES ('paper.published', $1, $2, $3, $4)
-            "#,
-        )
-        .bind(actor)
-        .bind(&published.paper_id)
-        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
-        .bind(Json(json!({
-          "schema_version": published.schema_version,
-        })))
-        .execute(&mut *transaction)
-        .await?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO publication_requests (
-              actor,
-              idempotency_key,
-              request_sha256,
-              paper_id,
-              revision
-            )
-            VALUES ($1, $2, $3, $4, $5)
-            "#,
-        )
-        .bind(actor)
-        .bind(idempotency_key)
-        .bind(request_sha256)
-        .bind(&published.paper_id)
-        .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
-        .execute(&mut *transaction)
-        .await?;
-
-        for (kind, url) in [
-            ("homepage", published.metadata.product_url.as_deref()),
-            ("repository", published.metadata.repository_url.as_deref()),
-        ] {
-            if let Some(url) = url {
-                sqlx::query(
-                    r#"
-                    INSERT INTO product_resources (
-                      product_id,
-                      kind,
-                      canonical_url,
-                      discovered_from_paper_id,
-                      discovered_from_revision
-                    )
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (product_id, kind, canonical_url) DO NOTHING
-                    "#,
-                )
-                .bind(&product_id)
-                .bind(kind)
-                .bind(url)
-                .bind(&published.paper_id)
-                .bind(i32::try_from(published.revision).expect("revision one fits in i32"))
-                .execute(&mut *transaction)
-                .await?;
-            }
-        }
-
         transaction.commit().await?;
         Ok(PublishOutcome {
             paper: published,
@@ -1672,6 +1603,287 @@ fn decode_github_trending_snapshot(
     })
 }
 
+fn validate_publication_request(actor: &str, idempotency_key: &str) -> Result<(), StorageError> {
+    if actor.trim().is_empty() {
+        return Err(StorageError::InvalidActor);
+    }
+    if !is_valid_idempotency_key(idempotency_key) {
+        return Err(StorageError::InvalidIdempotencyKey);
+    }
+    Ok(())
+}
+
+fn canonical_requested_product_id(
+    requested_product_id: Option<&str>,
+) -> Result<Option<String>, StorageError> {
+    requested_product_id
+        .map(|product_id| canonicalize_product_id(product_id).ok_or(StorageError::InvalidProductId))
+        .transpose()
+}
+
+fn publication_request_sha256(
+    submitted_markdown: &str,
+    requested_product_id: Option<&str>,
+) -> String {
+    let mut request_hasher = Sha256::new();
+    request_hasher.update(submitted_markdown.as_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(requested_product_id.unwrap_or_default().as_bytes());
+    format!("{:x}", request_hasher.finalize())
+}
+
+fn draft_publication_request_sha256(
+    paper_uuid: &str,
+    expected_revision: u32,
+    requested_product_id: Option<&str>,
+) -> String {
+    let mut request_hasher = Sha256::new();
+    request_hasher.update(b"draft.publish");
+    request_hasher.update([0]);
+    request_hasher.update(paper_uuid.as_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(expected_revision.to_be_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(requested_product_id.unwrap_or_default().as_bytes());
+    format!("{:x}", request_hasher.finalize())
+}
+
+async fn replayed_publication_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor: &str,
+    idempotency_key: &str,
+    request_sha256: &str,
+) -> Result<Option<PublishOutcome>, StorageError> {
+    let lock_key = format!("{}:{actor}{idempotency_key}", actor.len());
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(lock_key)
+        .execute(&mut **transaction)
+        .await?;
+
+    let existing = sqlx::query(
+        r#"
+        SELECT
+          publication_requests.request_sha256,
+          papers.product_id,
+          paper_revisions.paper_id,
+          paper_revisions.revision,
+          paper_revisions.published_at::text AS published_at,
+          paper_revisions.metadata,
+          paper_revisions.source_markdown
+        FROM publication_requests
+        JOIN paper_revisions USING (paper_id, revision)
+        JOIN papers USING (paper_id)
+        WHERE publication_requests.actor = $1
+          AND publication_requests.idempotency_key = $2
+        "#,
+    )
+    .bind(actor)
+    .bind(idempotency_key)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(existing) = existing else {
+        return Ok(None);
+    };
+    let existing_sha256: String = existing.try_get("request_sha256")?;
+    if existing_sha256 != request_sha256 {
+        return Err(StorageError::IdempotencyConflict);
+    }
+    Ok(Some(PublishOutcome {
+        paper: decode_published_paper(&existing)?,
+        replayed: true,
+    }))
+}
+
+async fn persist_publication_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    paper: PaperDocument,
+    submitted_markdown: &str,
+    actor: &str,
+    idempotency_key: &str,
+    requested_product_id: Option<&str>,
+    request_sha256: &str,
+) -> Result<PublishedPaper, StorageError> {
+    let creates_product = requested_product_id.is_none();
+    let clock = sqlx::query(
+        "SELECT to_char(CURRENT_DATE, 'YYMM') AS period, CURRENT_DATE::text AS published_at",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    let period: String = clock.try_get("period")?;
+    let published_at: String = clock.try_get("published_at")?;
+
+    let sequence = sqlx::query(
+        r#"
+        INSERT INTO paper_id_sequences (period, last_value)
+        VALUES ($1, 1)
+        ON CONFLICT (period) DO UPDATE
+        SET last_value = paper_id_sequences.last_value + 1
+        WHERE paper_id_sequences.last_value < 1073741823
+        RETURNING last_value
+        "#,
+    )
+    .bind(&period)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(sequence) = sequence else {
+        return Err(StorageError::IdentifierSpaceExhausted { period });
+    };
+    let sequence: i64 = sequence.try_get("last_value")?;
+    let encoded = u32::try_from(sequence)
+        .ok()
+        .and_then(encode_paper_id_suffix)
+        .ok_or_else(|| StorageError::IdentifierSpaceExhausted {
+            period: period.clone(),
+        })?;
+    let paper_id = format!("prodxiv:{period}.{encoded}");
+    let product_id = if let Some(product_id) = requested_product_id {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM products WHERE product_id = $1)",
+        )
+        .bind(product_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if !exists {
+            return Err(StorageError::UnknownProduct(product_id.to_owned()));
+        }
+        product_id.to_owned()
+    } else {
+        product_id_from_paper_id(&paper_id).expect("allocated paper identifiers are canonical")
+    };
+
+    let published = prepare_publication(
+        paper,
+        PublicationIdentity {
+            paper_id: paper_id.clone(),
+            revision: 1,
+            published_at,
+        },
+        product_id.clone(),
+    )?;
+
+    if creates_product {
+        sqlx::query("INSERT INTO products (product_id, initial_name) VALUES ($1, $2)")
+            .bind(&product_id)
+            .bind(
+                published
+                    .metadata
+                    .product_name
+                    .as_deref()
+                    .expect("publication validation requires a product name"),
+            )
+            .execute(&mut **transaction)
+            .await?;
+    }
+
+    sqlx::query("INSERT INTO papers (paper_id, product_id) VALUES ($1, $2)")
+        .bind(&paper_id)
+        .bind(&product_id)
+        .execute(&mut **transaction)
+        .await?;
+    let published_revision =
+        i32::try_from(published.revision).expect("publication revision one fits in i32");
+    sqlx::query(
+        r#"
+        INSERT INTO paper_revisions (
+          paper_id,
+          revision,
+          published_at,
+          published_by,
+          metadata,
+          submitted_markdown,
+          source_markdown
+        )
+        VALUES ($1, $2, $3::date, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(&published.paper_id)
+    .bind(published_revision)
+    .bind(&published.published_at)
+    .bind(actor)
+    .bind(Json(published.metadata.clone()))
+    .bind(submitted_markdown)
+    .bind(&published.source_markdown)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO audit_log (action, actor, paper_id, revision, details)
+        VALUES ('paper.published', $1, $2, $3, $4)
+        "#,
+    )
+    .bind(actor)
+    .bind(&published.paper_id)
+    .bind(published_revision)
+    .bind(Json(json!({
+      "schema_version": published.schema_version,
+    })))
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO publication_requests (
+          actor,
+          idempotency_key,
+          request_sha256,
+          paper_id,
+          revision
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(actor)
+    .bind(idempotency_key)
+    .bind(request_sha256)
+    .bind(&published.paper_id)
+    .bind(published_revision)
+    .execute(&mut **transaction)
+    .await?;
+
+    for (kind, url) in [
+        ("homepage", published.metadata.product_url.as_deref()),
+        ("repository", published.metadata.repository_url.as_deref()),
+    ] {
+        if let Some(url) = url {
+            sqlx::query(
+                r#"
+                INSERT INTO product_resources (
+                  product_id,
+                  kind,
+                  canonical_url,
+                  discovered_from_paper_id,
+                  discovered_from_revision
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (product_id, kind, canonical_url) DO NOTHING
+                "#,
+            )
+            .bind(&product_id)
+            .bind(kind)
+            .bind(url)
+            .bind(&published.paper_id)
+            .bind(published_revision)
+            .execute(&mut **transaction)
+            .await?;
+        }
+    }
+
+    Ok(published)
+}
+
+fn decode_published_paper(row: &PgRow) -> Result<PublishedPaper, StorageError> {
+    let metadata: Json<PaperMetadata> = row.try_get("metadata")?;
+    let revision: i32 = row.try_get("revision")?;
+    Ok(PublishedPaper {
+        schema_version: metadata.schema_version.clone(),
+        paper_id: row.try_get("paper_id")?,
+        product_id: row.try_get("product_id")?,
+        revision: decode_revision(revision)?,
+        published_at: row.try_get("published_at")?,
+        metadata: metadata.0,
+        source_markdown: row.try_get("source_markdown")?,
+    })
+}
+
 async fn select_draft_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     paper_uuid: &str,
@@ -1761,6 +1973,8 @@ pub enum StorageError {
     InvalidActor,
     #[error("draft source Markdown must not be empty")]
     InvalidDraftSource,
+    #[error("draft paper Markdown is invalid: {0}")]
+    InvalidDraftMarkdown(#[from] PaperParseError),
     #[error("draft changed; current revision is {current_revision}")]
     DraftRevisionConflict { current_revision: u32 },
     #[error("idempotency key is invalid")]

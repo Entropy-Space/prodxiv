@@ -14,7 +14,7 @@ use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, PaperDocument, PaperDraft, PaperDraftRevision,
     PaperDraftRevisionSummary, PaperDraftSummary, PaperStatus, ProductStatus, PublicationIdentity,
-    PublishedPaper, PublishedPaperSummary, prepare_publication,
+    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
     DraftUpdateOutcome, GitHubTrendingEntry, GitHubTrendingLanguageScope,
@@ -199,6 +199,87 @@ impl PublicationStore for FakeStore {
         }
         drafts.remove(paper_uuid);
         Ok(true)
+    }
+
+    async fn publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        _actor: &str,
+        idempotency_key: &str,
+        product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StoreError> {
+        let semantic_request = format!(
+            "draft:{paper_uuid}:{expected_revision}:{}",
+            product_id.unwrap_or_default()
+        );
+        if let Some((existing_request, published)) = self
+            .requests
+            .lock()
+            .expect("fake requests should lock")
+            .get(idempotency_key)
+        {
+            if existing_request != &semantic_request {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            return Ok(Some(PublishOutcome {
+                paper: published.clone(),
+                replayed: true,
+            }));
+        }
+
+        let source_markdown = {
+            let drafts = self.drafts.lock().expect("fake drafts should lock");
+            let Some(current) = drafts
+                .get(paper_uuid)
+                .and_then(|revisions| revisions.last())
+            else {
+                return Ok(None);
+            };
+            if current.revision != expected_revision {
+                return Err(StoreError::DraftRevisionConflict {
+                    current_revision: current.revision,
+                });
+            }
+            current.source_markdown.clone()
+        };
+        let paper = PaperDocument::from_markdown(&source_markdown)
+            .map_err(|error| StoreError::InvalidDraftMarkdown(error.to_string()))?;
+        let published = prepare_publication(
+            paper,
+            PublicationIdentity {
+                paper_id: "prodxiv:2607.000001".to_owned(),
+                revision: 1,
+                published_at: "2026-07-27".to_owned(),
+            },
+            product_id
+                .unwrap_or("prodxiv-product:2607.000001")
+                .to_owned(),
+        )
+        .map_err(|error| match error {
+            PublicationPreparationError::Invalid(report) => StoreError::InvalidPublication(report),
+            PublicationPreparationError::Serialize(_) => StoreError::Internal,
+        })?;
+
+        self.drafts
+            .lock()
+            .expect("fake drafts should lock")
+            .remove(paper_uuid);
+        self.publications
+            .lock()
+            .expect("fake store should lock")
+            .push(published.clone());
+        self.requests
+            .lock()
+            .expect("fake requests should lock")
+            .insert(
+                idempotency_key.to_owned(),
+                (semantic_request, published.clone()),
+            );
+        Ok(Some(PublishOutcome {
+            paper: published,
+            replayed: false,
+        }))
     }
 
     async fn publish_new(
@@ -885,6 +966,163 @@ async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
         .await
         .expect("deleted draft lookup should complete");
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn publishes_an_exact_draft_revision_and_replays_after_deletion() {
+    let application = app(Arc::new(FakeStore::default()));
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft creation should complete");
+    let draft_location = created.headers()[header::LOCATION]
+        .to_str()
+        .expect("location should be text")
+        .to_owned();
+    let publish_location = format!("{draft_location}/publish");
+
+    let published = application
+        .clone()
+        .oneshot(
+            Request::post(&publish_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .header("idempotency-key", "draft-publish-http-1")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft publication should complete");
+    assert_eq!(published.status(), StatusCode::CREATED);
+    assert_eq!(
+        published.headers()[header::LOCATION],
+        "/v1/papers/prodxiv:2607.000001/revisions/1"
+    );
+    let published_body = json_body(published).await;
+    assert_eq!(published_body["paper_id"], "prodxiv:2607.000001");
+    assert_eq!(published_body["version"], 1);
+
+    let deleted_draft = application
+        .clone()
+        .oneshot(
+            Request::get(&draft_location)
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("published draft lookup should complete");
+    assert_eq!(deleted_draft.status(), StatusCode::NOT_FOUND);
+
+    let replayed = application
+        .clone()
+        .oneshot(
+            Request::post(&publish_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .header("idempotency-key", "draft-publish-http-1")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft publication replay should complete");
+    assert_eq!(replayed.status(), StatusCode::OK);
+    assert_eq!(json_body(replayed).await, published_body);
+
+    let conflicting_replay = application
+        .clone()
+        .oneshot(
+            Request::post(&publish_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"2\"")
+                .header("idempotency-key", "draft-publish-http-1")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("conflicting draft publication replay should complete");
+    assert_eq!(conflicting_replay.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json_body(conflicting_replay).await["error"]["code"],
+        "publication.idempotency_conflict"
+    );
+
+    let missing_with_new_key = application
+        .oneshot(
+            Request::post(&publish_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .header("idempotency-key", "draft-publish-http-2")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("missing draft publication should complete");
+    assert_eq!(missing_with_new_key.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn keeps_an_unpublishable_draft_available_for_revision() {
+    let application = app(Arc::new(FakeStore::default()));
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::from(
+                    json!({ "source_markdown": "# Incomplete working notes\n" }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft creation should complete");
+    let draft_location = created.headers()[header::LOCATION]
+        .to_str()
+        .expect("location should be text")
+        .to_owned();
+    let failed = application
+        .clone()
+        .oneshot(
+            Request::post(format!("{draft_location}/publish"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .header("idempotency-key", "draft-publish-invalid")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("invalid draft publication should complete");
+    assert_eq!(failed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(failed).await["error"]["code"],
+        "paper.invalid_markdown"
+    );
+
+    let retained = application
+        .oneshot(
+            Request::get(&draft_location)
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("failed draft publication lookup should complete");
+    assert_eq!(retained.status(), StatusCode::OK);
 }
 
 #[tokio::test]

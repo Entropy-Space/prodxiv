@@ -223,6 +223,15 @@ pub trait PublicationStore: Send + Sync {
         actor: &str,
     ) -> Result<bool, StoreError>;
 
+    async fn publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+        idempotency_key: &str,
+        product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StoreError>;
+
     async fn publish_new(
         &self,
         paper: PaperDocument,
@@ -326,6 +335,26 @@ impl PublicationStore for PostgresStorage {
             .map_err(StoreError::from)
     }
 
+    async fn publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+        idempotency_key: &str,
+        product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StoreError> {
+        PostgresStorage::publish_draft(
+            self,
+            paper_uuid,
+            expected_revision,
+            actor,
+            idempotency_key,
+            product_id,
+        )
+        .await
+        .map_err(StoreError::from)
+    }
+
     async fn publish_new(
         &self,
         paper: PaperDocument,
@@ -408,6 +437,8 @@ pub enum StoreError {
     InvalidProduct,
     #[error("draft source Markdown is invalid")]
     InvalidDraftSource,
+    #[error("draft paper Markdown is invalid: {0}")]
+    InvalidDraftMarkdown(String),
     #[error("draft changed; current revision is {current_revision}")]
     DraftRevisionConflict { current_revision: u32 },
     #[error("GitHub Trending snapshot is invalid: {0}")]
@@ -442,6 +473,9 @@ impl From<StorageError> for StoreError {
                 Self::InvalidProduct
             }
             StorageError::InvalidDraftSource => Self::InvalidDraftSource,
+            StorageError::InvalidDraftMarkdown(error) => {
+                Self::InvalidDraftMarkdown(error.to_string())
+            }
             StorageError::DraftRevisionConflict { current_revision } => {
                 Self::DraftRevisionConflict { current_revision }
             }
@@ -464,6 +498,13 @@ pub struct PublishPaperRequest {
 #[serde(deny_unknown_fields)]
 pub struct WriteDraftRequest {
     pub source_markdown: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PublishDraftRequest {
+    #[serde(default)]
+    pub product_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -741,6 +782,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/drafts/{paper_uuid}/revisions/{revision}",
             get(get_draft_revision),
         )
+        .route("/v1/drafts/{paper_uuid}/publish", post(publish_draft))
         .route(
             "/v1/papers/{paper_id}/revisions/{revision}",
             get(get_paper_revision),
@@ -1193,6 +1235,55 @@ async fn get_draft_revision(
     Ok(Json(revision))
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/drafts/{paper_uuid}/publish",
+    security(("bearer_token" = [])),
+    params(
+      ("paper_uuid" = String, Path, description = "Unpublished paper UUID"),
+      ("If-Match" = String, Header, description = "Quoted current draft revision, for example \"3\""),
+      ("Idempotency-Key" = String, Header, description = "Stable key for safely retrying this exact draft publication")
+    ),
+    request_body = PublishDraftRequest,
+    responses(
+      (status = 201, description = "Exact draft revision was published and mutable content was removed", body = PublishedPaper),
+      (status = 200, description = "Original publication returned for an idempotent retry", body = PublishedPaper),
+      (status = 400, description = "Request, paper UUID, If-Match, or idempotency key is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft does not exist", body = ErrorResponse),
+      (status = 409, description = "Draft changed or the idempotency key conflicts", body = ErrorResponse),
+      (status = 422, description = "Draft Markdown or requested product is not publishable", body = ErrorResponse),
+      (status = 428, description = "If-Match is required", body = ErrorResponse),
+      (status = 500, description = "Publishing failed", body = ErrorResponse),
+      (status = 503, description = "Monthly identifier space is exhausted", body = ErrorResponse)
+    )
+)]
+async fn publish_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftPath>,
+    payload: Result<Json<PublishDraftRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    let expected_revision = expected_draft_revision(&headers)?;
+    let idempotency_key = idempotency_key(&headers)?;
+    let Json(payload) = payload.map_err(invalid_json)?;
+    let outcome = state
+        .store
+        .publish_draft(
+            &paper_uuid,
+            expected_revision,
+            &state.publish_actor,
+            idempotency_key,
+            payload.product_id.as_deref(),
+        )
+        .await
+        .map_err(publish_draft_store_error)?
+        .ok_or_else(draft_not_found)?;
+    Ok(publication_response(outcome))
+}
+
 fn invalid_json(error: JsonRejection) -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
@@ -1383,6 +1474,10 @@ async fn publish_paper(
         )
         .await
         .map_err(store_error)?;
+    Ok(publication_response(outcome))
+}
+
+fn publication_response(outcome: PublishOutcome) -> Response {
     let published = outcome.paper;
     let location = format!(
         "/v1/papers/{}/revisions/{}",
@@ -1398,7 +1493,7 @@ async fn publish_paper(
         header::LOCATION,
         HeaderValue::from_str(&location).expect("paper locations contain valid header characters"),
     );
-    Ok(response)
+    response
 }
 
 fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
@@ -1566,7 +1661,9 @@ fn store_error(error: StoreError) -> ApiError {
             "product.invalid",
             "product_id must identify an existing prodxiv product",
         ),
-        StoreError::InvalidDraftSource | StoreError::DraftRevisionConflict { .. } => {
+        StoreError::InvalidDraftSource
+        | StoreError::InvalidDraftMarkdown(_)
+        | StoreError::DraftRevisionConflict { .. } => {
             tracing::error!(error = %error, "unexpected draft error during publication operation");
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1584,6 +1681,27 @@ fn store_error(error: StoreError) -> ApiError {
             "storage.internal",
             "publication storage failed",
         ),
+    }
+}
+
+fn publish_draft_store_error(error: StoreError) -> ApiError {
+    match error {
+        StoreError::InvalidDraftMarkdown(message) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "paper.invalid_markdown",
+            message,
+        ),
+        StoreError::InvalidDraftSource => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "draft.source_required",
+            "source_markdown must not be empty",
+        ),
+        StoreError::DraftRevisionConflict { current_revision } => ApiError::new(
+            StatusCode::CONFLICT,
+            "draft.revision_conflict",
+            format!("draft changed; current revision is {current_revision}"),
+        ),
+        other => store_error(other),
     }
 }
 
@@ -1659,6 +1777,7 @@ fn trending_store_error(error: StoreError) -> ApiError {
         delete_draft,
         list_draft_revisions,
         get_draft_revision,
+        publish_draft,
         list_papers,
         publish_paper,
         get_paper_revision,
@@ -1667,6 +1786,7 @@ fn trending_store_error(error: StoreError) -> ApiError {
     ),
     components(schemas(
         WriteDraftRequest,
+        PublishDraftRequest,
         PaperDraft,
         PaperDraftSummary,
         PaperDraftListResponse,

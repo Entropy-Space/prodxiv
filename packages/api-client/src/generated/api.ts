@@ -52,6 +52,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/drafts/{paper_uuid}/publish": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["publish_draft"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/drafts/{paper_uuid}/revisions": {
     parameters: {
       query?: never;
@@ -345,6 +361,9 @@ export interface components {
       evidence?: components["schemas"]["ProductStatusEvidence"][];
       observed_at?: string | null;
       value: components["schemas"]["ProductStatus"];
+    };
+    PublishDraftRequest: {
+      product_id?: string | null;
     };
     PublishPaperRequest: {
       product_id?: string | null;
@@ -741,6 +760,119 @@ export interface operations {
       };
       /** @description Deleting the draft failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  publish_draft: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Quoted current draft revision, for example "3" */
+        "If-Match": string;
+        /** @description Stable key for safely retrying this exact draft publication */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description Unpublished paper UUID */
+        paper_uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PublishDraftRequest"];
+      };
+    };
+    responses: {
+      /** @description Original publication returned for an idempotent retry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedPaper"];
+        };
+      };
+      /** @description Exact draft revision was published and mutable content was removed */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedPaper"];
+        };
+      };
+      /** @description Request, paper UUID, If-Match, or idempotency key is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bearer token is absent or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft does not exist */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft changed or the idempotency key conflicts */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft Markdown or requested product is not publishable */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description If-Match is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Publishing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Monthly identifier space is exhausted */
+      503: {
         headers: {
           [name: string]: unknown;
         };
