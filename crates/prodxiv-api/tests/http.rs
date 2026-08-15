@@ -888,6 +888,68 @@ async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
 }
 
 #[tokio::test]
+async fn accepts_two_mib_draft_sources_after_json_escaping() {
+    const TWO_MIB: usize = 2 * 1024 * 1024;
+
+    let application = app(Arc::new(FakeStore::default()));
+    let source = format!("#{}", "\\".repeat(TWO_MIB - 1));
+    assert_eq!(source.len(), TWO_MIB);
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::from(json!({ "source_markdown": source }).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maximum-size draft creation should complete");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let location = created.headers()[header::LOCATION]
+        .to_str()
+        .expect("location should be text")
+        .to_owned();
+
+    let revised_source = format!("!{}", "\\".repeat(TWO_MIB - 1));
+    let updated = application
+        .clone()
+        .oneshot(
+            Request::put(&location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::from(
+                    json!({ "source_markdown": revised_source }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maximum-size draft update should complete");
+    assert_eq!(updated.status(), StatusCode::OK);
+
+    let oversized_source = format!("#{}", "x".repeat(TWO_MIB));
+    let oversized = application
+        .oneshot(
+            Request::put(&location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"2\"")
+                .body(Body::from(
+                    json!({ "source_markdown": oversized_source }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("oversized draft update should complete");
+    assert_eq!(oversized.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(oversized).await["error"]["code"],
+        "draft.source_too_large"
+    );
+}
+
+#[tokio::test]
 async fn protects_drafts_and_rejects_latest_or_stale_writes() {
     let application = app(Arc::new(FakeStore::default()));
     let unauthorized = application

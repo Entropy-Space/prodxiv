@@ -209,6 +209,13 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
             .expect("deleted draft lookup should succeed")
             .is_none()
     );
+    assert!(
+        storage
+            .list_draft_revisions(&created.paper_uuid)
+            .await
+            .expect("deleted draft revision list should succeed")
+            .is_none()
+    );
     let revision_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM paper_draft_revisions WHERE paper_uuid = $1::uuid",
     )

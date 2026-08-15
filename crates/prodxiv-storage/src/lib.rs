@@ -586,44 +586,41 @@ impl PostgresStorage {
         &self,
         paper_uuid: &str,
     ) -> Result<Option<Vec<PaperDraftRevisionSummary>>, StorageError> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM paper_drafts WHERE paper_uuid = $1::uuid)",
-        )
-        .bind(paper_uuid)
-        .fetch_one(&self.pool)
-        .await?;
-        if !exists {
-            return Ok(None);
-        }
-
         let rows = sqlx::query(
             r#"
             SELECT
-              paper_uuid::text AS paper_uuid,
-              revision,
+              paper_drafts.paper_uuid::text AS paper_uuid,
+              paper_draft_revisions.revision,
               to_char(
-                created_at AT TIME ZONE 'UTC',
+                paper_draft_revisions.created_at AT TIME ZONE 'UTC',
                 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
               ) AS created_at
-            FROM paper_draft_revisions
-            WHERE paper_uuid = $1::uuid
-            ORDER BY revision DESC
+            FROM paper_drafts
+            LEFT JOIN paper_draft_revisions
+              ON paper_draft_revisions.paper_uuid = paper_drafts.paper_uuid
+            WHERE paper_drafts.paper_uuid = $1::uuid
+            ORDER BY paper_draft_revisions.revision DESC
             "#,
         )
         .bind(paper_uuid)
         .fetch_all(&self.pool)
         .await?;
-        rows.into_iter()
-            .map(|row| {
-                let revision: i32 = row.try_get("revision")?;
-                Ok(PaperDraftRevisionSummary {
-                    paper_uuid: row.try_get("paper_uuid")?,
-                    revision: decode_revision(revision)?,
-                    created_at: row.try_get("created_at")?,
-                })
-            })
-            .collect::<Result<Vec<_>, StorageError>>()
-            .map(Some)
+        if rows.is_empty() {
+            return Ok(None);
+        }
+
+        let mut revisions = Vec::with_capacity(rows.len());
+        for row in rows {
+            let Some(revision) = row.try_get::<Option<i32>, _>("revision")? else {
+                continue;
+            };
+            revisions.push(PaperDraftRevisionSummary {
+                paper_uuid: row.try_get("paper_uuid")?,
+                revision: decode_revision(revision)?,
+                created_at: row.try_get("created_at")?,
+            });
+        }
+        Ok(Some(revisions))
     }
 
     /// Finds one retained draft snapshot.

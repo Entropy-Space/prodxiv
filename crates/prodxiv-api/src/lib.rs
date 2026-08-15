@@ -9,7 +9,7 @@ use std::{
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    extract::{Path, Query, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -36,6 +36,9 @@ use utoipa::{
     openapi::security::{Http, HttpAuthScheme, SecurityScheme},
 };
 const MAX_DRAFT_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+// A one-byte control character may occupy six bytes as a JSON `\u00XX` escape.
+// Keep a small fixed allowance for the request object's field syntax.
+const MAX_DRAFT_WRITE_BODY_BYTES: usize = MAX_DRAFT_SOURCE_BYTES * 6 + 64;
 const MAX_DRAFT_REVISION: u32 = i32::MAX as u32;
 
 #[derive(Clone)]
@@ -717,10 +720,18 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/papers", get(list_papers).post(publish_paper))
-        .route("/v1/drafts", get(list_drafts).post(create_draft))
+        .route(
+            "/v1/drafts",
+            get(list_drafts)
+                .post(create_draft)
+                .layer(DefaultBodyLimit::max(MAX_DRAFT_WRITE_BODY_BYTES)),
+        )
         .route(
             "/v1/drafts/{paper_uuid}",
-            get(get_draft).put(update_draft).delete(delete_draft),
+            get(get_draft)
+                .put(update_draft)
+                .delete(delete_draft)
+                .layer(DefaultBodyLimit::max(MAX_DRAFT_WRITE_BODY_BYTES)),
         )
         .route(
             "/v1/drafts/{paper_uuid}/revisions",
