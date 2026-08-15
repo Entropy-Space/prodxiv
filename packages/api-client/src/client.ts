@@ -46,6 +46,12 @@ export interface UpdateDraftInput {
   expected_revision: number;
 }
 
+export interface PublishDraftInput {
+  expected_revision: number;
+  idempotency_key: string;
+  product_id?: string;
+}
+
 export interface ListDraftsInput {
   limit?: number;
 }
@@ -211,6 +217,31 @@ export class ProdxivApiClient {
     return paperDraftRevision(response, body);
   }
 
+  async publishDraft(
+    paperUuid: string,
+    input: PublishDraftInput,
+  ): Promise<PublishPaperResult> {
+    validateDraftRevision(input.expected_revision);
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          authorization: this.#draftAuthorization(),
+          "content-type": "application/json",
+          "idempotency-key": input.idempotency_key,
+          "if-match": `"${input.expected_revision}"`,
+        },
+        body: JSON.stringify(
+          input.product_id === undefined
+            ? {}
+            : { product_id: input.product_id },
+        ),
+      },
+    );
+    return publishPaperResult(response, body);
+  }
+
   async publishPaper(input: PublishPaperInput): Promise<PublishPaperResult> {
     if (this.#token === undefined || this.#token.length === 0) {
       throw new ProdxivApiError(
@@ -234,15 +265,7 @@ export class ProdxivApiClient {
       }),
     });
 
-    const paper = publishedPaper(response, body);
-
-    return {
-      paper,
-      location:
-        response.headers.get("location") ??
-        `/v1/papers/${paper.paper_id}/revisions/${paper.version}`,
-      replayed: response.status === 200,
-    };
+    return publishPaperResult(response, body);
   }
 
   async getPaperRevision(
@@ -360,6 +383,20 @@ export class ProdxivApiClient {
     }
     return `Bearer ${this.#token}`;
   }
+}
+
+function publishPaperResult(
+  response: Response,
+  body: unknown,
+): PublishPaperResult {
+  const paper = publishedPaper(response, body);
+  return {
+    paper,
+    location:
+      response.headers.get("location") ??
+      `/v1/papers/${paper.paper_id}/revisions/${paper.version}`,
+    replayed: response.status === 200,
+  };
 }
 
 function paperDraft(response: Response, body: unknown): PaperDraft {

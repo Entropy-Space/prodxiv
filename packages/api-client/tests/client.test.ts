@@ -166,6 +166,52 @@ describe("ProdxivApiClient", () => {
     );
   });
 
+  test("publishes one saved draft revision without resending Markdown", async () => {
+    let requestUrl = "";
+    let requestInit: RequestInit | undefined;
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token: "draft-token",
+      fetch: async (input, init) => {
+        requestUrl = input.toString();
+        requestInit = init;
+        return Response.json(publishedPaper, {
+          status: 201,
+          headers: {
+            location: "/v1/papers/prodxiv:2607.000001/revisions/1",
+          },
+        });
+      },
+    });
+
+    const result = await client.publishDraft(draft.paper_uuid, {
+      expected_revision: 1,
+      idempotency_key: "draft-publish-client-1",
+      product_id: "prodxiv-product:2607.000001",
+    });
+
+    expect(requestUrl).toBe(
+      `https://api.prodxiv.example/v1/drafts/${draft.paper_uuid}/publish`,
+    );
+    expect(requestInit?.method).toBe("POST");
+    expect(requestInit?.headers).toEqual(
+      expect.objectContaining({
+        authorization: "Bearer draft-token",
+        "idempotency-key": "draft-publish-client-1",
+        "if-match": '"1"',
+      }),
+    );
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      product_id: "prodxiv-product:2607.000001",
+    });
+    expect(String(requestInit?.body)).not.toContain("source_markdown");
+    expect(result).toEqual({
+      paper: publishedPaper,
+      location: "/v1/papers/prodxiv:2607.000001/revisions/1",
+      replayed: false,
+    });
+  });
+
   test("requires a token and canonical UUID for private drafts", async () => {
     const client = new ProdxivApiClient({
       api_url: "https://api.prodxiv.example",

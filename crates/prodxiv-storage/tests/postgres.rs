@@ -235,6 +235,172 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn publishes_one_exact_draft_revision_and_replays_after_content_deletion(pool: PgPool) {
+    let storage = PostgresStorage::new(pool.clone());
+    let (source, _) = submission();
+    let created = storage
+        .create_draft(&source, "integration_test")
+        .await
+        .expect("draft should be created");
+
+    let published = storage
+        .publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "integration_test",
+            "draft-publish-request-1",
+            None,
+        )
+        .await
+        .expect("draft publication should succeed")
+        .expect("draft should exist");
+    assert!(!published.replayed);
+    assert_eq!(published.paper.revision, 1);
+    assert!(
+        storage
+            .find_draft(&created.paper_uuid)
+            .await
+            .expect("published draft lookup should succeed")
+            .is_none()
+    );
+
+    let submitted_markdown: String = sqlx::query_scalar(
+        "SELECT submitted_markdown FROM paper_revisions WHERE paper_id = $1 AND revision = 1",
+    )
+    .bind(&published.paper.paper_id)
+    .fetch_one(&pool)
+    .await
+    .expect("submitted Markdown should be readable");
+    assert_eq!(submitted_markdown, source);
+    let provenance: (String, i32, String, i32) = sqlx::query_as(
+        r#"
+        SELECT
+          paper_uuid::text,
+          draft_revision,
+          paper_id,
+          paper_revision
+        FROM paper_draft_publications
+        WHERE paper_uuid = $1::uuid
+        "#,
+    )
+    .bind(&created.paper_uuid)
+    .fetch_one(&pool)
+    .await
+    .expect("draft publication provenance should be readable");
+    assert_eq!(provenance.0, created.paper_uuid);
+    assert_eq!(provenance.1, 1);
+    assert_eq!(provenance.2, published.paper.paper_id);
+    assert_eq!(provenance.3, 1);
+    let mutated_provenance = sqlx::query(
+        "UPDATE paper_draft_publications SET draft_revision = 2 WHERE paper_uuid = $1::uuid",
+    )
+    .bind(&created.paper_uuid)
+    .execute(&pool)
+    .await;
+    assert!(
+        mutated_provenance.is_err(),
+        "draft publication provenance must remain immutable"
+    );
+
+    let replayed = storage
+        .publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "integration_test",
+            "draft-publish-request-1",
+            None,
+        )
+        .await
+        .expect("draft publication replay should succeed")
+        .expect("idempotency record should survive draft deletion");
+    assert!(replayed.replayed);
+    assert_eq!(replayed.paper, published.paper);
+
+    let conflicting_replay = storage
+        .publish_draft(
+            &created.paper_uuid,
+            created.revision + 1,
+            "integration_test",
+            "draft-publish-request-1",
+            None,
+        )
+        .await;
+    assert!(matches!(
+        conflicting_replay,
+        Err(StorageError::IdempotencyConflict)
+    ));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn keeps_an_invalid_draft_mutable_when_publication_fails(pool: PgPool) {
+    let storage = PostgresStorage::new(pool);
+    let created = storage
+        .create_draft("# Incomplete working notes\n", "integration_test")
+        .await
+        .expect("incomplete draft should be created");
+
+    let result = storage
+        .publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "integration_test",
+            "draft-publish-request-invalid",
+            None,
+        )
+        .await;
+    assert!(matches!(result, Err(StorageError::InvalidDraftMarkdown(_))));
+    assert!(
+        storage
+            .find_draft(&created.paper_uuid)
+            .await
+            .expect("failed draft publication lookup should succeed")
+            .is_some()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn publishes_a_draft_only_once_across_concurrent_request_keys(pool: PgPool) {
+    let storage = PostgresStorage::new(pool.clone());
+    let (source, _) = submission();
+    let created = storage
+        .create_draft(&source, "integration_test")
+        .await
+        .expect("draft should be created");
+
+    let (first, second) = tokio::join!(
+        storage.publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "integration_test",
+            "draft-publish-concurrent-1",
+            None,
+        ),
+        storage.publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "integration_test",
+            "draft-publish-concurrent-2",
+            None,
+        )
+    );
+    let first = first.expect("first concurrent publication should complete");
+    let second = second.expect("second concurrent publication should complete");
+    match (first, second) {
+        (Some(published), None) | (None, Some(published)) => {
+            assert!(!published.replayed);
+        }
+        outcome => panic!("one concurrent publication should win: {outcome:?}"),
+    }
+
+    let publication_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM paper_draft_publications")
+            .fetch_one(&pool)
+            .await
+            .expect("draft publication count should be readable");
+    assert_eq!(publication_count, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn publishes_and_reads_an_immutable_revision(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let (source, paper) = submission();

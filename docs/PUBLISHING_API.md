@@ -8,6 +8,7 @@ external-observation routes:
 - `POST /v1/drafts`
 - `GET /v1/drafts`
 - `GET`, `PUT`, and `DELETE /v1/drafts/{paper_uuid}`
+- `POST /v1/drafts/{paper_uuid}/publish`
 - `GET /v1/drafts/{paper_uuid}/revisions`
 - `GET /v1/drafts/{paper_uuid}/revisions/{revision}`
 - `POST /v1/papers`
