@@ -136,6 +136,105 @@ async fn migrates_existing_publications_to_products_and_revisions(pool: PgPool) 
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
+    let storage = PostgresStorage::new(pool.clone());
+    let created = storage
+        .create_draft("# Working notes\n", "integration_test")
+        .await
+        .expect("draft should be created");
+    assert_eq!(created.revision, 1);
+
+    let mut expected_revision = 1;
+    for edit in 1..=6 {
+        let outcome = storage
+            .update_draft(
+                &created.paper_uuid,
+                expected_revision,
+                &format!("# Working notes {edit}\n"),
+                "integration_test",
+            )
+            .await
+            .expect("draft should update")
+            .expect("draft should still exist");
+        assert!(!outcome.replayed);
+        expected_revision = outcome.draft.revision;
+    }
+    assert_eq!(expected_revision, 7);
+
+    let revisions = storage
+        .list_draft_revisions(&created.paper_uuid)
+        .await
+        .expect("draft revisions should be readable")
+        .expect("draft should exist");
+    assert_eq!(
+        revisions
+            .iter()
+            .map(|revision| revision.revision)
+            .collect::<Vec<_>>(),
+        vec![7, 6, 5, 4, 3]
+    );
+    assert!(
+        storage
+            .find_draft_revision(&created.paper_uuid, 1)
+            .await
+            .expect("pruned revision lookup should succeed")
+            .is_none()
+    );
+
+    let conflict = storage
+        .update_draft(
+            &created.paper_uuid,
+            1,
+            "# Conflicting edit\n",
+            "integration_test",
+        )
+        .await;
+    assert!(matches!(
+        conflict,
+        Err(StorageError::DraftRevisionConflict {
+            current_revision: 7
+        })
+    ));
+
+    assert!(
+        storage
+            .delete_draft(&created.paper_uuid, 7, "integration_test")
+            .await
+            .expect("draft should delete")
+    );
+    assert!(
+        storage
+            .find_draft(&created.paper_uuid)
+            .await
+            .expect("deleted draft lookup should succeed")
+            .is_none()
+    );
+    assert!(
+        storage
+            .list_draft_revisions(&created.paper_uuid)
+            .await
+            .expect("deleted draft revision list should succeed")
+            .is_none()
+    );
+    let revision_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM paper_draft_revisions WHERE paper_uuid = $1::uuid",
+    )
+    .bind(&created.paper_uuid)
+    .fetch_one(&pool)
+    .await
+    .expect("draft revision count should be readable");
+    assert_eq!(revision_count, 0);
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM paper_draft_audit_log WHERE paper_uuid = $1::uuid",
+    )
+    .bind(&created.paper_uuid)
+    .fetch_one(&pool)
+    .await
+    .expect("draft audit count should be readable");
+    assert_eq!(audit_count, 8);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn publishes_and_reads_an_immutable_revision(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let (source, paper) = submission();

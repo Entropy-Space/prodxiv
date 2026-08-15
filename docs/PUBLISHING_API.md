@@ -1,15 +1,23 @@
 # Publishing API
 
-The Axum service is the authoritative boundary for immutable publication. The
-MVP exposes public paper routes plus external-observation routes:
+The Axum service is the authoritative boundary for private drafts and
+immutable publication. The MVP exposes draft, public paper, and
+external-observation routes:
 
 - `GET /health`
+- `POST /v1/drafts`
+- `GET /v1/drafts`
+- `GET`, `PUT`, and `DELETE /v1/drafts/{paper_uuid}`
+- `GET /v1/drafts/{paper_uuid}/revisions`
+- `GET /v1/drafts/{paper_uuid}/revisions/{revision}`
 - `POST /v1/papers`
 - `GET /v1/papers/{paper_id}/revisions/{revision}`
 - `GET /v1/github/trending`
 - `POST /v1/github/trending/snapshots`
 
-The generated contract is checked in at `openapi/prodxiv-api.json`.
+The generated contract is checked in at `openapi/prodxiv-api.json`. Draft
+routes are private, use the publishing bearer token in the MVP, and are
+described in `docs/DRAFTS.md`.
 
 ## Local environment
 

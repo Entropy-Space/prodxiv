@@ -3,6 +3,11 @@ import type { components } from "./generated/api.ts";
 export type PublishedPaper = components["schemas"]["PublishedPaper"];
 export type PublishedPaperSummary =
   components["schemas"]["PublishedPaperSummary"];
+export type PaperDraft = components["schemas"]["PaperDraft"];
+export type PaperDraftSummary = components["schemas"]["PaperDraftSummary"];
+export type PaperDraftRevision = components["schemas"]["PaperDraftRevision"];
+export type PaperDraftRevisionSummary =
+  components["schemas"]["PaperDraftRevisionSummary"];
 export type GitHubTrendingEntry =
   components["schemas"]["GitHubTrendingEntryResponse"];
 export type GitHubTrendingSnapshot =
@@ -30,6 +35,28 @@ export interface ListPapersInput {
 export interface PaperList {
   papers: PublishedPaperSummary[];
   next_cursor?: string;
+}
+
+export interface CreateDraftInput {
+  source_markdown: string;
+}
+
+export interface UpdateDraftInput {
+  source_markdown: string;
+  expected_revision: number;
+}
+
+export interface ListDraftsInput {
+  limit?: number;
+}
+
+export interface PaperDraftList {
+  drafts: PaperDraftSummary[];
+}
+
+export interface PaperDraftRevisionList {
+  revisions: PaperDraftRevisionSummary[];
+  retained_revision_limit: number;
 }
 
 export interface GetGitHubTrendingInput {
@@ -86,6 +113,102 @@ export class ProdxivApiClient {
     this.#apiUrl = options.api_url.replace(/\/+$/, "");
     this.#token = options.token;
     this.#fetch = options.fetch ?? globalThis.fetch;
+  }
+
+  async createDraft(input: CreateDraftInput): Promise<PaperDraft> {
+    validateDraftSource(input.source_markdown);
+    const { response, body } = await this.#request("/v1/drafts", {
+      method: "POST",
+      headers: {
+        authorization: this.#draftAuthorization(),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ source_markdown: input.source_markdown }),
+    });
+    return paperDraft(response, body);
+  }
+
+  async listDrafts(input: ListDraftsInput = {}): Promise<PaperDraftList> {
+    if (
+      input.limit !== undefined &&
+      (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
+    ) {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_limit",
+        "draft list limit must be an integer between 1 and 100",
+      );
+    }
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) {
+      query.set("limit", String(input.limit));
+    }
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    const { response, body } = await this.#request(`/v1/drafts${suffix}`, {
+      headers: { authorization: this.#draftAuthorization() },
+    });
+    return paperDraftList(response, body);
+  }
+
+  async getDraft(paperUuid: string): Promise<PaperDraft> {
+    const path = draftPath(paperUuid);
+    const { response, body } = await this.#request(path, {
+      headers: { authorization: this.#draftAuthorization() },
+    });
+    return paperDraft(response, body);
+  }
+
+  async updateDraft(
+    paperUuid: string,
+    input: UpdateDraftInput,
+  ): Promise<PaperDraft> {
+    validateDraftSource(input.source_markdown);
+    validateDraftRevision(input.expected_revision);
+    const { response, body } = await this.#request(draftPath(paperUuid), {
+      method: "PUT",
+      headers: {
+        authorization: this.#draftAuthorization(),
+        "content-type": "application/json",
+        "if-match": `"${input.expected_revision}"`,
+      },
+      body: JSON.stringify({ source_markdown: input.source_markdown }),
+    });
+    return paperDraft(response, body);
+  }
+
+  async deleteDraft(
+    paperUuid: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    validateDraftRevision(expectedRevision);
+    const { response, body } = await this.#request(draftPath(paperUuid), {
+      method: "DELETE",
+      headers: {
+        authorization: this.#draftAuthorization(),
+        "if-match": `"${expectedRevision}"`,
+      },
+    });
+    assertSuccessfulResponse(response, body);
+  }
+
+  async listDraftRevisions(paperUuid: string): Promise<PaperDraftRevisionList> {
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/revisions`,
+      { headers: { authorization: this.#draftAuthorization() } },
+    );
+    return paperDraftRevisionList(response, body);
+  }
+
+  async getDraftRevision(
+    paperUuid: string,
+    revision: number,
+  ): Promise<PaperDraftRevision> {
+    validateDraftRevision(revision);
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/revisions/${revision}`,
+      { headers: { authorization: this.#draftAuthorization() } },
+    );
+    return paperDraftRevision(response, body);
   }
 
   async publishPaper(input: PublishPaperInput): Promise<PublishPaperResult> {
@@ -226,6 +349,203 @@ export class ProdxivApiClient {
     const body = (await response.json().catch(() => undefined)) as unknown;
     return { response, body };
   }
+
+  #draftAuthorization(): string {
+    if (this.#token === undefined || this.#token.length === 0) {
+      throw new ProdxivApiError(
+        0,
+        "auth.token_missing",
+        "draft access requires a bearer token",
+      );
+    }
+    return `Bearer ${this.#token}`;
+  }
+}
+
+function paperDraft(response: Response, body: unknown): PaperDraft {
+  assertSuccessfulResponse(response, body);
+  if (!isPaperDraft(body)) {
+    throw invalidResponse(
+      response,
+      "prodxiv API returned an invalid draft body",
+    );
+  }
+  return body;
+}
+
+function paperDraftList(response: Response, body: unknown): PaperDraftList {
+  assertSuccessfulResponse(response, body);
+  if (
+    !isRecord(body) ||
+    !Array.isArray(body.drafts) ||
+    !body.drafts.every(isPaperDraftSummary)
+  ) {
+    throw invalidResponse(
+      response,
+      "prodxiv API returned an invalid draft list",
+    );
+  }
+  return { drafts: body.drafts };
+}
+
+function paperDraftRevision(
+  response: Response,
+  body: unknown,
+): PaperDraftRevision {
+  assertSuccessfulResponse(response, body);
+  if (!isPaperDraftRevision(body)) {
+    throw invalidResponse(
+      response,
+      "prodxiv API returned an invalid draft revision",
+    );
+  }
+  return body;
+}
+
+function paperDraftRevisionList(
+  response: Response,
+  body: unknown,
+): PaperDraftRevisionList {
+  assertSuccessfulResponse(response, body);
+  if (
+    !isRecord(body) ||
+    !Number.isInteger(body.retained_revision_limit) ||
+    (body.retained_revision_limit as number) < 1 ||
+    !Array.isArray(body.revisions) ||
+    !body.revisions.every(isPaperDraftRevisionSummary) ||
+    body.revisions.length > (body.retained_revision_limit as number)
+  ) {
+    throw invalidResponse(
+      response,
+      "prodxiv API returned an invalid draft revision list",
+    );
+  }
+  return {
+    revisions: body.revisions,
+    retained_revision_limit: body.retained_revision_limit as number,
+  };
+}
+
+function assertSuccessfulResponse(response: Response, body: unknown): void {
+  if (response.ok) {
+    return;
+  }
+  if (isErrorResponse(body)) {
+    throw new ProdxivApiError(
+      response.status,
+      body.error.code,
+      body.error.message,
+      body.error.diagnostics ?? [],
+    );
+  }
+  throw invalidResponse(
+    response,
+    `prodxiv API returned HTTP ${response.status} without a valid error body`,
+  );
+}
+
+function invalidResponse(response: Response, message: string): ProdxivApiError {
+  return new ProdxivApiError(
+    response.status,
+    "network.invalid_response",
+    message,
+  );
+}
+
+function isPaperDraft(value: unknown): value is PaperDraft {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.source_markdown === "string" &&
+    value.source_markdown.length > 0 &&
+    isPaperDraftSummary(value)
+  );
+}
+
+function isPaperDraftSummary(value: unknown): value is PaperDraftSummary {
+  return (
+    isRecord(value) &&
+    isCanonicalUuid(value.paper_uuid) &&
+    isPositiveSafeInteger(value.revision) &&
+    isTimestamp(value.created_at) &&
+    isTimestamp(value.updated_at)
+  );
+}
+
+function isPaperDraftRevision(value: unknown): value is PaperDraftRevision {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.source_markdown === "string" &&
+    value.source_markdown.length > 0 &&
+    isPaperDraftRevisionSummary(value)
+  );
+}
+
+function isPaperDraftRevisionSummary(
+  value: unknown,
+): value is PaperDraftRevisionSummary {
+  return (
+    isRecord(value) &&
+    isCanonicalUuid(value.paper_uuid) &&
+    isPositiveSafeInteger(value.revision) &&
+    isTimestamp(value.created_at)
+  );
+}
+
+function draftPath(paperUuid: string): string {
+  if (!isCanonicalUuid(paperUuid)) {
+    throw new ProdxivApiError(
+      0,
+      "draft.invalid_uuid",
+      "paper UUID must use canonical lowercase hyphenated notation",
+    );
+  }
+  return `/v1/drafts/${paperUuid}`;
+}
+
+function validateDraftRevision(revision: number): void {
+  if (!isPositiveSafeInteger(revision)) {
+    throw new ProdxivApiError(
+      0,
+      "draft.invalid_revision",
+      "draft revision must be a positive safe integer",
+    );
+  }
+}
+
+function validateDraftSource(sourceMarkdown: string): void {
+  if (sourceMarkdown.trim().length === 0) {
+    throw new ProdxivApiError(
+      0,
+      "draft.source_required",
+      "draft source Markdown must not be empty",
+    );
+  }
+  if (new TextEncoder().encode(sourceMarkdown).byteLength > 2 * 1024 * 1024) {
+    throw new ProdxivApiError(
+      0,
+      "draft.source_too_large",
+      "draft source Markdown must not exceed 2097152 bytes",
+    );
+  }
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) > 0 &&
+    (value as number) <= 2_147_483_647
+  );
+}
+
+function isCanonicalUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
+  );
 }
 
 function publishedPaper(response: Response, body: unknown): PublishedPaper {
