@@ -1,4 +1,4 @@
-//! Authoritative HTTP API for publishing and reading prodxiv papers.
+//! Authoritative HTTP API for drafting, publishing, and reading prodxiv papers.
 
 use std::{
     env,
@@ -16,14 +16,16 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodxiv_domain::{
-    Diagnostic, PaperDocument, PublishedPaper, PublishedPaperSummary, ValidationProfile,
-    ValidationReport, canonicalize_paper_id, validate_paper,
+    DRAFT_REVISION_RETENTION, Diagnostic, PaperDocument, PaperDraft, PaperDraftRevision,
+    PaperDraftRevisionSummary, PaperDraftSummary, PublishedPaper, PublishedPaperSummary,
+    ValidationProfile, ValidationReport, canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
-    GITHUB_TRENDING_ANY_LANGUAGE, GitHubTrendingEntry, GitHubTrendingLanguageScope,
-    GitHubTrendingLanguageSelector, GitHubTrendingSnapshot, GitHubTrendingView,
-    NewGitHubTrendingEntry, NewGitHubTrendingSnapshot, PostgresStorage, PublicationCursor,
-    PublicationPage, PublishOutcome, StorageError, TrendingImportOutcome, is_valid_idempotency_key,
+    DraftUpdateOutcome, GITHUB_TRENDING_ANY_LANGUAGE, GitHubTrendingEntry,
+    GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector, GitHubTrendingSnapshot,
+    GitHubTrendingView, NewGitHubTrendingEntry, NewGitHubTrendingSnapshot, PostgresStorage,
+    PublicationCursor, PublicationPage, PublishOutcome, StorageError, TrendingImportOutcome,
+    is_valid_idempotency_key,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -33,6 +35,8 @@ use utoipa::{
     Modify, OpenApi, ToSchema,
     openapi::security::{Http, HttpAuthScheme, SecurityScheme},
 };
+const MAX_DRAFT_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_DRAFT_REVISION: u32 = i32::MAX as u32;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -180,6 +184,42 @@ fn resolve_migration_database_url(
 
 #[async_trait]
 pub trait PublicationStore: Send + Sync {
+    async fn create_draft(
+        &self,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<PaperDraft, StoreError>;
+
+    async fn list_drafts(&self, limit: u32) -> Result<Vec<PaperDraftSummary>, StoreError>;
+
+    async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StoreError>;
+
+    async fn update_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<Option<DraftUpdateOutcome>, StoreError>;
+
+    async fn list_draft_revisions(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<Vec<PaperDraftRevisionSummary>>, StoreError>;
+
+    async fn find_draft_revision(
+        &self,
+        paper_uuid: &str,
+        revision: u32,
+    ) -> Result<Option<PaperDraftRevision>, StoreError>;
+
+    async fn delete_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+    ) -> Result<bool, StoreError>;
+
     async fn publish_new(
         &self,
         paper: PaperDocument,
@@ -219,6 +259,70 @@ pub trait PublicationStore: Send + Sync {
 
 #[async_trait]
 impl PublicationStore for PostgresStorage {
+    async fn create_draft(
+        &self,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<PaperDraft, StoreError> {
+        PostgresStorage::create_draft(self, source_markdown, actor)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_drafts(&self, limit: u32) -> Result<Vec<PaperDraftSummary>, StoreError> {
+        PostgresStorage::list_drafts(self, limit)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StoreError> {
+        PostgresStorage::find_draft(self, paper_uuid)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn update_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<Option<DraftUpdateOutcome>, StoreError> {
+        PostgresStorage::update_draft(self, paper_uuid, expected_revision, source_markdown, actor)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_draft_revisions(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<Vec<PaperDraftRevisionSummary>>, StoreError> {
+        PostgresStorage::list_draft_revisions(self, paper_uuid)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_draft_revision(
+        &self,
+        paper_uuid: &str,
+        revision: u32,
+    ) -> Result<Option<PaperDraftRevision>, StoreError> {
+        PostgresStorage::find_draft_revision(self, paper_uuid, revision)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn delete_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+    ) -> Result<bool, StoreError> {
+        PostgresStorage::delete_draft(self, paper_uuid, expected_revision, actor)
+            .await
+            .map_err(StoreError::from)
+    }
+
     async fn publish_new(
         &self,
         paper: PaperDocument,
@@ -299,6 +403,10 @@ pub enum StoreError {
     IdempotencyConflict,
     #[error("product identifier is invalid or does not exist")]
     InvalidProduct,
+    #[error("draft source Markdown is invalid")]
+    InvalidDraftSource,
+    #[error("draft changed; current revision is {current_revision}")]
+    DraftRevisionConflict { current_revision: u32 },
     #[error("GitHub Trending snapshot is invalid: {0}")]
     InvalidTrendingSnapshot(&'static str),
     #[error("storage operation failed")]
@@ -324,11 +432,15 @@ impl From<StorageError> for StoreError {
             | StorageError::TrendingSerialization(_)
             | StorageError::CorruptTrendingRank(_)
             | StorageError::CorruptTrendingLanguageScope(_) => {
-                tracing::error!(error = %error, "publication storage operation failed");
+                tracing::error!(error = %error, "API storage operation failed");
                 Self::Internal
             }
             StorageError::InvalidProductId | StorageError::UnknownProduct(_) => {
                 Self::InvalidProduct
+            }
+            StorageError::InvalidDraftSource => Self::InvalidDraftSource,
+            StorageError::DraftRevisionConflict { current_revision } => {
+                Self::DraftRevisionConflict { current_revision }
             }
             StorageError::InvalidTrendingSnapshot(message) => {
                 Self::InvalidTrendingSnapshot(message)
@@ -343,6 +455,12 @@ pub struct PublishPaperRequest {
     pub source_markdown: String,
     #[serde(default)]
     pub product_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WriteDraftRequest {
+    pub source_markdown: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -481,9 +599,25 @@ struct RevisionPath {
 }
 
 #[derive(Debug, Deserialize)]
+struct DraftPath {
+    paper_uuid: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DraftRevisionPath {
+    paper_uuid: String,
+    revision: u32,
+}
+
+#[derive(Debug, Deserialize)]
 struct ListPapersQuery {
     limit: Option<u32>,
     cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListDraftsQuery {
+    limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -499,6 +633,17 @@ pub struct PaperListResponse {
     pub papers: Vec<PublishedPaperSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PaperDraftListResponse {
+    pub drafts: Vec<PaperDraftSummary>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PaperDraftRevisionListResponse {
+    pub revisions: Vec<PaperDraftRevisionSummary>,
+    pub retained_revision_limit: u32,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -572,6 +717,19 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/papers", get(list_papers).post(publish_paper))
+        .route("/v1/drafts", get(list_drafts).post(create_draft))
+        .route(
+            "/v1/drafts/{paper_uuid}",
+            get(get_draft).put(update_draft).delete(delete_draft),
+        )
+        .route(
+            "/v1/drafts/{paper_uuid}/revisions",
+            get(list_draft_revisions),
+        )
+        .route(
+            "/v1/drafts/{paper_uuid}/revisions/{revision}",
+            get(get_draft_revision),
+        )
         .route(
             "/v1/papers/{paper_id}/revisions/{revision}",
             get(get_paper_revision),
@@ -763,6 +921,354 @@ fn is_iso_date(value: &str) -> bool {
 )]
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/drafts",
+    security(("bearer_token" = [])),
+    request_body = WriteDraftRequest,
+    responses(
+      (status = 201, description = "Mutable draft was created", body = PaperDraft),
+      (status = 400, description = "JSON is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 422, description = "Draft source is empty or too large", body = ErrorResponse),
+      (status = 500, description = "Draft creation failed", body = ErrorResponse)
+    )
+)]
+async fn create_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<WriteDraftRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let Json(payload) = payload.map_err(invalid_json)?;
+    validate_draft_source(&payload.source_markdown)?;
+    let draft = state
+        .store
+        .create_draft(&payload.source_markdown, &state.publish_actor)
+        .await
+        .map_err(draft_store_error)?;
+    let location = format!("/v1/drafts/{}", draft.paper_uuid);
+    let mut response = draft_response(StatusCode::CREATED, draft);
+    response.headers_mut().insert(
+        header::LOCATION,
+        HeaderValue::from_str(&location).expect("draft locations contain valid header characters"),
+    );
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/drafts",
+    security(("bearer_token" = [])),
+    params(
+      ("limit" = Option<u32>, Query, minimum = 1, maximum = 100, description = "Maximum drafts to return; defaults to 20")
+    ),
+    responses(
+      (status = 200, description = "Drafts ordered by most recent edit", body = PaperDraftListResponse),
+      (status = 400, description = "Limit is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 500, description = "Reading drafts failed", body = ErrorResponse)
+    )
+)]
+async fn list_drafts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ListDraftsQuery>,
+) -> Result<Json<PaperDraftListResponse>, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let limit = query.limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request.invalid_limit",
+            "limit must be between 1 and 100",
+        ));
+    }
+    let drafts = state
+        .store
+        .list_drafts(limit)
+        .await
+        .map_err(draft_store_error)?;
+    Ok(Json(PaperDraftListResponse { drafts }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/drafts/{paper_uuid}",
+    security(("bearer_token" = [])),
+    params(("paper_uuid" = String, Path, description = "Unpublished paper UUID")),
+    responses(
+      (status = 200, description = "Current mutable draft snapshot", body = PaperDraft),
+      (status = 400, description = "Paper UUID is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft does not exist", body = ErrorResponse),
+      (status = 500, description = "Reading the draft failed", body = ErrorResponse)
+    )
+)]
+async fn get_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftPath>,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    let draft = state
+        .store
+        .find_draft(&paper_uuid)
+        .await
+        .map_err(draft_store_error)?
+        .ok_or_else(draft_not_found)?;
+    Ok(draft_response(StatusCode::OK, draft))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/drafts/{paper_uuid}",
+    security(("bearer_token" = [])),
+    params(
+      ("paper_uuid" = String, Path, description = "Unpublished paper UUID"),
+      ("If-Match" = String, Header, description = "Quoted current draft revision, for example \"3\"")
+    ),
+    request_body = WriteDraftRequest,
+    responses(
+      (status = 200, description = "Next mutable draft snapshot", body = PaperDraft),
+      (status = 400, description = "Request, paper UUID, or If-Match is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft does not exist", body = ErrorResponse),
+      (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
+      (status = 422, description = "Draft source is empty or too large", body = ErrorResponse),
+      (status = 428, description = "If-Match is required", body = ErrorResponse),
+      (status = 500, description = "Updating the draft failed", body = ErrorResponse)
+    )
+)]
+async fn update_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftPath>,
+    payload: Result<Json<WriteDraftRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    let expected_revision = expected_draft_revision(&headers)?;
+    let Json(payload) = payload.map_err(invalid_json)?;
+    validate_draft_source(&payload.source_markdown)?;
+    let outcome = state
+        .store
+        .update_draft(
+            &paper_uuid,
+            expected_revision,
+            &payload.source_markdown,
+            &state.publish_actor,
+        )
+        .await
+        .map_err(draft_store_error)?
+        .ok_or_else(draft_not_found)?;
+    Ok(draft_response(StatusCode::OK, outcome.draft))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/drafts/{paper_uuid}",
+    security(("bearer_token" = [])),
+    params(
+      ("paper_uuid" = String, Path, description = "Unpublished paper UUID"),
+      ("If-Match" = String, Header, description = "Quoted current draft revision, for example \"3\"")
+    ),
+    responses(
+      (status = 204, description = "Draft content and retained snapshots were deleted"),
+      (status = 400, description = "Paper UUID or If-Match is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft does not exist", body = ErrorResponse),
+      (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
+      (status = 428, description = "If-Match is required", body = ErrorResponse),
+      (status = 500, description = "Deleting the draft failed", body = ErrorResponse)
+    )
+)]
+async fn delete_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftPath>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    let expected_revision = expected_draft_revision(&headers)?;
+    let deleted = state
+        .store
+        .delete_draft(&paper_uuid, expected_revision, &state.publish_actor)
+        .await
+        .map_err(draft_store_error)?;
+    if !deleted {
+        return Err(draft_not_found());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/drafts/{paper_uuid}/revisions",
+    security(("bearer_token" = [])),
+    params(("paper_uuid" = String, Path, description = "Unpublished paper UUID")),
+    responses(
+      (status = 200, description = "Up to five retained draft snapshots, newest first", body = PaperDraftRevisionListResponse),
+      (status = 400, description = "Paper UUID is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft does not exist", body = ErrorResponse),
+      (status = 500, description = "Reading draft revisions failed", body = ErrorResponse)
+    )
+)]
+async fn list_draft_revisions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftPath>,
+) -> Result<Json<PaperDraftRevisionListResponse>, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    let revisions = state
+        .store
+        .list_draft_revisions(&paper_uuid)
+        .await
+        .map_err(draft_store_error)?
+        .ok_or_else(draft_not_found)?;
+    Ok(Json(PaperDraftRevisionListResponse {
+        revisions,
+        retained_revision_limit: DRAFT_REVISION_RETENTION,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/drafts/{paper_uuid}/revisions/{revision}",
+    security(("bearer_token" = [])),
+    params(
+      ("paper_uuid" = String, Path, description = "Unpublished paper UUID"),
+      ("revision" = u32, Path, minimum = 1)
+    ),
+    responses(
+      (status = 200, description = "Exact retained draft snapshot", body = PaperDraftRevision),
+      (status = 400, description = "Paper UUID or revision is invalid", body = ErrorResponse),
+      (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
+      (status = 404, description = "Draft revision is not retained", body = ErrorResponse),
+      (status = 500, description = "Reading the draft revision failed", body = ErrorResponse)
+    )
+)]
+async fn get_draft_revision(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(path): Path<DraftRevisionPath>,
+) -> Result<Json<PaperDraftRevision>, ApiError> {
+    authorize(&headers, &state.publish_token)?;
+    let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
+    if !(1..=MAX_DRAFT_REVISION).contains(&path.revision) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "draft.invalid_revision",
+            "draft revision must be a positive 32-bit integer",
+        ));
+    }
+    let revision = state
+        .store
+        .find_draft_revision(&paper_uuid, path.revision)
+        .await
+        .map_err(draft_store_error)?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "draft.revision_not_found",
+                "draft revision does not exist or is no longer retained",
+            )
+        })?;
+    Ok(Json(revision))
+}
+
+fn invalid_json(error: JsonRejection) -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "request.invalid_json",
+        error.body_text(),
+    )
+}
+
+fn validate_draft_source(source_markdown: &str) -> Result<(), ApiError> {
+    if source_markdown.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "draft.source_required",
+            "source_markdown must not be empty",
+        ));
+    }
+    if source_markdown.len() > MAX_DRAFT_SOURCE_BYTES {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "draft.source_too_large",
+            format!("source_markdown must not exceed {MAX_DRAFT_SOURCE_BYTES} bytes"),
+        ));
+    }
+    Ok(())
+}
+
+fn canonical_draft_uuid(value: &str) -> Result<String, ApiError> {
+    let valid = value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        });
+    if valid {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "draft.invalid_uuid",
+            "paper_uuid must be a canonical hyphenated UUID",
+        ))
+    }
+}
+
+fn expected_draft_revision(headers: &HeaderMap) -> Result<u32, ApiError> {
+    let value = headers.get(header::IF_MATCH).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::PRECONDITION_REQUIRED,
+            "draft.if_match_required",
+            "If-Match with the current quoted draft revision is required",
+        )
+    })?;
+    let value = value.to_str().ok().and_then(|value| {
+        value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+    });
+    let revision = value.and_then(|value| value.parse::<u32>().ok());
+    revision
+        .filter(|revision| (1..=MAX_DRAFT_REVISION).contains(revision))
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "draft.invalid_if_match",
+                "If-Match must contain a positive quoted 32-bit draft revision such as \"3\"",
+            )
+        })
+}
+
+fn draft_response(status: StatusCode, draft: PaperDraft) -> Response {
+    let etag = format!("\"{}\"", draft.revision);
+    let mut response = (status, Json(draft)).into_response();
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("numeric draft revisions form valid ETags"),
+    );
+    response
+}
+
+fn draft_not_found() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "draft.not_found",
+        "draft does not exist",
+    )
 }
 
 #[utoipa::path(
@@ -1049,6 +1555,14 @@ fn store_error(error: StoreError) -> ApiError {
             "product.invalid",
             "product_id must identify an existing prodxiv product",
         ),
+        StoreError::InvalidDraftSource | StoreError::DraftRevisionConflict { .. } => {
+            tracing::error!(error = %error, "unexpected draft error during publication operation");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage.internal",
+                "publication storage failed",
+            )
+        }
         StoreError::InvalidTrendingSnapshot(message) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "trending.invalid_snapshot",
@@ -1059,6 +1573,34 @@ fn store_error(error: StoreError) -> ApiError {
             "storage.internal",
             "publication storage failed",
         ),
+    }
+}
+
+fn draft_store_error(error: StoreError) -> ApiError {
+    match error {
+        StoreError::InvalidDraftSource => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "draft.source_required",
+            "source_markdown must not be empty",
+        ),
+        StoreError::DraftRevisionConflict { current_revision } => ApiError::new(
+            StatusCode::CONFLICT,
+            "draft.revision_conflict",
+            format!("draft changed; current revision is {current_revision}"),
+        ),
+        StoreError::Internal => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage.internal",
+            "draft storage failed",
+        ),
+        other => {
+            tracing::error!(error = %other, "unexpected draft storage error");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage.internal",
+                "draft storage failed",
+            )
+        }
     }
 }
 
@@ -1095,10 +1637,17 @@ fn trending_store_error(error: StoreError) -> ApiError {
     info(
         title = "prodxiv publishing API",
         version = "0.1.0",
-        description = "Authoritative immutable publication and retrieval API."
+        description = "Authoritative private drafting, immutable publication, and retrieval API."
     ),
     paths(
         health,
+        create_draft,
+        list_drafts,
+        get_draft,
+        update_draft,
+        delete_draft,
+        list_draft_revisions,
+        get_draft_revision,
         list_papers,
         publish_paper,
         get_paper_revision,
@@ -1106,6 +1655,13 @@ fn trending_store_error(error: StoreError) -> ApiError {
         ingest_github_trending_snapshot
     ),
     components(schemas(
+        WriteDraftRequest,
+        PaperDraft,
+        PaperDraftSummary,
+        PaperDraftListResponse,
+        PaperDraftRevision,
+        PaperDraftRevisionSummary,
+        PaperDraftRevisionListResponse,
         PublishPaperRequest,
         IngestGitHubTrendingRequest,
         IngestGitHubTrendingEntry,

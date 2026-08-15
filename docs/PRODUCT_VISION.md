@@ -162,6 +162,12 @@ Individuals and teams should be able to publish papers for both working
 products and pre-build concepts. Submissions should be open, subject to format
 validation and community moderation rather than mandatory editorial approval.
 
+Before publication, a paper has a private UUID and a mutable draft with a
+bounded revision history. Draft API behavior and retention are documented in
+`docs/DRAFTS.md`. The public short identifier is allocated only at publication;
+the UUID remains internal provenance rather than becoming part of published
+URLs.
+
 Published revisions are immutable. Authors update a paper by publishing a new
 revision instead of silently changing its historical record.
 

@@ -1,17 +1,18 @@
-//! PostgreSQL persistence for immutable prodxiv publications.
+//! PostgreSQL persistence for prodxiv drafts, publications, and observations.
 
 use std::collections::HashMap;
 
 use prodxiv_domain::{
-    PaperDocument, PaperMetadata, PublicationIdentity, PublicationPreparationError, PublishedPaper,
-    PublishedPaperSummary, canonicalize_product_id, encode_paper_id_suffix, prepare_publication,
-    product_id_from_paper_id,
+    DRAFT_REVISION_RETENTION, PaperDocument, PaperDraft, PaperDraftRevision,
+    PaperDraftRevisionSummary, PaperDraftSummary, PaperMetadata, PublicationIdentity,
+    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, canonicalize_product_id,
+    encode_paper_id_suffix, prepare_publication, product_id_from_paper_id,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{
-    PgPool, Row,
+    PgPool, Postgres, Row, Transaction,
     migrate::{MigrateError, Migrator},
     postgres::{PgPoolOptions, PgRow},
     types::Json,
@@ -41,6 +42,12 @@ pub struct PublicationCursor {
 pub struct PublicationPage {
     pub papers: Vec<PublishedPaperSummary>,
     pub next_cursor: Option<PublicationCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftUpdateOutcome {
+    pub draft: PaperDraft,
+    pub replayed: bool,
 }
 
 pub const GITHUB_TRENDING_ANY_LANGUAGE: &str = "any";
@@ -257,6 +264,474 @@ impl PostgresStorage {
     pub async fn migrate(&self) -> Result<(), StorageError> {
         MIGRATOR.run(&self.pool).await?;
         Ok(())
+    }
+
+    /// Creates the first mutable snapshot for an unpublished paper.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the actor or source is empty, or PostgreSQL
+    /// rejects the transaction.
+    pub async fn create_draft(
+        &self,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<PaperDraft, StorageError> {
+        validate_draft_write(source_markdown, actor)?;
+
+        let mut transaction = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO paper_drafts (created_by)
+            VALUES ($1)
+            RETURNING
+              paper_uuid::text AS paper_uuid,
+              current_revision,
+              to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS created_at,
+              to_char(
+                updated_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS updated_at
+            "#,
+        )
+        .bind(actor)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let paper_uuid: String = row.try_get("paper_uuid")?;
+        let revision: i32 = row.try_get("current_revision")?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_revisions (
+              paper_uuid,
+              revision,
+              source_markdown,
+              created_by
+            )
+            VALUES ($1::uuid, $2, $3, $4)
+            "#,
+        )
+        .bind(&paper_uuid)
+        .bind(revision)
+        .bind(source_markdown)
+        .bind(actor)
+        .execute(&mut *transaction)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_audit_log (
+              action,
+              actor,
+              paper_uuid,
+              revision,
+              details
+            )
+            VALUES ('draft.created', $1, $2::uuid, $3, $4)
+            "#,
+        )
+        .bind(actor)
+        .bind(&paper_uuid)
+        .bind(revision)
+        .bind(Json(json!({
+          "retained_revision_limit": DRAFT_REVISION_RETENTION,
+        })))
+        .execute(&mut *transaction)
+        .await?;
+
+        let draft = PaperDraft {
+            paper_uuid,
+            revision: decode_revision(revision)?,
+            source_markdown: source_markdown.to_owned(),
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        };
+        transaction.commit().await?;
+        Ok(draft)
+    }
+
+    /// Lists current drafts in reverse edit order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn list_drafts(&self, limit: u32) -> Result<Vec<PaperDraftSummary>, StorageError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+              paper_uuid::text AS paper_uuid,
+              current_revision,
+              to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS created_at,
+              to_char(
+                updated_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS updated_at
+            FROM paper_drafts
+            ORDER BY updated_at DESC, paper_uuid DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let revision: i32 = row.try_get("current_revision")?;
+                Ok(PaperDraftSummary {
+                    paper_uuid: row.try_get("paper_uuid")?,
+                    revision: decode_revision(revision)?,
+                    created_at: row.try_get("created_at")?,
+                    updated_at: row.try_get("updated_at")?,
+                })
+            })
+            .collect()
+    }
+
+    /// Finds the current snapshot for one unpublished paper.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when the stored record cannot be
+    /// read.
+    pub async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StorageError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              paper_drafts.paper_uuid::text AS paper_uuid,
+              paper_drafts.current_revision,
+              paper_draft_revisions.source_markdown,
+              to_char(
+                paper_drafts.created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS created_at,
+              to_char(
+                paper_drafts.updated_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS updated_at
+            FROM paper_drafts
+            JOIN paper_draft_revisions
+              ON paper_draft_revisions.paper_uuid = paper_drafts.paper_uuid
+              AND paper_draft_revisions.revision = paper_drafts.current_revision
+            WHERE paper_drafts.paper_uuid = $1::uuid
+            "#,
+        )
+        .bind(paper_uuid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(decode_draft).transpose()
+    }
+
+    /// Replaces the current draft and retains only its five newest snapshots.
+    ///
+    /// A retry of the immediately preceding successful write is returned as a
+    /// replay. Other stale expected revisions are rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the actor or source is empty, the expected
+    /// revision is stale, or PostgreSQL rejects the transaction.
+    pub async fn update_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        source_markdown: &str,
+        actor: &str,
+    ) -> Result<Option<DraftUpdateOutcome>, StorageError> {
+        validate_draft_write(source_markdown, actor)?;
+        let expected_revision = i32::try_from(expected_revision)
+            .map_err(|_| StorageError::CorruptRevision(i32::MAX))?;
+
+        let mut transaction = self.pool.begin().await?;
+        let current = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT current_revision
+            FROM paper_drafts
+            WHERE paper_uuid = $1::uuid
+            FOR UPDATE
+            "#,
+        )
+        .bind(paper_uuid)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(current_revision) = current else {
+            transaction.rollback().await?;
+            return Ok(None);
+        };
+
+        if current_revision != expected_revision {
+            if current_revision == expected_revision.saturating_add(1) {
+                let existing_source = sqlx::query_scalar::<_, String>(
+                    r#"
+                    SELECT source_markdown
+                    FROM paper_draft_revisions
+                    WHERE paper_uuid = $1::uuid AND revision = $2
+                    "#,
+                )
+                .bind(paper_uuid)
+                .bind(current_revision)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if existing_source == source_markdown {
+                    let row = select_draft_in_transaction(&mut transaction, paper_uuid)
+                        .await?
+                        .expect("locked draft still exists");
+                    transaction.commit().await?;
+                    return Ok(Some(DraftUpdateOutcome {
+                        draft: decode_draft(row)?,
+                        replayed: true,
+                    }));
+                }
+            }
+            transaction.rollback().await?;
+            return Err(StorageError::DraftRevisionConflict {
+                current_revision: decode_revision(current_revision)?,
+            });
+        }
+
+        let next_revision = current_revision
+            .checked_add(1)
+            .ok_or(StorageError::CorruptRevision(current_revision))?;
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_revisions (
+              paper_uuid,
+              revision,
+              source_markdown,
+              created_by
+            )
+            VALUES ($1::uuid, $2, $3, $4)
+            "#,
+        )
+        .bind(paper_uuid)
+        .bind(next_revision)
+        .bind(source_markdown)
+        .bind(actor)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE paper_drafts
+            SET current_revision = $2, updated_at = CURRENT_TIMESTAMP
+            WHERE paper_uuid = $1::uuid
+            "#,
+        )
+        .bind(paper_uuid)
+        .bind(next_revision)
+        .execute(&mut *transaction)
+        .await?;
+
+        let retained_from_revision = next_revision
+            .saturating_sub(i32::try_from(DRAFT_REVISION_RETENTION).expect("retention fits in i32"))
+            .saturating_add(1);
+        let pruned = sqlx::query(
+            r#"
+            DELETE FROM paper_draft_revisions
+            WHERE paper_uuid = $1::uuid AND revision < $2
+            "#,
+        )
+        .bind(paper_uuid)
+        .bind(retained_from_revision)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_audit_log (
+              action,
+              actor,
+              paper_uuid,
+              revision,
+              details
+            )
+            VALUES ('draft.updated', $1, $2::uuid, $3, $4)
+            "#,
+        )
+        .bind(actor)
+        .bind(paper_uuid)
+        .bind(next_revision)
+        .bind(Json(json!({
+          "pruned_revision_count": pruned,
+          "retained_from_revision": retained_from_revision,
+          "retained_revision_limit": DRAFT_REVISION_RETENTION,
+        })))
+        .execute(&mut *transaction)
+        .await?;
+
+        let row = select_draft_in_transaction(&mut transaction, paper_uuid)
+            .await?
+            .expect("updated draft still exists");
+        let draft = decode_draft(row)?;
+        transaction.commit().await?;
+        Ok(Some(DraftUpdateOutcome {
+            draft,
+            replayed: false,
+        }))
+    }
+
+    /// Lists retained snapshots for one draft in newest-first order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn list_draft_revisions(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<Vec<PaperDraftRevisionSummary>>, StorageError> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM paper_drafts WHERE paper_uuid = $1::uuid)",
+        )
+        .bind(paper_uuid)
+        .fetch_one(&self.pool)
+        .await?;
+        if !exists {
+            return Ok(None);
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+              paper_uuid::text AS paper_uuid,
+              revision,
+              to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS created_at
+            FROM paper_draft_revisions
+            WHERE paper_uuid = $1::uuid
+            ORDER BY revision DESC
+            "#,
+        )
+        .bind(paper_uuid)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                let revision: i32 = row.try_get("revision")?;
+                Ok(PaperDraftRevisionSummary {
+                    paper_uuid: row.try_get("paper_uuid")?,
+                    revision: decode_revision(revision)?,
+                    created_at: row.try_get("created_at")?,
+                })
+            })
+            .collect::<Result<Vec<_>, StorageError>>()
+            .map(Some)
+    }
+
+    /// Finds one retained draft snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when the stored record cannot be
+    /// read.
+    pub async fn find_draft_revision(
+        &self,
+        paper_uuid: &str,
+        revision: u32,
+    ) -> Result<Option<PaperDraftRevision>, StorageError> {
+        let Ok(revision) = i32::try_from(revision) else {
+            return Ok(None);
+        };
+        let row = sqlx::query(
+            r#"
+            SELECT
+              paper_uuid::text AS paper_uuid,
+              revision,
+              source_markdown,
+              to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+              ) AS created_at
+            FROM paper_draft_revisions
+            WHERE paper_uuid = $1::uuid AND revision = $2
+            "#,
+        )
+        .bind(paper_uuid)
+        .bind(revision)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            let revision: i32 = row.try_get("revision")?;
+            Ok(PaperDraftRevision {
+                paper_uuid: row.try_get("paper_uuid")?,
+                revision: decode_revision(revision)?,
+                source_markdown: row.try_get("source_markdown")?,
+                created_at: row.try_get("created_at")?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Deletes a mutable draft and its retained content snapshots.
+    ///
+    /// The deletion event remains in the append-only draft audit log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the actor is empty, the expected revision is
+    /// stale, or PostgreSQL rejects the transaction.
+    pub async fn delete_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+    ) -> Result<bool, StorageError> {
+        if actor.trim().is_empty() {
+            return Err(StorageError::InvalidActor);
+        }
+        let mut transaction = self.pool.begin().await?;
+        let current_revision = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT current_revision
+            FROM paper_drafts
+            WHERE paper_uuid = $1::uuid
+            FOR UPDATE
+            "#,
+        )
+        .bind(paper_uuid)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(current_revision) = current_revision else {
+            transaction.rollback().await?;
+            return Ok(false);
+        };
+        if decode_revision(current_revision)? != expected_revision {
+            transaction.rollback().await?;
+            return Err(StorageError::DraftRevisionConflict {
+                current_revision: decode_revision(current_revision)?,
+            });
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO paper_draft_audit_log (
+              action,
+              actor,
+              paper_uuid,
+              revision
+            )
+            VALUES ('draft.deleted', $1, $2::uuid, $3)
+            "#,
+        )
+        .bind(actor)
+        .bind(paper_uuid)
+        .bind(current_revision)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM paper_drafts WHERE paper_uuid = $1::uuid")
+            .bind(paper_uuid)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(true)
     }
 
     /// Publishes the first immutable revision of a new paper.
@@ -1200,6 +1675,62 @@ fn decode_github_trending_snapshot(
     })
 }
 
+async fn select_draft_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    paper_uuid: &str,
+) -> Result<Option<PgRow>, StorageError> {
+    sqlx::query(
+        r#"
+        SELECT
+          paper_drafts.paper_uuid::text AS paper_uuid,
+          paper_drafts.current_revision,
+          paper_draft_revisions.source_markdown,
+          to_char(
+            paper_drafts.created_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+          ) AS created_at,
+          to_char(
+            paper_drafts.updated_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+          ) AS updated_at
+        FROM paper_drafts
+        JOIN paper_draft_revisions
+          ON paper_draft_revisions.paper_uuid = paper_drafts.paper_uuid
+          AND paper_draft_revisions.revision = paper_drafts.current_revision
+        WHERE paper_drafts.paper_uuid = $1::uuid
+        "#,
+    )
+    .bind(paper_uuid)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(StorageError::from)
+}
+
+fn decode_draft(row: PgRow) -> Result<PaperDraft, StorageError> {
+    let revision: i32 = row.try_get("current_revision")?;
+    Ok(PaperDraft {
+        paper_uuid: row.try_get("paper_uuid")?,
+        revision: decode_revision(revision)?,
+        source_markdown: row.try_get("source_markdown")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn decode_revision(revision: i32) -> Result<u32, StorageError> {
+    u32::try_from(revision).map_err(|_| StorageError::CorruptRevision(revision))
+}
+
+fn validate_draft_write(source_markdown: &str, actor: &str) -> Result<(), StorageError> {
+    if actor.trim().is_empty() {
+        return Err(StorageError::InvalidActor);
+    }
+    if source_markdown.trim().is_empty() {
+        return Err(StorageError::InvalidDraftSource);
+    }
+    Ok(())
+}
+
 fn decode_github_trending_entry(row: &PgRow) -> Result<GitHubTrendingEntry, StorageError> {
     let rank: i32 = row.try_get("rank")?;
     Ok(GitHubTrendingEntry {
@@ -1231,6 +1762,10 @@ pub enum StorageError {
     Publication(#[from] PublicationPreparationError),
     #[error("operation actor must not be empty")]
     InvalidActor,
+    #[error("draft source Markdown must not be empty")]
+    InvalidDraftSource,
+    #[error("draft changed; current revision is {current_revision}")]
+    DraftRevisionConflict { current_revision: u32 },
     #[error("idempotency key is invalid")]
     InvalidIdempotencyKey,
     #[error("idempotency key was already used for different content")]

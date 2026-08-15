@@ -3,8 +3,17 @@ import { describe, expect, test } from "bun:test";
 import {
   ProdxivApiClient,
   ProdxivApiError,
+  type PaperDraft,
   type PublishedPaper,
 } from "../src/client.ts";
+
+const draft = {
+  paper_uuid: "00000000-0000-4000-8000-000000000001",
+  revision: 1,
+  source_markdown: "# Working notes\n",
+  created_at: "2026-08-15T00:00:00.000000Z",
+  updated_at: "2026-08-15T00:00:00.000000Z",
+} satisfies PaperDraft;
 
 const publishedPaper = {
   schema_version: "1",
@@ -79,6 +88,103 @@ const publishedPaperV2 = {
 } satisfies PublishedPaper;
 
 describe("ProdxivApiClient", () => {
+  test("manages UUID-scoped drafts and retained revisions", async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example/",
+      token: "draft-token",
+      fetch: async (input, init) => {
+        const url = input.toString();
+        requests.push({ url, init });
+        const pathname = new URL(url).pathname;
+        if (init?.method === "POST") {
+          return Response.json(draft, { status: 201 });
+        }
+        if (init?.method === "PUT") {
+          return Response.json({
+            ...draft,
+            revision: 2,
+            source_markdown: "# Revised notes\n",
+            updated_at: "2026-08-15T00:00:01.000000Z",
+          });
+        }
+        if (init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        if (pathname.endsWith("/revisions/1")) {
+          const { updated_at: _, ...revision } = draft;
+          return Response.json(revision);
+        }
+        if (pathname.endsWith("/revisions")) {
+          const { source_markdown: _, updated_at: __, ...summary } = draft;
+          return Response.json({
+            revisions: [summary],
+            retained_revision_limit: 5,
+          });
+        }
+        if (pathname === "/v1/drafts") {
+          const { source_markdown: _, ...summary } = draft;
+          return Response.json({ drafts: [summary] });
+        }
+        return Response.json(draft);
+      },
+    });
+
+    expect(
+      await client.createDraft({ source_markdown: draft.source_markdown }),
+    ).toEqual(draft);
+    expect((await client.listDrafts()).drafts[0]?.paper_uuid).toBe(
+      draft.paper_uuid,
+    );
+    expect(await client.getDraft(draft.paper_uuid)).toEqual(draft);
+    expect(
+      await client.updateDraft(draft.paper_uuid, {
+        source_markdown: "# Revised notes\n",
+        expected_revision: 1,
+      }),
+    ).toEqual(expect.objectContaining({ revision: 2 }));
+    expect(
+      (await client.listDraftRevisions(draft.paper_uuid))
+        .retained_revision_limit,
+    ).toBe(5);
+    expect(await client.getDraftRevision(draft.paper_uuid, 1)).toEqual(
+      expect.objectContaining({ revision: 1 }),
+    );
+    await client.deleteDraft(draft.paper_uuid, 2);
+
+    expect(requests.map((request) => request.url)).not.toContain(
+      "https://api.prodxiv.example/v1/drafts/latest",
+    );
+    expect(requests[0]?.init?.headers).toEqual(
+      expect.objectContaining({ authorization: "Bearer draft-token" }),
+    );
+    expect(requests[3]?.init?.headers).toEqual(
+      expect.objectContaining({ "if-match": '"1"' }),
+    );
+    expect(requests[6]?.init?.headers).toEqual(
+      expect.objectContaining({ "if-match": '"2"' }),
+    );
+  });
+
+  test("requires a token and canonical UUID for private drafts", async () => {
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      fetch: async () => Response.json(draft),
+    });
+
+    await expect(client.listDrafts()).rejects.toEqual(
+      expect.objectContaining({ code: "auth.token_missing" }),
+    );
+    const authorized = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token: "draft-token",
+      fetch: async () => Response.json(draft),
+    });
+    await expect(authorized.getDraft("latest")).rejects.toEqual(
+      expect.objectContaining({ code: "draft.invalid_uuid" }),
+    );
+  });
+
   test("reads a GitHub Trending snapshot with an exact scope", async () => {
     let requestUrl = "";
     const client = new ProdxivApiClient({

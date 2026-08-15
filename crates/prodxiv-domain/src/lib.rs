@@ -1,10 +1,15 @@
 //! Canonical product paper contracts.
 
+mod draft;
 mod paper;
 mod policy;
 mod publication;
 mod validation;
 
+pub use draft::{
+    DRAFT_REVISION_RETENTION, PaperDraft, PaperDraftRevision, PaperDraftRevisionSummary,
+    PaperDraftSummary,
+};
 pub use paper::{
     Author, AuthorKind, LEGACY_SCHEMA_VERSION, PAPER_ID_ALPHABET, PAPER_ID_SUFFIX_LENGTH,
     PRODUCT_ID_PREFIX, PaperDocument, PaperMetadata, PaperParseError, PaperScope, PaperScopeKind,
