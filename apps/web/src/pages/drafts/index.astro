@@ -1,0 +1,251 @@
+---
+import type { DraftReviewStatus, PaperDraftSummary } from "@prodxiv/api-client";
+import SiteLayout from "../../layouts/SiteLayout.astro";
+import {
+  draftReviewChallenge,
+  draftReviewClient,
+  isUnauthorizedReviewError,
+  reviewErrorMessage,
+} from "../../lib/draft-review-auth.ts";
+
+export const prerender = false;
+
+Astro.response.headers.set("cache-control", "no-store");
+Astro.response.headers.set("x-robots-tag", "noindex, nofollow");
+
+const requestedStatus = Astro.url.searchParams.get("status") ?? "pending_review";
+const reviewStatus: DraftReviewStatus = isReviewStatus(requestedStatus)
+  ? requestedStatus
+  : "pending_review";
+const client = draftReviewClient(Astro.request, import.meta.env.PRODXIV_API_URL);
+if (client === undefined) {
+  return draftReviewChallenge();
+}
+
+let drafts: PaperDraftSummary[] = [];
+let errorMessage: string | undefined;
+try {
+  drafts = (
+    await client.listDrafts({ limit: 100, review_status: reviewStatus })
+  ).drafts;
+} catch (error) {
+  if (isUnauthorizedReviewError(error)) {
+    return draftReviewChallenge();
+  }
+  errorMessage = reviewErrorMessage(error);
+}
+
+const labels: Record<DraftReviewStatus, string> = {
+  pending_review: "Pending review",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+function isReviewStatus(value: string): value is DraftReviewStatus {
+  return value === "pending_review" || value === "approved" || value === "rejected";
+}
+
+function formatTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+---
+
+<SiteLayout
+  title="Draft review — prodxiv"
+  description="Private review queue for unpublished product-paper drafts."
+>
+  <section class="review-shell shell">
+    <header class="review-header">
+      <div>
+        <p class="eyebrow">Private author workspace</p>
+        <h1>Draft review</h1>
+        <p>
+          Approval authorizes the exact current revision for publication during
+          the next daily run. Rejected drafts remain private and retained.
+        </p>
+      </div>
+      <span class="private-badge">Authenticated</span>
+    </header>
+
+    <nav class="review-tabs" aria-label="Draft review status">
+      {Object.entries(labels).map(([status, label]) => (
+        <a
+          href={`/drafts?status=${status}`}
+          aria-current={status === reviewStatus ? "page" : undefined}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+
+    {errorMessage !== undefined ? (
+      <p class="review-notice review-notice--error">{errorMessage}</p>
+    ) : drafts.length === 0 ? (
+      <div class="empty-review">
+        <h2>No {labels[reviewStatus].toLowerCase()} drafts</h2>
+        <p>The daily Paperbot run will place new drafts here.</p>
+      </div>
+    ) : (
+      <ol class="draft-list">
+        {drafts.map((draft) => (
+          <li>
+            <a href={`/drafts/${draft.paper_uuid}`}>
+              <span class="draft-list__id">{draft.paper_uuid}</span>
+              <span class="draft-list__meta">
+                Revision {draft.revision} · {labels[draft.review.status]} · Edited{" "}
+                <time datetime={draft.updated_at}>{formatTimestamp(draft.updated_at)}</time>
+              </span>
+              {draft.review.rejection_reason !== undefined ? (
+                <span class="draft-list__reason">
+                  {draft.review.rejection_reason}
+                </span>
+              ) : null}
+            </a>
+          </li>
+        ))}
+      </ol>
+    )}
+  </section>
+</SiteLayout>
+
+<style>
+  .review-shell {
+    padding-block: clamp(3rem, 7vw, 6rem);
+  }
+
+  .review-header {
+    display: flex;
+    gap: 2rem;
+    align-items: start;
+    justify-content: space-between;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .eyebrow {
+    margin: 0 0 0.5rem;
+    color: var(--accent);
+    font-size: 0.72rem;
+    font-weight: 750;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(2.7rem, 7vw, 5rem);
+    font-weight: 500;
+    line-height: 0.95;
+    letter-spacing: -0.045em;
+  }
+
+  .review-header p:last-child {
+    max-width: 47rem;
+    margin: 1.2rem 0 0;
+    color: var(--ink-soft);
+  }
+
+  .private-badge {
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--line-strong);
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .review-tabs {
+    display: flex;
+    gap: 1.5rem;
+    margin-block: 2rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .review-tabs a {
+    padding: 0 0 0.65rem;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .review-tabs a[aria-current="page"] {
+    color: var(--accent);
+    border-bottom: 0.18rem solid var(--accent);
+  }
+
+  .draft-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+    list-style: none;
+  }
+
+  .draft-list li {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .draft-list a {
+    display: grid;
+    gap: 0.35rem;
+    padding: 1.25rem 0.2rem;
+    text-decoration: none;
+  }
+
+  .draft-list__id {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+  }
+
+  .draft-list__meta,
+  .draft-list__reason {
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+  }
+
+  .draft-list__reason {
+    font-family: var(--serif);
+    font-style: italic;
+  }
+
+  .empty-review,
+  .review-notice {
+    padding: 2rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .empty-review h2,
+  .empty-review p {
+    margin: 0;
+  }
+
+  .empty-review p {
+    margin-top: 0.5rem;
+    color: var(--ink-soft);
+  }
+
+  .review-notice--error {
+    color: var(--accent-dark);
+    border-color: var(--accent);
+  }
+
+  @media (max-width: 600px) {
+    .review-header {
+      display: grid;
+    }
+
+    .private-badge {
+      width: fit-content;
+    }
+  }
+</style>

@@ -8,6 +8,8 @@ external-observation routes:
 - `POST /v1/drafts`
 - `GET /v1/drafts`
 - `GET`, `PUT`, and `DELETE /v1/drafts/{paper_uuid}`
+- `POST /v1/drafts/{paper_uuid}/approve`
+- `POST /v1/drafts/{paper_uuid}/reject`
 - `POST /v1/drafts/{paper_uuid}/publish`
 - `GET /v1/drafts/{paper_uuid}/revisions`
 - `GET /v1/drafts/{paper_uuid}/revisions/{revision}`
@@ -19,6 +21,12 @@ external-observation routes:
 The generated contract is checked in at `openapi/prodxiv-api.json`. Draft
 routes are private, use the publishing bearer token in the MVP, and are
 described in `docs/DRAFTS.md`.
+
+The website exposes the private `/drafts` review queue. It accepts the same
+token from browser HTTP Basic authentication and forwards it server-side; do
+not configure `PRODXIV_PUBLISH_TOKEN` on the web project or expose it in client
+JavaScript. Any non-empty Basic username is accepted in this MVP, so API audit
+events use `PRODXIV_PUBLISH_ACTOR` until real reviewer identity is introduced.
 
 ## Local environment
 

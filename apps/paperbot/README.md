@@ -169,12 +169,18 @@ session contents. The model cannot browse repositories, and the command does
 not draft or publish papers. The selection is a research queue, not an
 endorsement.
 
-The repository's scheduled `Evaluate Paperbot` workflow uses the selection as
-a discovery lane alongside three exact-revision canaries. It generates six
-private auto-mode drafts per day, each with one terminal `*_final.zip`, and
-uploads the run directories and sealed ZIPs for 30 days. Assumptions and
-unresolved questions remain review inputs rather than evidence. The workflow
-has no publication step or publishing credentials.
+The repository's `Daily Paperbot Drafts` workflow generates three private
+auto-mode drafts from the discovery queue per day, skipping repositories that
+already have a published, pending, or approved paper from the current Paperbot
+version. Each draft has one terminal `*_final.zip`, and the workflow uploads
+the private run directories and sealed ZIPs for 30 days. It submits those
+papers as reviewable drafts. At the start of a later run, a separate host step
+publishes only exact revisions an author already approved; Paperbot's model
+sessions never receive the publishing token.
+Assumptions and unresolved questions remain review inputs rather than
+evidence. Three exact-revision canaries run separately only for same-repository
+pull requests labeled `paperbot-canaries`, or by manual dispatch, and never
+publish.
 
 Every Paperbot-started Pi session file is created before its first model turn,
 is mode `0600` inside a mode-`0700` run directory, and stays local. Session

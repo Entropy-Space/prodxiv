@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fs, path::Path};
 
-use prodxiv_domain::PaperDocument;
+use prodxiv_domain::{DraftReviewStatus, PaperDocument};
 use prodxiv_storage::{
     GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector, NewGitHubTrendingSnapshot,
     PostgresStorage, StorageError,
@@ -235,6 +235,124 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn creates_daily_drafts_idempotently(pool: PgPool) {
+    let storage = PostgresStorage::new(pool);
+    let first = storage
+        .create_draft_idempotent(
+            "# Daily draft\n",
+            "paperbot_daily",
+            "paperbot-draft-generation-1",
+        )
+        .await
+        .expect("first draft submission should succeed");
+    let replay = storage
+        .create_draft_idempotent(
+            "# Daily draft\n",
+            "paperbot_daily",
+            "paperbot-draft-generation-1",
+        )
+        .await
+        .expect("same draft submission should replay");
+    assert!(!first.replayed);
+    assert!(replay.replayed);
+    assert_eq!(replay.draft.paper_uuid, first.draft.paper_uuid);
+
+    let conflict = storage
+        .create_draft_idempotent(
+            "# Different daily draft\n",
+            "paperbot_daily",
+            "paperbot-draft-generation-1",
+        )
+        .await;
+    assert!(matches!(conflict, Err(StorageError::IdempotencyConflict)));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: PgPool) {
+    let storage = PostgresStorage::new(pool.clone());
+    let (source, _) = submission();
+    let created = storage
+        .create_draft(&source, "paperbot_daily")
+        .await
+        .expect("draft should be created");
+    assert_eq!(created.review.status, DraftReviewStatus::PendingReview);
+
+    let unapproved = storage
+        .publish_draft(
+            &created.paper_uuid,
+            created.revision,
+            "daily_promoter",
+            "draft-review-unapproved",
+            None,
+        )
+        .await;
+    assert!(matches!(unapproved, Err(StorageError::DraftNotApproved)));
+
+    let rejected = storage
+        .reject_draft(
+            &created.paper_uuid,
+            created.revision,
+            "author_test",
+            Some("Not ready for publication"),
+        )
+        .await
+        .expect("rejection should succeed")
+        .expect("draft should remain available");
+    assert_eq!(rejected.review.status, DraftReviewStatus::Rejected);
+    assert_eq!(rejected.review.reviewed_revision, Some(1));
+    assert_eq!(
+        rejected.review.rejection_reason.as_deref(),
+        Some("Not ready for publication")
+    );
+    assert_eq!(
+        storage
+            .list_drafts(5, Some(DraftReviewStatus::Rejected))
+            .await
+            .expect("rejected drafts should list")
+            .len(),
+        1
+    );
+
+    let edited = storage
+        .update_draft(
+            &created.paper_uuid,
+            created.revision,
+            &source,
+            "author_test",
+        )
+        .await
+        .expect("rejected draft should remain editable")
+        .expect("draft should exist")
+        .draft;
+    assert_eq!(edited.revision, 2);
+    assert_eq!(edited.review.status, DraftReviewStatus::PendingReview);
+    assert!(edited.review.reviewed_revision.is_none());
+    assert!(edited.review.rejection_reason.is_none());
+
+    let approved = storage
+        .approve_draft(&created.paper_uuid, edited.revision, "author_test")
+        .await
+        .expect("approval should succeed")
+        .expect("draft should exist");
+    assert_eq!(approved.review.status, DraftReviewStatus::Approved);
+    assert_eq!(approved.review.reviewed_revision, Some(edited.revision));
+
+    let review_actions: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT action
+        FROM paper_draft_audit_log
+        WHERE paper_uuid = $1::uuid AND action IN ('draft.rejected', 'draft.approved')
+        ORDER BY audit_id
+        "#,
+    )
+    .bind(&created.paper_uuid)
+    .fetch_all(&pool)
+    .await
+    .expect("review audit events should be readable");
+    assert_eq!(review_actions, ["draft.rejected", "draft.approved"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn publishes_one_exact_draft_revision_and_replays_after_content_deletion(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let (source, _) = submission();
@@ -242,6 +360,11 @@ async fn publishes_one_exact_draft_revision_and_replays_after_content_deletion(p
         .create_draft(&source, "integration_test")
         .await
         .expect("draft should be created");
+    storage
+        .approve_draft(&created.paper_uuid, created.revision, "author_test")
+        .await
+        .expect("draft approval should succeed")
+        .expect("draft should exist");
 
     let published = storage
         .publish_draft(
@@ -340,13 +463,7 @@ async fn keeps_an_invalid_draft_mutable_when_publication_fails(pool: PgPool) {
         .expect("incomplete draft should be created");
 
     let result = storage
-        .publish_draft(
-            &created.paper_uuid,
-            created.revision,
-            "integration_test",
-            "draft-publish-request-invalid",
-            None,
-        )
+        .approve_draft(&created.paper_uuid, created.revision, "author_test")
         .await;
     assert!(matches!(result, Err(StorageError::InvalidDraftMarkdown(_))));
     assert!(
@@ -366,6 +483,11 @@ async fn publishes_a_draft_only_once_across_concurrent_request_keys(pool: PgPool
         .create_draft(&source, "integration_test")
         .await
         .expect("draft should be created");
+    storage
+        .approve_draft(&created.paper_uuid, created.revision, "author_test")
+        .await
+        .expect("draft approval should succeed")
+        .expect("draft should exist");
 
     let (first, second) = tokio::join!(
         storage.publish_draft(

@@ -52,6 +52,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/drafts/{paper_uuid}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["approve_draft"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/drafts/{paper_uuid}/publish": {
     parameters: {
       query?: never;
@@ -62,6 +78,22 @@ export interface paths {
     get?: never;
     put?: never;
     post: operations["publish_draft"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/drafts/{paper_uuid}/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["reject_draft"];
     delete?: never;
     options?: never;
     head?: never;
@@ -185,6 +217,8 @@ export interface components {
     };
     /** @enum {string} */
     DiagnosticSeverity: "error" | "warning";
+    /** @enum {string} */
+    DraftReviewStatus: "pending_review" | "approved" | "rejected";
     ErrorBody: {
       code: string;
       diagnostics?: components["schemas"]["Diagnostic"][];
@@ -261,6 +295,7 @@ export interface components {
     PaperDraft: {
       created_at: string;
       paper_uuid: string;
+      review: components["schemas"]["PaperDraftReview"];
       /** Format: int32 */
       revision: number;
       source_markdown: string;
@@ -268,6 +303,14 @@ export interface components {
     };
     PaperDraftListResponse: {
       drafts: components["schemas"]["PaperDraftSummary"][];
+    };
+    PaperDraftReview: {
+      rejection_reason?: string | null;
+      reviewed_at?: string | null;
+      reviewed_by?: string | null;
+      /** Format: int32 */
+      reviewed_revision?: number | null;
+      status: components["schemas"]["DraftReviewStatus"];
     };
     PaperDraftRevision: {
       created_at: string;
@@ -290,6 +333,7 @@ export interface components {
     PaperDraftSummary: {
       created_at: string;
       paper_uuid: string;
+      review: components["schemas"]["PaperDraftReview"];
       /** Format: int32 */
       revision: number;
       updated_at: string;
@@ -388,6 +432,9 @@ export interface components {
       /** Format: int32 */
       version: number;
     };
+    RejectDraftRequest: {
+      reason?: string | null;
+    };
     /** @enum {string} */
     RelationshipKind:
       "inspired_by" | "built_on" | "alternative_to" | "supersedes";
@@ -434,6 +481,8 @@ export interface operations {
       query?: {
         /** @description Maximum drafts to return; defaults to 20 */
         limit?: number;
+        /** @description Optional pending_review, approved, or rejected filter */
+        review_status?: string;
       };
       header?: never;
       path?: never;
@@ -482,7 +531,10 @@ export interface operations {
   create_draft: {
     parameters: {
       query?: never;
-      header?: never;
+      header: {
+        /** @description Stable key for safely retrying this exact draft creation */
+        "Idempotency-Key": string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -492,6 +544,15 @@ export interface operations {
       };
     };
     responses: {
+      /** @description Original mutable draft returned for an idempotent retry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaperDraft"];
+        };
+      };
       /** @description Mutable draft was created */
       201: {
         headers: {
@@ -512,6 +573,15 @@ export interface operations {
       };
       /** @description Bearer token is absent or invalid */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Idempotency key conflicts or its draft already completed */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -769,6 +839,95 @@ export interface operations {
       };
     };
   };
+  approve_draft: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Quoted current draft revision, for example "3" */
+        "If-Match": string;
+      };
+      path: {
+        /** @description Unpublished paper UUID */
+        paper_uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact current revision was approved for a later publication run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaperDraft"];
+        };
+      };
+      /** @description Paper UUID or If-Match is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bearer token is absent or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft does not exist */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft changed since the caller read it */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft is not valid for publication */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description If-Match is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Approving the draft failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   publish_draft: {
     parameters: {
       query?: never;
@@ -873,6 +1032,99 @@ export interface operations {
       };
       /** @description Monthly identifier space is exhausted */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  reject_draft: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Quoted current draft revision, for example "3" */
+        "If-Match": string;
+      };
+      path: {
+        /** @description Unpublished paper UUID */
+        paper_uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RejectDraftRequest"];
+      };
+    };
+    responses: {
+      /** @description Exact current revision was rejected and retained */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaperDraft"];
+        };
+      };
+      /** @description Request, paper UUID, or If-Match is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bearer token is absent or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft does not exist */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft changed since the caller read it */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Rejection reason is too large */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description If-Match is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Rejecting the draft failed */
+      500: {
         headers: {
           [name: string]: unknown;
         };

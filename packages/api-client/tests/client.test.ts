@@ -11,6 +11,7 @@ const draft = {
   paper_uuid: "00000000-0000-4000-8000-000000000001",
   revision: 1,
   source_markdown: "# Working notes\n",
+  review: { status: "pending_review" },
   created_at: "2026-08-15T00:00:00.000000Z",
   updated_at: "2026-08-15T00:00:00.000000Z",
 } satisfies PaperDraft;
@@ -131,11 +132,15 @@ describe("ProdxivApiClient", () => {
     });
 
     expect(
-      await client.createDraft({ source_markdown: draft.source_markdown }),
+      await client.createDraft({
+        source_markdown: draft.source_markdown,
+        idempotency_key: "draft-create-client-1",
+      }),
     ).toEqual(draft);
-    expect((await client.listDrafts()).drafts[0]?.paper_uuid).toBe(
-      draft.paper_uuid,
-    );
+    expect(
+      (await client.listDrafts({ review_status: "pending_review" })).drafts[0]
+        ?.paper_uuid,
+    ).toBe(draft.paper_uuid);
     expect(await client.getDraft(draft.paper_uuid)).toEqual(draft);
     expect(
       await client.updateDraft(draft.paper_uuid, {
@@ -155,8 +160,14 @@ describe("ProdxivApiClient", () => {
     expect(requests.map((request) => request.url)).not.toContain(
       "https://api.prodxiv.example/v1/drafts/latest",
     );
+    expect(requests[1]?.url).toBe(
+      "https://api.prodxiv.example/v1/drafts?review_status=pending_review",
+    );
     expect(requests[0]?.init?.headers).toEqual(
-      expect.objectContaining({ authorization: "Bearer draft-token" }),
+      expect.objectContaining({
+        authorization: "Bearer draft-token",
+        "idempotency-key": "draft-create-client-1",
+      }),
     );
     expect(requests[3]?.init?.headers).toEqual(
       expect.objectContaining({ "if-match": '"1"' }),
@@ -164,6 +175,61 @@ describe("ProdxivApiClient", () => {
     expect(requests[6]?.init?.headers).toEqual(
       expect.objectContaining({ "if-match": '"2"' }),
     );
+  });
+
+  test("approves and rejects exact draft revisions", async () => {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token: "draft-token",
+      fetch: async (input, init) => {
+        requests.push({ url: input.toString(), init });
+        const rejected = input.toString().endsWith("/reject");
+        return Response.json({
+          ...draft,
+          review: rejected
+            ? {
+                status: "rejected",
+                reviewed_revision: 1,
+                reviewed_by: "author",
+                reviewed_at: "2026-08-17T00:00:00.000000Z",
+                rejection_reason: "Needs revision",
+              }
+            : {
+                status: "approved",
+                reviewed_revision: 1,
+                reviewed_by: "author",
+                reviewed_at: "2026-08-17T00:00:00.000000Z",
+              },
+        });
+      },
+    });
+
+    expect(
+      (await client.approveDraft(draft.paper_uuid, { expected_revision: 1 }))
+        .review.status,
+    ).toBe("approved");
+    expect(
+      (
+        await client.rejectDraft(draft.paper_uuid, {
+          expected_revision: 1,
+          reason: "Needs revision",
+        })
+      ).review.status,
+    ).toBe("rejected");
+
+    expect(requests[0]?.url).toBe(
+      `https://api.prodxiv.example/v1/drafts/${draft.paper_uuid}/approve`,
+    );
+    expect(requests[0]?.init?.headers).toEqual(
+      expect.objectContaining({ "if-match": '"1"' }),
+    );
+    expect(requests[1]?.url).toBe(
+      `https://api.prodxiv.example/v1/drafts/${draft.paper_uuid}/reject`,
+    );
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({
+      reason: "Needs revision",
+    });
   });
 
   test("publishes one saved draft revision without resending Markdown", async () => {
