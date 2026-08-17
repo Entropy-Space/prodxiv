@@ -1,5 +1,6 @@
 ---
 import type { PaperDraft } from "@prodxiv/api-client";
+import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 import SiteLayout from "../../layouts/SiteLayout.astro";
 import {
   draftReviewChallenge,
@@ -40,6 +41,15 @@ if (Astro.request.method === "POST") {
       await client.approveDraft(paperUuid, {
         expected_revision: expectedRevision,
       });
+    } else if (action === "approve_and_publish") {
+      const result = await client.approveAndPublishDraft(paperUuid, {
+        expected_revision: expectedRevision,
+        idempotency_key: `author-approve-publish:${paperUuid}:${expectedRevision}`,
+      });
+      return Astro.redirect(
+        publicPaperPath(result.paper.paper_id, result.paper.version),
+        303,
+      );
     } else if (action === "reject") {
       const reason = form.get("reason");
       await client.rejectDraft(paperUuid, {
@@ -126,7 +136,9 @@ function noticeMessage(value: string | null): string | undefined {
           <div>
             <p class="eyebrow">Private unpublished paper</p>
             <h1>Draft revision {draft.revision}</h1>
-            <p class="draft-uuid">{draft.paper_uuid}</p>
+            <p class="draft-uuid">
+              {draft.paper_uuid} · {draft.owner_kind === "bot" ? "Paperbot-owned" : "Author-owned"}
+            </p>
           </div>
           <span class:list={["status-badge", `status-badge--${draft.review.status}`]}>
             {statusLabel}
@@ -168,6 +180,20 @@ function noticeMessage(value: string | null): string | undefined {
                 Approval is bound to revision {draft.revision}. Any later edit
                 clears it automatically.
               </p>
+              <form method="post">
+                <input
+                  type="hidden"
+                  name="expected_revision"
+                  value={draft.revision}
+                />
+                <button
+                  class="button button--primary"
+                  name="action"
+                  value="approve_and_publish"
+                >
+                  Approve and publish now
+                </button>
+              </form>
               {draft.review.status !== "approved" ? (
                 <form method="post">
                   <input
@@ -175,7 +201,7 @@ function noticeMessage(value: string | null): string | undefined {
                     name="expected_revision"
                     value={draft.revision}
                   />
-                  <button class="button button--primary" name="action" value="approve">
+                  <button class="button button--secondary" name="action" value="approve">
                     Approve for next run
                   </button>
                 </form>

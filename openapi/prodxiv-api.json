@@ -53,6 +53,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "owner_kind",
+            "in": "query",
+            "description": "Optional author or bot ownership filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -343,6 +352,16 @@
               }
             }
           },
+          "403": {
+            "description": "Bot principal attempted to edit an author-owned draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Draft does not exist",
             "content": {
@@ -439,6 +458,16 @@
           },
           "401": {
             "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bot principal attempted to delete an author-owned draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -550,6 +579,16 @@
               }
             }
           },
+          "403": {
+            "description": "Bot principals cannot approve through the author review endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Draft does not exist",
             "content": {
@@ -592,6 +631,168 @@
           },
           "500": {
             "description": "Approving the draft failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/v1/drafts/{paper_uuid}/approve-and-publish": {
+      "post": {
+        "tags": [],
+        "operationId": "approve_and_publish_draft",
+        "parameters": [
+          {
+            "name": "paper_uuid",
+            "in": "path",
+            "description": "Unpublished paper UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Quoted current draft revision, for example \"3\"",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Stable key for safely retrying this exact approval and publication",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Original publication returned for an idempotent retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPaper"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Exact draft revision was approved and published atomically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPaper"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request, paper UUID, If-Match, or idempotency key is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bot principal attempted to approve a non-pending or author-owned draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft changed or the idempotency key conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Draft Markdown or requested product is not publishable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Approving and publishing failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Monthly identifier space is exhausted",
             "content": {
               "application/json": {
                 "schema": {
@@ -817,6 +1018,16 @@
           },
           "401": {
             "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bot principal attempted to reject an author-owned draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -1563,6 +1774,13 @@
           "warning"
         ]
       },
+      "DraftOwnerKind": {
+        "type": "string",
+        "enum": [
+          "author",
+          "bot"
+        ]
+      },
       "DraftReviewStatus": {
         "type": "string",
         "enum": [
@@ -1889,6 +2107,7 @@
         "required": [
           "paper_uuid",
           "revision",
+          "owner_kind",
           "source_markdown",
           "review",
           "created_at",
@@ -1897,6 +2116,9 @@
         "properties": {
           "created_at": {
             "type": "string"
+          },
+          "owner_kind": {
+            "$ref": "#/components/schemas/DraftOwnerKind"
           },
           "paper_uuid": {
             "type": "string"
@@ -2043,6 +2265,7 @@
         "required": [
           "paper_uuid",
           "revision",
+          "owner_kind",
           "review",
           "created_at",
           "updated_at"
@@ -2050,6 +2273,9 @@
         "properties": {
           "created_at": {
             "type": "string"
+          },
+          "owner_kind": {
+            "$ref": "#/components/schemas/DraftOwnerKind"
           },
           "paper_uuid": {
             "type": "string"

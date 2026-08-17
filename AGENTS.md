@@ -22,7 +22,9 @@ Read these documents before making product or architecture decisions:
   revision.
 - Treat limitations and benchmark methodology as first-class content.
 - Prefer visible uncertainty over unsupported fluent prose.
-- Paperbot may draft and revise, but it must never publish automatically.
+- Paperbot's author-facing CLI must not publish without explicit confirmation.
+  The daily scheduler may atomically approve and publish an unchanged,
+  bot-owned draft from a previous run, but never an author-owned draft.
 - Paperbot should infer implementation and ask authors about intention.
 - Keep repository analysis local by default.
 
@@ -129,7 +131,9 @@ The CLI should:
   vendored dependencies by default.
 - Show which files were selected for local analysis.
 - Never fabricate benchmarks or treat marketing copy as established fact.
-- Require explicit confirmation for submission or any remote write.
+- Require explicit confirmation for author-invoked submission or remote writes.
+  Scheduled bot writes must use the dedicated bot principal and remain limited
+  to bot-owned drafts.
 
 The skill should:
 

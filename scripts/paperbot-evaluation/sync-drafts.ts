@@ -11,14 +11,23 @@ interface DraftSyncClient {
   listDrafts(input: {
     limit: number;
     review_status: "pending_review" | "approved";
+    owner_kind?: "author" | "bot";
   }): Promise<{
     drafts: Array<{
       paper_uuid: string;
       revision: number;
+      owner_kind: "author" | "bot";
       review: { reviewed_revision?: number | null };
     }>;
   }>;
   publishDraft(
+    paper_uuid: string,
+    input: PublishDraftInput,
+  ): Promise<{
+    paper: { paper_id: string; version: number };
+    replayed: boolean;
+  }>;
+  approveAndPublishDraft(
     paper_uuid: string,
     input: PublishDraftInput,
   ): Promise<{
@@ -36,19 +45,21 @@ interface DraftSyncClient {
 }
 
 export interface PromotionReport {
-  schema_version: "1";
+  schema_version: "2";
   approved_count: number;
+  pending_bot_count: number;
   published: Array<{
     paper_uuid: string;
     draft_revision: number;
     paper_id: string;
     paper_revision: number;
     replayed: boolean;
+    approval_kind: "human" | "automatic";
   }>;
   skipped: Array<{
     paper_uuid: string;
     draft_revision: number;
-    reason: "draft_changed";
+    reason: "draft_changed" | "ownership_changed";
   }>;
   failed: Array<{
     paper_uuid: string;
@@ -81,7 +92,7 @@ export interface SubmissionReport {
   }>;
 }
 
-export async function promoteApprovedDrafts(
+export async function promoteDrafts(
   client: DraftSyncClient,
 ): Promise<PromotionReport> {
   const approved = await client.listDrafts({
@@ -89,8 +100,9 @@ export async function promoteApprovedDrafts(
     review_status: "approved",
   });
   const report: PromotionReport = {
-    schema_version: "1",
+    schema_version: "2",
     approved_count: approved.drafts.length,
+    pending_bot_count: 0,
     published: [],
     skipped: [],
     failed: [],
@@ -117,6 +129,7 @@ export async function promoteApprovedDrafts(
         paper_id: outcome.paper.paper_id,
         paper_revision: outcome.paper.version,
         replayed: outcome.replayed,
+        approval_kind: "human",
       });
     } catch (error) {
       if (
@@ -135,6 +148,54 @@ export async function promoteApprovedDrafts(
       report.failed.push({
         paper_uuid: draft.paper_uuid,
         draft_revision: reviewedRevision,
+        error_code:
+          error instanceof ProdxivApiError
+            ? error.code
+            : "sync.unexpected_error",
+        message: safeErrorMessage(error),
+      });
+    }
+  }
+  const pending = await client.listDrafts({
+    limit: 100,
+    review_status: "pending_review",
+    owner_kind: "bot",
+  });
+  report.pending_bot_count = pending.drafts.length;
+  for (const draft of pending.drafts) {
+    try {
+      const outcome = await client.approveAndPublishDraft(draft.paper_uuid, {
+        expected_revision: draft.revision,
+        idempotency_key: `paperbot-auto-publish:${draft.paper_uuid}:${draft.revision}`,
+      });
+      report.published.push({
+        paper_uuid: draft.paper_uuid,
+        draft_revision: draft.revision,
+        paper_id: outcome.paper.paper_id,
+        paper_revision: outcome.paper.version,
+        replayed: outcome.replayed,
+        approval_kind: "automatic",
+      });
+    } catch (error) {
+      if (
+        error instanceof ProdxivApiError &&
+        (error.code === "draft.revision_conflict" ||
+          error.code === "draft.not_found" ||
+          error.code === "draft.owner_forbidden")
+      ) {
+        report.skipped.push({
+          paper_uuid: draft.paper_uuid,
+          draft_revision: draft.revision,
+          reason:
+            error.code === "draft.owner_forbidden"
+              ? "ownership_changed"
+              : "draft_changed",
+        });
+        continue;
+      }
+      report.failed.push({
+        paper_uuid: draft.paper_uuid,
+        draft_revision: draft.revision,
         error_code:
           error instanceof ProdxivApiError
             ? error.code
@@ -253,6 +314,7 @@ async function enforcePendingDraftLimit(
     const pending = await client.listDrafts({
       limit: 100,
       review_status: "pending_review",
+      owner_kind: "bot",
     });
     if (pending.drafts.length <= limit) {
       return rotated;
@@ -416,11 +478,9 @@ function configuredApiUrl(value: string | undefined): string {
 }
 
 async function main(): Promise<void> {
-  const token = process.env.PRODXIV_PUBLISH_TOKEN;
+  const token = process.env.PRODXIV_BOT_TOKEN;
   if (token === undefined || token.length < 32) {
-    throw new Error(
-      "PRODXIV_PUBLISH_TOKEN must contain at least 32 characters",
-    );
+    throw new Error("PRODXIV_BOT_TOKEN must contain at least 32 characters");
   }
   const client = new ProdxivApiClient({
     api_url: configuredApiUrl(process.env.PRODXIV_API_URL),
@@ -429,7 +489,7 @@ async function main(): Promise<void> {
   const [command, inputPath, expectedCountValue] = process.argv.slice(2);
   let report: PromotionReport | SubmissionReport;
   if (command === "promote") {
-    report = await promoteApprovedDrafts(client);
+    report = await promoteDrafts(client);
   } else if (command === "submit" && inputPath !== undefined) {
     const expectedCount = Number(expectedCountValue ?? "3");
     report = await submitBatchDrafts(inputPath, expectedCount, client);

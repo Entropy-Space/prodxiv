@@ -10,6 +10,7 @@ import {
 const draft = {
   paper_uuid: "00000000-0000-4000-8000-000000000001",
   revision: 1,
+  owner_kind: "author",
   source_markdown: "# Working notes\n",
   review: { status: "pending_review" },
   created_at: "2026-08-15T00:00:00.000000Z",
@@ -138,8 +139,12 @@ describe("ProdxivApiClient", () => {
       }),
     ).toEqual(draft);
     expect(
-      (await client.listDrafts({ review_status: "pending_review" })).drafts[0]
-        ?.paper_uuid,
+      (
+        await client.listDrafts({
+          review_status: "pending_review",
+          owner_kind: "author",
+        })
+      ).drafts[0]?.paper_uuid,
     ).toBe(draft.paper_uuid);
     expect(await client.getDraft(draft.paper_uuid)).toEqual(draft);
     expect(
@@ -161,7 +166,7 @@ describe("ProdxivApiClient", () => {
       "https://api.prodxiv.example/v1/drafts/latest",
     );
     expect(requests[1]?.url).toBe(
-      "https://api.prodxiv.example/v1/drafts?review_status=pending_review",
+      "https://api.prodxiv.example/v1/drafts?review_status=pending_review&owner_kind=author",
     );
     expect(requests[0]?.init?.headers).toEqual(
       expect.objectContaining({
@@ -276,6 +281,41 @@ describe("ProdxivApiClient", () => {
       location: "/v1/papers/prodxiv:2607.000001/revisions/1",
       replayed: false,
     });
+  });
+
+  test("approves and publishes one saved draft revision atomically", async () => {
+    let requestUrl = "";
+    let requestInit: RequestInit | undefined;
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token: "author-token",
+      fetch: async (input, init) => {
+        requestUrl = input.toString();
+        requestInit = init;
+        return Response.json(publishedPaper, {
+          status: 201,
+          headers: {
+            location: "/v1/papers/prodxiv:2607.000001/revisions/1",
+          },
+        });
+      },
+    });
+
+    await client.approveAndPublishDraft(draft.paper_uuid, {
+      expected_revision: 1,
+      idempotency_key: "draft-approve-publish-client-1",
+    });
+
+    expect(requestUrl).toBe(
+      `https://api.prodxiv.example/v1/drafts/${draft.paper_uuid}/approve-and-publish`,
+    );
+    expect(requestInit?.headers).toEqual(
+      expect.objectContaining({
+        authorization: "Bearer author-token",
+        "idempotency-key": "draft-approve-publish-client-1",
+        "if-match": '"1"',
+      }),
+    );
   });
 
   test("requires a token and canonical UUID for private drafts", async () => {

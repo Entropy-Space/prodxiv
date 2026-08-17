@@ -27,6 +27,8 @@ services:
       DATABASE_URL: postgres://prodxiv:prodxiv@postgres:5432/prodxiv
       DIRECT_DATABASE_URL: postgres://prodxiv:prodxiv@postgres:5432/prodxiv
       PRODXIV_BIND_ADDRESS: 0.0.0.0:3000
+      PRODXIV_BOT_ACTOR: ${PRODXIV_BOT_ACTOR:-paperbot:daily}
+      PRODXIV_BOT_TOKEN: ${PRODXIV_BOT_TOKEN:-}
       PRODXIV_PUBLISH_ACTOR: ${PRODXIV_PUBLISH_ACTOR:-local_publisher}
       PRODXIV_PUBLISH_TOKEN: ${PRODXIV_PUBLISH_TOKEN:?set PRODXIV_PUBLISH_TOKEN}
       PRODXIV_TRENDING_INGEST_TOKEN: ${PRODXIV_TRENDING_INGEST_TOKEN:-}

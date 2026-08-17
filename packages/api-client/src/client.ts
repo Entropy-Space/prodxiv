@@ -6,6 +6,7 @@ export type PublishedPaperSummary =
 export type PaperDraft = components["schemas"]["PaperDraft"];
 export type PaperDraftSummary = components["schemas"]["PaperDraftSummary"];
 export type DraftReviewStatus = components["schemas"]["DraftReviewStatus"];
+export type DraftOwnerKind = components["schemas"]["DraftOwnerKind"];
 export type PaperDraftRevision = components["schemas"]["PaperDraftRevision"];
 export type PaperDraftRevisionSummary =
   components["schemas"]["PaperDraftRevisionSummary"];
@@ -65,6 +66,7 @@ export interface RejectDraftInput extends ReviewDraftInput {
 export interface ListDraftsInput {
   limit?: number;
   review_status?: DraftReviewStatus;
+  owner_kind?: DraftOwnerKind;
 }
 
 export interface PaperDraftList {
@@ -167,12 +169,22 @@ export class ProdxivApiClient {
         "draft review status must be pending_review, approved, or rejected",
       );
     }
+    if (input.owner_kind !== undefined && !isDraftOwnerKind(input.owner_kind)) {
+      throw new ProdxivApiError(
+        0,
+        "draft.invalid_owner_kind",
+        "draft owner kind must be author or bot",
+      );
+    }
     const query = new URLSearchParams();
     if (input.limit !== undefined) {
       query.set("limit", String(input.limit));
     }
     if (input.review_status !== undefined) {
       query.set("review_status", input.review_status);
+    }
+    if (input.owner_kind !== undefined) {
+      query.set("owner_kind", input.owner_kind);
     }
     const suffix = query.size === 0 ? "" : `?${query.toString()}`;
     const { response, body } = await this.#request(`/v1/drafts${suffix}`, {
@@ -299,6 +311,31 @@ export class ProdxivApiClient {
     validateDraftRevision(input.expected_revision);
     const { response, body } = await this.#request(
       `${draftPath(paperUuid)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          authorization: this.#draftAuthorization(),
+          "content-type": "application/json",
+          "idempotency-key": input.idempotency_key,
+          "if-match": `"${input.expected_revision}"`,
+        },
+        body: JSON.stringify(
+          input.product_id === undefined
+            ? {}
+            : { product_id: input.product_id },
+        ),
+      },
+    );
+    return publishPaperResult(response, body);
+  }
+
+  async approveAndPublishDraft(
+    paperUuid: string,
+    input: PublishDraftInput,
+  ): Promise<PublishPaperResult> {
+    validateDraftRevision(input.expected_revision);
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/approve-and-publish`,
       {
         method: "POST",
         headers: {
@@ -580,6 +617,7 @@ function isPaperDraftSummary(value: unknown): value is PaperDraftSummary {
     isRecord(value) &&
     isCanonicalUuid(value.paper_uuid) &&
     isPositiveSafeInteger(value.revision) &&
+    isDraftOwnerKind(value.owner_kind) &&
     isPaperDraftReview(value.review, value.revision as number) &&
     isTimestamp(value.created_at) &&
     isTimestamp(value.updated_at)
@@ -620,6 +658,10 @@ function isDraftReviewStatus(value: unknown): value is DraftReviewStatus {
   return (
     value === "pending_review" || value === "approved" || value === "rejected"
   );
+}
+
+function isDraftOwnerKind(value: unknown): value is DraftOwnerKind {
+  return value === "author" || value === "bot";
 }
 
 function isAbsent(value: unknown): boolean {

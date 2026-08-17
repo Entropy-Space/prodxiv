@@ -9,6 +9,7 @@ external-observation routes:
 - `GET /v1/drafts`
 - `GET`, `PUT`, and `DELETE /v1/drafts/{paper_uuid}`
 - `POST /v1/drafts/{paper_uuid}/approve`
+- `POST /v1/drafts/{paper_uuid}/approve-and-publish`
 - `POST /v1/drafts/{paper_uuid}/reject`
 - `POST /v1/drafts/{paper_uuid}/publish`
 - `GET /v1/drafts/{paper_uuid}/revisions`
@@ -19,8 +20,8 @@ external-observation routes:
 - `POST /v1/github/trending/snapshots`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`. Draft
-routes are private, use the publishing bearer token in the MVP, and are
-described in `docs/DRAFTS.md`.
+routes are private and accept the author publishing token or the separately
+scoped bot token described in `docs/DRAFTS.md`.
 
 The website exposes the private `/drafts` review queue. It accepts the same
 token from browser HTTP Basic authentication and forwards it server-side; do
@@ -30,10 +31,10 @@ events use `PRODXIV_PUBLISH_ACTOR` until real reviewer identity is introduced.
 
 ## Local environment
 
-Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` and
-`PRODXIV_TRENDING_INGEST_TOKEN` with different random values containing at
-least 32 characters. Then start PostgreSQL, the API, and the static website
-with Podman:
+Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN`,
+`PRODXIV_BOT_TOKEN`, and `PRODXIV_TRENDING_INGEST_TOKEN` with three different
+random values containing at least 32 characters. Then start PostgreSQL, the
+API, and the static website with Podman:
 
 ```sh
 podman compose up --build
@@ -266,6 +267,10 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
+- `PRODXIV_BOT_TOKEN` to a distinct secret with at least 32 characters. When
+  absent, bot-authenticated draft actions are unavailable.
+- `PRODXIV_BOT_ACTOR` to the scheduler's audit actor; it defaults to
+  `paperbot:daily`.
 - `PRODXIV_TRENDING_INGEST_TOKEN` to a different secret with at least 32
   characters. When absent, reading remains available and ingestion returns
   `503`.

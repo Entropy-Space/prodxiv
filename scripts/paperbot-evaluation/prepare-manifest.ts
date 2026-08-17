@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   }
   const excludedRepositories = await currentPaperbotRepositories(
     process.env.PRODXIV_API_URL,
-    process.env.PRODXIV_PUBLISH_TOKEN,
+    process.env.PRODXIV_BOT_TOKEN,
   );
   const manifest = await prepareEvaluationManifest(
     resolve(selectionPath),
@@ -81,7 +81,7 @@ async function currentPaperbotRepositories(
 ): Promise<Set<string>> {
   if (apiUrlValue === undefined || token === undefined) {
     throw new Error(
-      "PRODXIV_API_URL and PRODXIV_PUBLISH_TOKEN are required to exclude existing Paperbot papers",
+      "PRODXIV_API_URL and PRODXIV_BOT_TOKEN are required to exclude existing Paperbot papers",
     );
   }
   const client = new ProdxivApiClient({

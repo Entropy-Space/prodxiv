@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   evaluate:
-    name: promote approved and generate pending drafts
+    name: publish eligible drafts and generate pending drafts
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: production
@@ -43,7 +43,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+          PRODXIV_BOT_TOKEN: ${{ secrets.PRODXIV_BOT_TOKEN }}
         run: |
           if [ -z "${DEEPSEEK_API_KEY}" ]; then
             echo "::error::Add the DEEPSEEK_API_KEY production secret for daily Paperbot drafting."
@@ -53,17 +53,17 @@ jobs:
             echo "::error::Add the PRODXIV_API_URL production variable."
             exit 1
           fi
-          if [ -z "${PRODXIV_PUBLISH_TOKEN}" ]; then
-            echo "::error::Add the PRODXIV_PUBLISH_TOKEN production secret."
+          if [ -z "${PRODXIV_BOT_TOKEN}" ]; then
+            echo "::error::Add the PRODXIV_BOT_TOKEN production secret."
             exit 1
           fi
 
-      - name: Publish previously approved drafts
+      - name: Publish approved and bot-owned pending drafts
         id: promote
         continue-on-error: true
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+          PRODXIV_BOT_TOKEN: ${{ secrets.PRODXIV_BOT_TOKEN }}
         run: |
           mkdir -p evaluation
           bun run scripts/paperbot-evaluation/sync-drafts.ts promote \
@@ -83,7 +83,7 @@ jobs:
       - name: Prepare three rotating drafts
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+          PRODXIV_BOT_TOKEN: ${{ secrets.PRODXIV_BOT_TOKEN }}
         run: |
           bun run scripts/paperbot-evaluation/prepare-manifest.ts \
             evaluation-selection.json \
@@ -104,7 +104,7 @@ jobs:
       - name: Submit generated papers as private drafts
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
-          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+          PRODXIV_BOT_TOKEN: ${{ secrets.PRODXIV_BOT_TOKEN }}
         run: |
           bun run scripts/paperbot-evaluation/sync-drafts.ts submit \
             evaluation/runs/batch.json 3 \
@@ -159,5 +159,5 @@ jobs:
       - name: Fail after preserving a promotion error
         if: always() && steps.promote.outcome == 'failure'
         run: |
-          echo "::error::One or more approved drafts could not be published; see the promotion report."
+          echo "::error::One or more eligible drafts could not be published; see the promotion report."
           exit 1

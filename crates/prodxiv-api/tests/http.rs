@@ -12,10 +12,10 @@ use axum::{
 };
 use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{
-    DRAFT_REVISION_RETENTION, DraftReviewStatus, PaperDocument, PaperDraft, PaperDraftReview,
-    PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary, PaperStatus, ProductStatus,
-    PublicationIdentity, PublicationPreparationError, PublishedPaper, PublishedPaperSummary,
-    prepare_publication,
+    DRAFT_REVISION_RETENTION, DraftOwnerKind, DraftReviewStatus, PaperDocument, PaperDraft,
+    PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary,
+    PaperStatus, ProductStatus, PublicationIdentity, PublicationPreparationError, PublishedPaper,
+    PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
     DraftCreateOutcome, DraftUpdateOutcome, GitHubTrendingEntry, GitHubTrendingLanguageScope,
@@ -27,11 +27,13 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 const TOKEN: &str = "test_token_with_at_least_32_characters";
+const BOT_TOKEN: &str = "bot_token_with_at_least_32_characters";
 const INGEST_TOKEN: &str = "trending_ingest_token_with_32_characters";
 
 #[derive(Default)]
 struct FakeStore {
     drafts: Mutex<HashMap<String, Vec<PaperDraftRevision>>>,
+    draft_owners: Mutex<HashMap<String, DraftOwnerKind>>,
     draft_reviews: Mutex<HashMap<String, PaperDraftReview>>,
     draft_requests: Mutex<HashMap<String, (String, String)>>,
     publications: Mutex<Vec<PublishedPaper>>,
@@ -47,6 +49,7 @@ impl PublicationStore for FakeStore {
         &self,
         source_markdown: &str,
         _actor: &str,
+        owner_kind: DraftOwnerKind,
         idempotency_key: &str,
     ) -> Result<DraftCreateOutcome, StoreError> {
         let existing = self
@@ -81,6 +84,10 @@ impl PublicationStore for FakeStore {
             created_at: created_at.clone(),
         };
         drafts.insert(paper_uuid.clone(), vec![revision]);
+        self.draft_owners
+            .lock()
+            .expect("fake draft owners should lock")
+            .insert(paper_uuid.clone(), owner_kind);
         let review = PaperDraftReview::pending();
         self.draft_reviews
             .lock()
@@ -89,6 +96,7 @@ impl PublicationStore for FakeStore {
         let draft = PaperDraft {
             paper_uuid,
             revision: 1,
+            owner_kind,
             source_markdown: source_markdown.to_owned(),
             review,
             created_at: created_at.clone(),
@@ -111,12 +119,17 @@ impl PublicationStore for FakeStore {
         &self,
         limit: u32,
         review_status: Option<DraftReviewStatus>,
+        owner_kind: Option<DraftOwnerKind>,
     ) -> Result<Vec<PaperDraftSummary>, StoreError> {
         let drafts = self.drafts.lock().expect("fake drafts should lock");
         let reviews = self
             .draft_reviews
             .lock()
             .expect("fake draft reviews should lock");
+        let owners = self
+            .draft_owners
+            .lock()
+            .expect("fake draft owners should lock");
         Ok(drafts
             .values()
             .filter_map(|revisions| revisions.last())
@@ -127,10 +140,16 @@ impl PublicationStore for FakeStore {
                         .is_some_and(|review| review.status == status)
                 })
             })
+            .filter(|revision| {
+                owner_kind.is_none_or(|kind| owners.get(&revision.paper_uuid) == Some(&kind))
+            })
             .take(usize::try_from(limit).expect("u32 fits in usize"))
             .map(|revision| PaperDraftSummary {
                 paper_uuid: revision.paper_uuid.clone(),
                 revision: revision.revision,
+                owner_kind: *owners
+                    .get(&revision.paper_uuid)
+                    .expect("fake draft owner exists"),
                 review: reviews
                     .get(&revision.paper_uuid)
                     .cloned()
@@ -147,10 +166,15 @@ impl PublicationStore for FakeStore {
             .draft_reviews
             .lock()
             .expect("fake draft reviews should lock");
+        let owners = self
+            .draft_owners
+            .lock()
+            .expect("fake draft owners should lock");
         Ok(drafts.get(paper_uuid).and_then(|revisions| {
             revisions.last().map(|revision| PaperDraft {
                 paper_uuid: revision.paper_uuid.clone(),
                 revision: revision.revision,
+                owner_kind: *owners.get(paper_uuid).expect("fake draft owner exists"),
                 source_markdown: revision.source_markdown.clone(),
                 review: reviews
                     .get(paper_uuid)
@@ -168,11 +192,22 @@ impl PublicationStore for FakeStore {
         expected_revision: u32,
         source_markdown: &str,
         _actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<Option<DraftUpdateOutcome>, StoreError> {
         let mut drafts = self.drafts.lock().expect("fake drafts should lock");
         let Some(revisions) = drafts.get_mut(paper_uuid) else {
             return Ok(None);
         };
+        if actor_kind == DraftOwnerKind::Bot
+            && self
+                .draft_owners
+                .lock()
+                .expect("fake draft owners should lock")
+                .get(paper_uuid)
+                != Some(&DraftOwnerKind::Bot)
+        {
+            return Err(StoreError::DraftOwnerForbidden);
+        }
         let current = revisions.last().expect("draft has a revision");
         if current.revision != expected_revision {
             if current.revision == expected_revision.saturating_add(1)
@@ -182,6 +217,12 @@ impl PublicationStore for FakeStore {
                     draft: PaperDraft {
                         paper_uuid: current.paper_uuid.clone(),
                         revision: current.revision,
+                        owner_kind: *self
+                            .draft_owners
+                            .lock()
+                            .expect("fake draft owners should lock")
+                            .get(paper_uuid)
+                            .expect("fake draft owner exists"),
                         source_markdown: current.source_markdown.clone(),
                         review: self
                             .draft_reviews
@@ -216,10 +257,20 @@ impl PublicationStore for FakeStore {
             .lock()
             .expect("fake draft reviews should lock")
             .insert(paper_uuid.to_owned(), PaperDraftReview::pending());
+        let mut owners = self
+            .draft_owners
+            .lock()
+            .expect("fake draft owners should lock");
+        let owner_kind = owners.get_mut(paper_uuid).expect("fake draft owner exists");
+        if actor_kind == DraftOwnerKind::Author {
+            *owner_kind = DraftOwnerKind::Author;
+        }
+        let owner_kind = *owner_kind;
         Ok(Some(DraftUpdateOutcome {
             draft: PaperDraft {
                 paper_uuid: paper_uuid.to_owned(),
                 revision: revision_number,
+                owner_kind,
                 source_markdown: source_markdown.to_owned(),
                 review: PaperDraftReview::pending(),
                 created_at: "2026-08-15T00:00:00.000000Z".to_owned(),
@@ -234,7 +285,11 @@ impl PublicationStore for FakeStore {
         paper_uuid: &str,
         expected_revision: u32,
         _actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<Option<PaperDraft>, StoreError> {
+        if actor_kind == DraftOwnerKind::Bot {
+            return Err(StoreError::DraftOwnerForbidden);
+        }
         let draft = self.find_draft(paper_uuid).await?;
         let Some(mut draft) = draft else {
             return Ok(None);
@@ -279,12 +334,16 @@ impl PublicationStore for FakeStore {
         paper_uuid: &str,
         expected_revision: u32,
         _actor: &str,
+        actor_kind: DraftOwnerKind,
         reason: Option<&str>,
     ) -> Result<Option<PaperDraft>, StoreError> {
         let draft = self.find_draft(paper_uuid).await?;
         let Some(mut draft) = draft else {
             return Ok(None);
         };
+        if actor_kind == DraftOwnerKind::Bot && draft.owner_kind != DraftOwnerKind::Bot {
+            return Err(StoreError::DraftOwnerForbidden);
+        }
         if draft.revision != expected_revision {
             return Err(StoreError::DraftRevisionConflict {
                 current_revision: draft.revision,
@@ -340,6 +399,7 @@ impl PublicationStore for FakeStore {
         paper_uuid: &str,
         expected_revision: u32,
         _actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<bool, StoreError> {
         let mut drafts = self.drafts.lock().expect("fake drafts should lock");
         let Some(current_revision) = drafts
@@ -352,7 +412,21 @@ impl PublicationStore for FakeStore {
         if current_revision != expected_revision {
             return Err(StoreError::DraftRevisionConflict { current_revision });
         }
+        if actor_kind == DraftOwnerKind::Bot
+            && self
+                .draft_owners
+                .lock()
+                .expect("fake draft owners should lock")
+                .get(paper_uuid)
+                != Some(&DraftOwnerKind::Bot)
+        {
+            return Err(StoreError::DraftOwnerForbidden);
+        }
         drafts.remove(paper_uuid);
+        self.draft_owners
+            .lock()
+            .expect("fake draft owners should lock")
+            .remove(paper_uuid);
         self.draft_reviews
             .lock()
             .expect("fake draft reviews should lock")
@@ -436,6 +510,10 @@ impl PublicationStore for FakeStore {
             .lock()
             .expect("fake drafts should lock")
             .remove(paper_uuid);
+        self.draft_owners
+            .lock()
+            .expect("fake draft owners should lock")
+            .remove(paper_uuid);
         self.draft_reviews
             .lock()
             .expect("fake draft reviews should lock")
@@ -455,6 +533,62 @@ impl PublicationStore for FakeStore {
             paper: published,
             replayed: false,
         }))
+    }
+
+    async fn approve_and_publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+        actor_kind: DraftOwnerKind,
+        idempotency_key: &str,
+        product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StoreError> {
+        match self
+            .publish_draft(
+                paper_uuid,
+                expected_revision,
+                actor,
+                idempotency_key,
+                product_id,
+            )
+            .await
+        {
+            Ok(outcome) => return Ok(outcome),
+            Err(StoreError::DraftNotApproved) => {}
+            Err(error) => return Err(error),
+        }
+        let draft = self.find_draft(paper_uuid).await?;
+        let Some(draft) = draft else {
+            return Ok(None);
+        };
+        if actor_kind == DraftOwnerKind::Bot
+            && (draft.owner_kind != DraftOwnerKind::Bot
+                || draft.review.status != DraftReviewStatus::PendingReview)
+        {
+            return Err(StoreError::DraftOwnerForbidden);
+        }
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .insert(
+                paper_uuid.to_owned(),
+                PaperDraftReview {
+                    status: DraftReviewStatus::Approved,
+                    reviewed_revision: Some(expected_revision),
+                    reviewed_by: Some(actor.to_owned()),
+                    reviewed_at: Some("2026-08-15T00:01:00.000000Z".to_owned()),
+                    rejection_reason: None,
+                },
+            );
+        self.publish_draft(
+            paper_uuid,
+            expected_revision,
+            actor,
+            idempotency_key,
+            product_id,
+        )
+        .await
     }
 
     async fn publish_new(
@@ -683,6 +817,7 @@ fn legacy_submission_markdown() -> String {
 fn app(store: Arc<FakeStore>) -> axum::Router {
     router(
         AppState::new(store, TOKEN, "api_test")
+            .with_bot_principal(Some(BOT_TOKEN.to_owned()), "paperbot:daily".to_owned())
             .with_trending_ingestion(Some(INGEST_TOKEN.to_owned())),
     )
 }
@@ -1292,6 +1427,125 @@ async fn reviews_exact_draft_revisions_without_deleting_rejections() {
         .await
         .expect("stale rejection should complete");
     assert_eq!(stale_rejection.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn confines_bot_auto_publication_to_unchanged_bot_owned_drafts() {
+    let application = app(Arc::new(FakeStore::default()));
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {BOT_TOKEN}"))
+                .header("idempotency-key", "draft-create-http-bot-owned")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("bot draft creation should complete");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body = json_body(created).await;
+    assert_eq!(created_body["owner_kind"], "bot");
+    let paper_uuid = created_body["paper_uuid"]
+        .as_str()
+        .expect("draft UUID should be text");
+    let draft_location = format!("/v1/drafts/{paper_uuid}");
+
+    let edited = application
+        .clone()
+        .oneshot(
+            Request::put(&draft_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("author draft edit should complete");
+    assert_eq!(edited.status(), StatusCode::OK);
+    let edited_body = json_body(edited).await;
+    assert_eq!(edited_body["owner_kind"], "author");
+
+    let forbidden_edit = application
+        .clone()
+        .oneshot(
+            Request::put(&draft_location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {BOT_TOKEN}"))
+                .header(header::IF_MATCH, "\"2\"")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("bot edit attempt should complete");
+    assert_eq!(forbidden_edit.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        json_body(forbidden_edit).await["error"]["code"],
+        "draft.owner_forbidden"
+    );
+
+    let forbidden = application
+        .clone()
+        .oneshot(
+            Request::post(format!("{draft_location}/approve-and-publish"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {BOT_TOKEN}"))
+                .header(header::IF_MATCH, "\"2\"")
+                .header("idempotency-key", "draft-bot-auto-publish-transferred")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("bot publication attempt should complete");
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        json_body(forbidden).await["error"]["code"],
+        "draft.owner_forbidden"
+    );
+
+    let bot_owned = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {BOT_TOKEN}"))
+                .header("idempotency-key", "draft-create-http-bot-auto")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("second bot draft creation should complete");
+    let bot_owned_body = json_body(bot_owned).await;
+    let bot_owned_uuid = bot_owned_body["paper_uuid"]
+        .as_str()
+        .expect("draft UUID should be text");
+    let published = application
+        .oneshot(
+            Request::post(format!("/v1/drafts/{bot_owned_uuid}/approve-and-publish"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {BOT_TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .header("idempotency-key", "draft-bot-auto-publish-owned")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("bot-owned draft publication should complete");
+    assert_eq!(published.status(), StatusCode::CREATED);
+    assert_eq!(
+        json_body(published).await["paper_id"],
+        "prodxiv:2607.000001"
+    );
 }
 
 #[tokio::test]

@@ -64,8 +64,8 @@ function formatTimestamp(value: string): string {
         <p class="eyebrow">Private author workspace</p>
         <h1>Draft review</h1>
         <p>
-          Approval authorizes the exact current revision for publication during
-          the next daily run. Rejected drafts remain private and retained.
+          Approve a revision for the next run or publish it immediately.
+          Rejected drafts remain private and retained.
         </p>
       </div>
       <span class="private-badge">Authenticated</span>
@@ -96,7 +96,7 @@ function formatTimestamp(value: string): string {
             <a href={`/drafts/${draft.paper_uuid}`}>
               <span class="draft-list__id">{draft.paper_uuid}</span>
               <span class="draft-list__meta">
-                Revision {draft.revision} · {labels[draft.review.status]} · Edited{" "}
+                Revision {draft.revision} · {draft.owner_kind === "bot" ? "Paperbot-owned" : "Author-owned"} · {labels[draft.review.status]} · Edited{" "}
                 <time datetime={draft.updated_at}>{formatTimestamp(draft.updated_at)}</time>
               </span>
               {draft.review.rejection_reason !== undefined ? (
