@@ -480,24 +480,52 @@ This command does not download repository contents, start paper-drafting
 sessions, create a batch manifest, submit, or publish. Its ten results are a
 research queue, not endorsements.
 
-### Daily evaluation corpus
+### Daily draft and canary workflows
 
-The `Evaluate Paperbot` GitHub Actions workflow runs once per day and may also
-be dispatched manually. It combines three public repositories pinned to exact
-commit SHAs from `examples/paperbot-evaluation/canaries.json` with the first
-three non-canary repositories from that day's validated Trending selection.
-The fixed lane makes regressions comparable across Paperbot builds; the
-rotating lane exposes new repository shapes and failure modes.
+The `Daily Paperbot Drafts` GitHub Actions workflow runs once per day and may
+also be dispatched manually. It selects the first three eligible repositories
+from that day's validated Trending research queue and runs them through the
+normal private auto-mode `agent batch` workflow. A repository is skipped when
+an existing published paper, pending draft, or approved draft names both that
+repository and the current Paperbot `tool_version`; a new Paperbot version
+makes it eligible again. Every successful project produces one terminal
+`*_final.zip`; unsupported intention remains a visible assumption or unresolved
+question rather than fabricated evidence.
 
-Each of the six repositories runs through the normal private auto-mode `agent
-batch` workflow. Every successful project produces one terminal `*_final.zip`;
-unsupported intention remains a visible assumption or unresolved question
-rather than fabricated evidence. Failures remain valuable outputs and retain
-their checkpoint ZIPs. GitHub Actions keeps
-the private run directories, ZIPs, selection, batch report, and workflow
-metadata as one access-controlled artifact for 30 days. The workflow requires
-the `DEEPSEEK_API_KEY` repository secret, receives no publishing credentials,
-and never submits or publishes a paper.
+The run has two ordered remote-write phases. First, it publishes drafts whose
+exact current revisions were approved by an author before the run. Then it
+submits the three newly generated papers as private `pending_review` drafts.
+Draft creation and publication use stable idempotency keys, so retrying a
+partially completed workflow does not create duplicate papers. The Paperbot
+model and drafting sessions never receive the publishing token and cannot
+submit, approve, or publish.
+
+Only five daily drafts remain in the active `pending_review` queue. After new
+submissions, the workflow marks the oldest excess pending drafts `rejected`
+with a rotation reason. Rotation is auditable and retains their content; it is
+not deletion. Approved drafts are outside that limit and remain eligible for
+the next run unless edited.
+
+GitHub Actions uploads the private run directories, terminal ZIPs, selection,
+batch report, promotion report, submission report, and workflow metadata as
+one access-controlled artifact for 30 days. The artifact can contain source
+material, prompts, model output, and implementation details, so it must never
+be made public.
+
+Fixed canaries are a separate `Paperbot Fixed Canaries` workflow. They run only
+when a same-repository pull request explicitly carries the
+`paperbot-canaries` label, and rerun when that labeled PR changes, or when a
+trusted revision is dispatched manually. The canary workflow evaluates the
+three SHA-pinned repositories in
+`examples/paperbot-evaluation/canaries.json`, uploads private artifacts, and
+has no publishing credential or remote publication step. Fork pull requests
+must use manual dispatch after their code is trusted.
+
+Configure the daily workflow's `production` GitHub Environment with the
+`PRODXIV_API_URL` variable and the `DEEPSEEK_API_KEY` and
+`PRODXIV_PUBLISH_TOKEN` secrets. The fixed-canary workflow uses only the
+repository `DEEPSEEK_API_KEY` secret. Neither workflow needs a database
+credential.
 
 ### Batch public repositories
 

@@ -12,12 +12,13 @@ use axum::{
 };
 use prodxiv_api::{AppState, PublicationStore, StoreError, router};
 use prodxiv_domain::{
-    DRAFT_REVISION_RETENTION, PaperDocument, PaperDraft, PaperDraftRevision,
-    PaperDraftRevisionSummary, PaperDraftSummary, PaperStatus, ProductStatus, PublicationIdentity,
-    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, prepare_publication,
+    DRAFT_REVISION_RETENTION, DraftReviewStatus, PaperDocument, PaperDraft, PaperDraftReview,
+    PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary, PaperStatus, ProductStatus,
+    PublicationIdentity, PublicationPreparationError, PublishedPaper, PublishedPaperSummary,
+    prepare_publication,
 };
 use prodxiv_storage::{
-    DraftUpdateOutcome, GitHubTrendingEntry, GitHubTrendingLanguageScope,
+    DraftCreateOutcome, DraftUpdateOutcome, GitHubTrendingEntry, GitHubTrendingLanguageScope,
     GitHubTrendingLanguageSelector, GitHubTrendingSnapshot, GitHubTrendingView,
     NewGitHubTrendingSnapshot, PublicationCursor, PublicationPage, PublishOutcome,
     TrendingImportOutcome,
@@ -31,6 +32,8 @@ const INGEST_TOKEN: &str = "trending_ingest_token_with_32_characters";
 #[derive(Default)]
 struct FakeStore {
     drafts: Mutex<HashMap<String, Vec<PaperDraftRevision>>>,
+    draft_reviews: Mutex<HashMap<String, PaperDraftReview>>,
+    draft_requests: Mutex<HashMap<String, (String, String)>>,
     publications: Mutex<Vec<PublishedPaper>>,
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
     trending_requests: Mutex<HashMap<String, String>>,
@@ -44,7 +47,27 @@ impl PublicationStore for FakeStore {
         &self,
         source_markdown: &str,
         _actor: &str,
-    ) -> Result<PaperDraft, StoreError> {
+        idempotency_key: &str,
+    ) -> Result<DraftCreateOutcome, StoreError> {
+        let existing = self
+            .draft_requests
+            .lock()
+            .expect("fake draft requests should lock")
+            .get(idempotency_key)
+            .cloned();
+        if let Some((existing_source, paper_uuid)) = existing {
+            if existing_source != source_markdown {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            let draft = self
+                .find_draft(&paper_uuid)
+                .await?
+                .ok_or(StoreError::DraftCreationCompleted)?;
+            return Ok(DraftCreateOutcome {
+                draft,
+                replayed: true,
+            });
+        }
         let mut drafts = self.drafts.lock().expect("fake drafts should lock");
         let paper_uuid = format!(
             "00000000-0000-4000-8000-{:012x}",
@@ -58,24 +81,60 @@ impl PublicationStore for FakeStore {
             created_at: created_at.clone(),
         };
         drafts.insert(paper_uuid.clone(), vec![revision]);
-        Ok(PaperDraft {
+        let review = PaperDraftReview::pending();
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .insert(paper_uuid.clone(), review.clone());
+        let draft = PaperDraft {
             paper_uuid,
             revision: 1,
             source_markdown: source_markdown.to_owned(),
+            review,
             created_at: created_at.clone(),
             updated_at: created_at,
+        };
+        self.draft_requests
+            .lock()
+            .expect("fake draft requests should lock")
+            .insert(
+                idempotency_key.to_owned(),
+                (source_markdown.to_owned(), draft.paper_uuid.clone()),
+            );
+        Ok(DraftCreateOutcome {
+            draft,
+            replayed: false,
         })
     }
 
-    async fn list_drafts(&self, limit: u32) -> Result<Vec<PaperDraftSummary>, StoreError> {
+    async fn list_drafts(
+        &self,
+        limit: u32,
+        review_status: Option<DraftReviewStatus>,
+    ) -> Result<Vec<PaperDraftSummary>, StoreError> {
         let drafts = self.drafts.lock().expect("fake drafts should lock");
+        let reviews = self
+            .draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock");
         Ok(drafts
             .values()
             .filter_map(|revisions| revisions.last())
+            .filter(|revision| {
+                review_status.is_none_or(|status| {
+                    reviews
+                        .get(&revision.paper_uuid)
+                        .is_some_and(|review| review.status == status)
+                })
+            })
             .take(usize::try_from(limit).expect("u32 fits in usize"))
             .map(|revision| PaperDraftSummary {
                 paper_uuid: revision.paper_uuid.clone(),
                 revision: revision.revision,
+                review: reviews
+                    .get(&revision.paper_uuid)
+                    .cloned()
+                    .expect("fake draft review exists"),
                 created_at: "2026-08-15T00:00:00.000000Z".to_owned(),
                 updated_at: revision.created_at.clone(),
             })
@@ -84,11 +143,19 @@ impl PublicationStore for FakeStore {
 
     async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StoreError> {
         let drafts = self.drafts.lock().expect("fake drafts should lock");
+        let reviews = self
+            .draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock");
         Ok(drafts.get(paper_uuid).and_then(|revisions| {
             revisions.last().map(|revision| PaperDraft {
                 paper_uuid: revision.paper_uuid.clone(),
                 revision: revision.revision,
                 source_markdown: revision.source_markdown.clone(),
+                review: reviews
+                    .get(paper_uuid)
+                    .cloned()
+                    .expect("fake draft review exists"),
                 created_at: "2026-08-15T00:00:00.000000Z".to_owned(),
                 updated_at: revision.created_at.clone(),
             })
@@ -116,6 +183,13 @@ impl PublicationStore for FakeStore {
                         paper_uuid: current.paper_uuid.clone(),
                         revision: current.revision,
                         source_markdown: current.source_markdown.clone(),
+                        review: self
+                            .draft_reviews
+                            .lock()
+                            .expect("fake draft reviews should lock")
+                            .get(paper_uuid)
+                            .cloned()
+                            .expect("fake draft review exists"),
                         created_at: "2026-08-15T00:00:00.000000Z".to_owned(),
                         updated_at: current.created_at.clone(),
                     },
@@ -138,16 +212,97 @@ impl PublicationStore for FakeStore {
         if revisions.len() > usize::try_from(DRAFT_REVISION_RETENTION).expect("retention fits") {
             revisions.remove(0);
         }
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .insert(paper_uuid.to_owned(), PaperDraftReview::pending());
         Ok(Some(DraftUpdateOutcome {
             draft: PaperDraft {
                 paper_uuid: paper_uuid.to_owned(),
                 revision: revision_number,
                 source_markdown: source_markdown.to_owned(),
+                review: PaperDraftReview::pending(),
                 created_at: "2026-08-15T00:00:00.000000Z".to_owned(),
                 updated_at: created_at,
             },
             replayed: false,
         }))
+    }
+
+    async fn approve_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        _actor: &str,
+    ) -> Result<Option<PaperDraft>, StoreError> {
+        let draft = self.find_draft(paper_uuid).await?;
+        let Some(mut draft) = draft else {
+            return Ok(None);
+        };
+        if draft.revision != expected_revision {
+            return Err(StoreError::DraftRevisionConflict {
+                current_revision: draft.revision,
+            });
+        }
+        let paper = PaperDocument::from_markdown(&draft.source_markdown)
+            .map_err(|error| StoreError::InvalidDraftMarkdown(error.to_string()))?;
+        prepare_publication(
+            paper,
+            PublicationIdentity {
+                paper_id: "prodxiv:2607.000001".to_owned(),
+                revision: 1,
+                published_at: "2026-07-27".to_owned(),
+            },
+            "prodxiv-product:2607.000001".to_owned(),
+        )
+        .map_err(|error| match error {
+            PublicationPreparationError::Invalid(report) => StoreError::InvalidPublication(report),
+            PublicationPreparationError::Serialize(_) => StoreError::Internal,
+        })?;
+        let review = PaperDraftReview {
+            status: DraftReviewStatus::Approved,
+            reviewed_revision: Some(expected_revision),
+            reviewed_by: Some("test_actor".to_owned()),
+            reviewed_at: Some("2026-08-15T00:01:00.000000Z".to_owned()),
+            rejection_reason: None,
+        };
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .insert(paper_uuid.to_owned(), review.clone());
+        draft.review = review;
+        Ok(Some(draft))
+    }
+
+    async fn reject_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        _actor: &str,
+        reason: Option<&str>,
+    ) -> Result<Option<PaperDraft>, StoreError> {
+        let draft = self.find_draft(paper_uuid).await?;
+        let Some(mut draft) = draft else {
+            return Ok(None);
+        };
+        if draft.revision != expected_revision {
+            return Err(StoreError::DraftRevisionConflict {
+                current_revision: draft.revision,
+            });
+        }
+        let review = PaperDraftReview {
+            status: DraftReviewStatus::Rejected,
+            reviewed_revision: Some(expected_revision),
+            reviewed_by: Some("test_actor".to_owned()),
+            reviewed_at: Some("2026-08-15T00:01:00.000000Z".to_owned()),
+            rejection_reason: reason.map(str::to_owned),
+        };
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .insert(paper_uuid.to_owned(), review.clone());
+        draft.review = review;
+        Ok(Some(draft))
     }
 
     async fn list_draft_revisions(
@@ -198,6 +353,10 @@ impl PublicationStore for FakeStore {
             return Err(StoreError::DraftRevisionConflict { current_revision });
         }
         drafts.remove(paper_uuid);
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
+            .remove(paper_uuid);
         Ok(true)
     }
 
@@ -241,6 +400,18 @@ impl PublicationStore for FakeStore {
                     current_revision: current.revision,
                 });
             }
+            let approved = self
+                .draft_reviews
+                .lock()
+                .expect("fake draft reviews should lock")
+                .get(paper_uuid)
+                .is_some_and(|review| {
+                    review.status == DraftReviewStatus::Approved
+                        && review.reviewed_revision == Some(expected_revision)
+                });
+            if !approved {
+                return Err(StoreError::DraftNotApproved);
+            }
             current.source_markdown.clone()
         };
         let paper = PaperDocument::from_markdown(&source_markdown)
@@ -264,6 +435,10 @@ impl PublicationStore for FakeStore {
         self.drafts
             .lock()
             .expect("fake drafts should lock")
+            .remove(paper_uuid);
+        self.draft_reviews
+            .lock()
+            .expect("fake draft reviews should lock")
             .remove(paper_uuid);
         self.publications
             .lock()
@@ -846,6 +1021,47 @@ async fn publishing_requires_authorization() {
 }
 
 #[tokio::test]
+async fn creates_a_draft_idempotently() {
+    let application = app(Arc::new(FakeStore::default()));
+    let request = |source_markdown: &str| {
+        Request::post("/v1/drafts")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+            .header("idempotency-key", "draft-create-http-replay")
+            .body(Body::from(
+                json!({ "source_markdown": source_markdown }).to_string(),
+            ))
+            .expect("request should build")
+    };
+
+    let first = application
+        .clone()
+        .oneshot(request("# Working notes\n"))
+        .await
+        .expect("draft creation should complete");
+    let first_location = first.headers()[header::LOCATION].clone();
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let replay = application
+        .clone()
+        .oneshot(request("# Working notes\n"))
+        .await
+        .expect("draft replay should complete");
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(replay.headers()[header::LOCATION], first_location);
+
+    let conflict = application
+        .oneshot(request("# Different notes\n"))
+        .await
+        .expect("conflicting draft creation should complete");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json_body(conflict).await["error"]["code"],
+        "draft.idempotency_conflict"
+    );
+}
+
+#[tokio::test]
 async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
     let application = app(Arc::new(FakeStore::default()));
     let created = application
@@ -854,6 +1070,7 @@ async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
             Request::post("/v1/drafts")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-crud")
                 .body(Body::from(
                     json!({ "source_markdown": "# Working notes\n" }).to_string(),
                 ))
@@ -874,6 +1091,7 @@ async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
     let created_body = json_body(created).await;
     assert_eq!(created_body["paper_uuid"], paper_uuid);
     assert_eq!(created_body["revision"], 1);
+    assert_eq!(created_body["review"]["status"], "pending_review");
 
     for expected_revision in 1..=6 {
         let response = application
@@ -969,6 +1187,114 @@ async fn creates_updates_lists_and_deletes_a_uuid_scoped_draft() {
 }
 
 #[tokio::test]
+async fn reviews_exact_draft_revisions_without_deleting_rejections() {
+    let application = app(Arc::new(FakeStore::default()));
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-review")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft creation should complete");
+    let location = created.headers()[header::LOCATION]
+        .to_str()
+        .expect("location should be text")
+        .to_owned();
+
+    let rejected = application
+        .clone()
+        .oneshot(
+            Request::post(format!("{location}/reject"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::from(
+                    json!({ "reason": "The author wants revisions" }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft rejection should complete");
+    assert_eq!(rejected.status(), StatusCode::OK);
+    let rejected = json_body(rejected).await;
+    assert_eq!(rejected["review"]["status"], "rejected");
+    assert_eq!(rejected["review"]["reviewed_revision"], 1);
+    assert_eq!(
+        rejected["review"]["rejection_reason"],
+        "The author wants revisions"
+    );
+
+    let listed = application
+        .clone()
+        .oneshot(
+            Request::get("/v1/drafts?review_status=rejected")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("rejected draft list should complete");
+    assert_eq!(
+        json_body(listed).await["drafts"].as_array().map(Vec::len),
+        Some(1)
+    );
+
+    let edited = application
+        .clone()
+        .oneshot(
+            Request::put(&location)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::from(
+                    json!({ "source_markdown": submission_markdown() }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("rejected draft edit should complete");
+    let edited = json_body(edited).await;
+    assert_eq!(edited["revision"], 2);
+    assert_eq!(edited["review"]["status"], "pending_review");
+    assert!(edited["review"].get("reviewed_revision").is_none());
+
+    let approved = application
+        .clone()
+        .oneshot(
+            Request::post(format!("{location}/approve"))
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"2\"")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft approval should complete");
+    let approved = json_body(approved).await;
+    assert_eq!(approved["review"]["status"], "approved");
+    assert_eq!(approved["review"]["reviewed_revision"], 2);
+
+    let stale_rejection = application
+        .oneshot(
+            Request::post(format!("{location}/reject"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::from(json!({}).to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("stale rejection should complete");
+    assert_eq!(stale_rejection.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn publishes_an_exact_draft_revision_and_replays_after_deletion() {
     let application = app(Arc::new(FakeStore::default()));
     let created = application
@@ -977,6 +1303,7 @@ async fn publishes_an_exact_draft_revision_and_replays_after_deletion() {
             Request::post("/v1/drafts")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-publish")
                 .body(Body::from(
                     json!({ "source_markdown": submission_markdown() }).to_string(),
                 ))
@@ -989,6 +1316,20 @@ async fn publishes_an_exact_draft_revision_and_replays_after_deletion() {
         .expect("location should be text")
         .to_owned();
     let publish_location = format!("{draft_location}/publish");
+
+    let approved = application
+        .clone()
+        .oneshot(
+            Request::post(format!("{draft_location}/approve"))
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("draft approval should complete");
+    assert_eq!(approved.status(), StatusCode::OK);
+    assert_eq!(json_body(approved).await["review"]["status"], "approved");
 
     let published = application
         .clone()
@@ -1083,6 +1424,7 @@ async fn keeps_an_unpublishable_draft_available_for_revision() {
             Request::post("/v1/drafts")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-invalid")
                 .body(Body::from(
                     json!({ "source_markdown": "# Incomplete working notes\n" }).to_string(),
                 ))
@@ -1097,6 +1439,23 @@ async fn keeps_an_unpublishable_draft_available_for_revision() {
     let failed = application
         .clone()
         .oneshot(
+            Request::post(format!("{draft_location}/approve"))
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::IF_MATCH, "\"1\"")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("invalid draft approval should complete");
+    assert_eq!(failed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(failed).await["error"]["code"],
+        "paper.invalid_markdown"
+    );
+
+    let not_approved = application
+        .clone()
+        .oneshot(
             Request::post(format!("{draft_location}/publish"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
@@ -1106,11 +1465,11 @@ async fn keeps_an_unpublishable_draft_available_for_revision() {
                 .expect("request should build"),
         )
         .await
-        .expect("invalid draft publication should complete");
-    assert_eq!(failed.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        .expect("unapproved draft publication should complete");
+    assert_eq!(not_approved.status(), StatusCode::CONFLICT);
     assert_eq!(
-        json_body(failed).await["error"]["code"],
-        "paper.invalid_markdown"
+        json_body(not_approved).await["error"]["code"],
+        "draft.not_approved"
     );
 
     let retained = application
@@ -1138,6 +1497,7 @@ async fn accepts_two_mib_draft_sources_after_json_escaping() {
             Request::post("/v1/drafts")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-max-source")
                 .body(Body::from(json!({ "source_markdown": source }).to_string()))
                 .expect("request should build"),
         )
@@ -1223,6 +1583,7 @@ async fn protects_drafts_and_rejects_latest_or_stale_writes() {
             Request::post("/v1/drafts")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("idempotency-key", "draft-create-http-protection")
                 .body(Body::from(
                     json!({ "source_markdown": "first" }).to_string(),
                 ))

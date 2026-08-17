@@ -5,6 +5,7 @@ export type PublishedPaperSummary =
   components["schemas"]["PublishedPaperSummary"];
 export type PaperDraft = components["schemas"]["PaperDraft"];
 export type PaperDraftSummary = components["schemas"]["PaperDraftSummary"];
+export type DraftReviewStatus = components["schemas"]["DraftReviewStatus"];
 export type PaperDraftRevision = components["schemas"]["PaperDraftRevision"];
 export type PaperDraftRevisionSummary =
   components["schemas"]["PaperDraftRevisionSummary"];
@@ -39,6 +40,7 @@ export interface PaperList {
 
 export interface CreateDraftInput {
   source_markdown: string;
+  idempotency_key: string;
 }
 
 export interface UpdateDraftInput {
@@ -52,8 +54,17 @@ export interface PublishDraftInput {
   product_id?: string;
 }
 
+export interface ReviewDraftInput {
+  expected_revision: number;
+}
+
+export interface RejectDraftInput extends ReviewDraftInput {
+  reason?: string;
+}
+
 export interface ListDraftsInput {
   limit?: number;
+  review_status?: DraftReviewStatus;
 }
 
 export interface PaperDraftList {
@@ -128,6 +139,7 @@ export class ProdxivApiClient {
       headers: {
         authorization: this.#draftAuthorization(),
         "content-type": "application/json",
+        "idempotency-key": input.idempotency_key,
       },
       body: JSON.stringify({ source_markdown: input.source_markdown }),
     });
@@ -145,9 +157,22 @@ export class ProdxivApiClient {
         "draft list limit must be an integer between 1 and 100",
       );
     }
+    if (
+      input.review_status !== undefined &&
+      !isDraftReviewStatus(input.review_status)
+    ) {
+      throw new ProdxivApiError(
+        0,
+        "draft.invalid_review_status",
+        "draft review status must be pending_review, approved, or rejected",
+      );
+    }
     const query = new URLSearchParams();
     if (input.limit !== undefined) {
       query.set("limit", String(input.limit));
+    }
+    if (input.review_status !== undefined) {
+      query.set("review_status", input.review_status);
     }
     const suffix = query.size === 0 ? "" : `?${query.toString()}`;
     const { response, body } = await this.#request(`/v1/drafts${suffix}`, {
@@ -179,6 +204,56 @@ export class ProdxivApiClient {
       },
       body: JSON.stringify({ source_markdown: input.source_markdown }),
     });
+    return paperDraft(response, body);
+  }
+
+  async approveDraft(
+    paperUuid: string,
+    input: ReviewDraftInput,
+  ): Promise<PaperDraft> {
+    validateDraftRevision(input.expected_revision);
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          authorization: this.#draftAuthorization(),
+          "if-match": `"${input.expected_revision}"`,
+        },
+      },
+    );
+    return paperDraft(response, body);
+  }
+
+  async rejectDraft(
+    paperUuid: string,
+    input: RejectDraftInput,
+  ): Promise<PaperDraft> {
+    validateDraftRevision(input.expected_revision);
+    if (
+      input.reason !== undefined &&
+      new TextEncoder().encode(input.reason).byteLength > 2_000
+    ) {
+      throw new ProdxivApiError(
+        0,
+        "draft.rejection_reason_too_large",
+        "draft rejection reason must not exceed 2000 bytes",
+      );
+    }
+    const { response, body } = await this.#request(
+      `${draftPath(paperUuid)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          authorization: this.#draftAuthorization(),
+          "content-type": "application/json",
+          "if-match": `"${input.expected_revision}"`,
+        },
+        body: JSON.stringify(
+          input.reason === undefined ? {} : { reason: input.reason },
+        ),
+      },
+    );
     return paperDraft(response, body);
   }
 
@@ -505,9 +580,50 @@ function isPaperDraftSummary(value: unknown): value is PaperDraftSummary {
     isRecord(value) &&
     isCanonicalUuid(value.paper_uuid) &&
     isPositiveSafeInteger(value.revision) &&
+    isPaperDraftReview(value.review, value.revision as number) &&
     isTimestamp(value.created_at) &&
     isTimestamp(value.updated_at)
   );
+}
+
+function isPaperDraftReview(value: unknown, currentRevision: number): boolean {
+  if (!isRecord(value) || !isDraftReviewStatus(value.status)) {
+    return false;
+  }
+  const reviewedRevision = value.reviewed_revision;
+  const reviewedBy = value.reviewed_by;
+  const reviewedAt = value.reviewed_at;
+  const rejectionReason = value.rejection_reason;
+  if (value.status === "pending_review") {
+    return (
+      isAbsent(reviewedRevision) &&
+      isAbsent(reviewedBy) &&
+      isAbsent(reviewedAt) &&
+      isAbsent(rejectionReason)
+    );
+  }
+  if (
+    !isPositiveSafeInteger(reviewedRevision) ||
+    reviewedRevision !== currentRevision ||
+    typeof reviewedBy !== "string" ||
+    reviewedBy.trim().length === 0 ||
+    !isTimestamp(reviewedAt)
+  ) {
+    return false;
+  }
+  return value.status === "approved"
+    ? isAbsent(rejectionReason)
+    : isAbsent(rejectionReason) || typeof rejectionReason === "string";
+}
+
+function isDraftReviewStatus(value: unknown): value is DraftReviewStatus {
+  return (
+    value === "pending_review" || value === "approved" || value === "rejected"
+  );
+}
+
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null;
 }
 
 function isPaperDraftRevision(value: unknown): value is PaperDraftRevision {

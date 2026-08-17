@@ -1,4 +1,4 @@
-name: Evaluate Paperbot
+name: Daily Paperbot Drafts
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: DeepSeek model used for the evaluation.
+        description: DeepSeek model used for daily drafting.
         required: false
         default: deepseek-v4-flash
         type: string
@@ -20,9 +20,10 @@ concurrency:
 
 jobs:
   evaluate:
-    name: generate daily private drafts
+    name: promote approved and generate pending drafts
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    environment: production
     env:
       PAPERBOT_MODEL: ${{ inputs.model || 'deepseek-v4-flash' }}
 
@@ -38,14 +39,35 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
-      - name: Validate model configuration
+      - name: Validate daily workflow configuration
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
         run: |
           if [ -z "${DEEPSEEK_API_KEY}" ]; then
-            echo "::error::Add the DEEPSEEK_API_KEY repository secret for daily Paperbot evaluation."
+            echo "::error::Add the DEEPSEEK_API_KEY production secret for daily Paperbot drafting."
             exit 1
           fi
+          if [ -z "${PRODXIV_API_URL}" ]; then
+            echo "::error::Add the PRODXIV_API_URL production variable."
+            exit 1
+          fi
+          if [ -z "${PRODXIV_PUBLISH_TOKEN}" ]; then
+            echo "::error::Add the PRODXIV_PUBLISH_TOKEN production secret."
+            exit 1
+          fi
+
+      - name: Publish previously approved drafts
+        id: promote
+        continue-on-error: true
+        env:
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+        run: |
+          mkdir -p evaluation
+          bun run scripts/paperbot-evaluation/sync-drafts.ts promote \
+            > evaluation/promotion.json
 
       - name: Select discovery repositories
         env:
@@ -58,10 +80,12 @@ jobs:
             --model "${PAPERBOT_MODEL}" \
             --format json > evaluation-selection.json
 
-      - name: Prepare fixed and rotating evaluation corpus
+      - name: Prepare three rotating drafts
+        env:
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
         run: |
           bun run scripts/paperbot-evaluation/prepare-manifest.ts \
-            examples/paperbot-evaluation/canaries.json \
             evaluation-selection.json \
             evaluation-manifest.json
 
@@ -76,6 +100,15 @@ jobs:
             --model "${PAPERBOT_MODEL}" \
             --concurrency 2 \
             --format json > evaluation-batch-result.json
+
+      - name: Submit generated papers as private drafts
+        env:
+          PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
+          PRODXIV_PUBLISH_TOKEN: ${{ secrets.PRODXIV_PUBLISH_TOKEN }}
+        run: |
+          bun run scripts/paperbot-evaluation/sync-drafts.ts submit \
+            evaluation/runs/batch.json 3 \
+            > evaluation/submission.json
 
       - name: Record evaluation metadata
         if: always()
@@ -101,7 +134,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Daily Paperbot evaluation"
+            echo "## Daily Paperbot drafts"
             echo
             echo "Model: \`${PAPERBOT_MODEL}\`"
             echo "Repository revision: \`${GITHUB_SHA}\`"
@@ -111,4 +144,20 @@ jobs:
               jq '.summary' evaluation/runs/batch.json
               echo '```'
             fi
+            for report in evaluation/promotion.json evaluation/submission.json; do
+              if [ -f "${report}" ]; then
+                echo
+                echo "### $(basename "${report}" .json)"
+                echo
+                echo '```json'
+                jq '.' "${report}"
+                echo '```'
+              fi
+            done
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail after preserving a promotion error
+        if: always() && steps.promote.outcome == 'failure'
+        run: |
+          echo "::error::One or more approved drafts could not be published; see the promotion report."
+          exit 1

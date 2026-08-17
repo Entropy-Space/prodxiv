@@ -7,8 +7,8 @@ mod publication;
 mod validation;
 
 pub use draft::{
-    DRAFT_REVISION_RETENTION, PaperDraft, PaperDraftRevision, PaperDraftRevisionSummary,
-    PaperDraftSummary,
+    DRAFT_REVISION_RETENTION, DraftReviewStatus, MAX_DRAFT_REJECTION_REASON_BYTES, PaperDraft,
+    PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary,
 };
 pub use paper::{
     Author, AuthorKind, LEGACY_SCHEMA_VERSION, PAPER_ID_ALPHABET, PAPER_ID_SUFFIX_LENGTH,

@@ -44,6 +44,15 @@
               "maximum": 100,
               "minimum": 1
             }
+          },
+          {
+            "name": "review_status",
+            "in": "query",
+            "description": "Optional pending_review, approved, or rejected filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -97,6 +106,17 @@
       "post": {
         "tags": [],
         "operationId": "create_draft",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Stable key for safely retrying this exact draft creation",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -108,6 +128,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "Original mutable draft returned for an idempotent retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperDraft"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Mutable draft was created",
             "content": {
@@ -130,6 +160,16 @@
           },
           "401": {
             "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key conflicts or its draft already completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -455,6 +495,119 @@
         ]
       }
     },
+    "/v1/drafts/{paper_uuid}/approve": {
+      "post": {
+        "tags": [],
+        "operationId": "approve_draft",
+        "parameters": [
+          {
+            "name": "paper_uuid",
+            "in": "path",
+            "description": "Unpublished paper UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Quoted current draft revision, for example \"3\"",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact current revision was approved for a later publication run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Paper UUID or If-Match is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft changed since the caller read it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Draft is not valid for publication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Approving the draft failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
     "/v1/drafts/{paper_uuid}/publish": {
       "post": {
         "tags": [],
@@ -591,6 +744,129 @@
           },
           "503": {
             "description": "Monthly identifier space is exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/v1/drafts/{paper_uuid}/reject": {
+      "post": {
+        "tags": [],
+        "operationId": "reject_draft",
+        "parameters": [
+          {
+            "name": "paper_uuid",
+            "in": "path",
+            "description": "Unpublished paper UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Quoted current draft revision, for example \"3\"",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact current revision was rejected and retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request, paper UUID, or If-Match is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token is absent or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft changed since the caller read it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejection reason is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejecting the draft failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1287,6 +1563,14 @@
           "warning"
         ]
       },
+      "DraftReviewStatus": {
+        "type": "string",
+        "enum": [
+          "pending_review",
+          "approved",
+          "rejected"
+        ]
+      },
       "ErrorBody": {
         "type": "object",
         "required": [
@@ -1606,6 +1890,7 @@
           "paper_uuid",
           "revision",
           "source_markdown",
+          "review",
           "created_at",
           "updated_at"
         ],
@@ -1615,6 +1900,9 @@
           },
           "paper_uuid": {
             "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/PaperDraftReview"
           },
           "revision": {
             "type": "integer",
@@ -1643,6 +1931,44 @@
             }
           }
         }
+      },
+      "PaperDraftReview": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "rejection_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewed_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewed_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/DraftReviewStatus"
+          }
+        },
+        "additionalProperties": false
       },
       "PaperDraftRevision": {
         "type": "object",
@@ -1717,6 +2043,7 @@
         "required": [
           "paper_uuid",
           "revision",
+          "review",
           "created_at",
           "updated_at"
         ],
@@ -1726,6 +2053,9 @@
           },
           "paper_uuid": {
             "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/PaperDraftReview"
           },
           "revision": {
             "type": "integer",
@@ -2137,6 +2467,18 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "RejectDraftRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false

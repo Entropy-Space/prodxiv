@@ -1,0 +1,158 @@
+import { expect, test } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { ProdxivApiError } from "../../packages/api-client/src/client.ts";
+import { promoteApprovedDrafts, submitBatchDrafts } from "./sync-drafts.ts";
+
+test("promotes only unchanged approved revisions", async () => {
+  const publishedRequests: string[] = [];
+  const report = await promoteApprovedDrafts({
+    async listDrafts() {
+      return {
+        drafts: [
+          approvedDraft("00000000-0000-4000-8000-000000000001", 2),
+          approvedDraft("00000000-0000-4000-8000-000000000002", 3),
+        ],
+      };
+    },
+    async publishDraft(paperUuid, input) {
+      publishedRequests.push(`${paperUuid}:${input.expected_revision}`);
+      if (paperUuid.endsWith("2")) {
+        throw new ProdxivApiError(
+          409,
+          "draft.revision_conflict",
+          "draft changed",
+        );
+      }
+      return {
+        paper: { paper_id: "prodxiv:2608.000001", version: 1 },
+        replayed: false,
+      };
+    },
+    async createDraft() {
+      throw new Error("promotion must not create drafts");
+    },
+    async rejectDraft() {
+      throw new Error("promotion must not reject drafts");
+    },
+  });
+
+  expect(publishedRequests).toEqual([
+    "00000000-0000-4000-8000-000000000001:2",
+    "00000000-0000-4000-8000-000000000002:3",
+  ]);
+  expect(report.published).toHaveLength(1);
+  expect(report.skipped).toEqual([
+    {
+      paper_uuid: "00000000-0000-4000-8000-000000000002",
+      draft_revision: 3,
+      reason: "draft_changed",
+    },
+  ]);
+  expect(report.failed).toEqual([]);
+});
+
+test("submits three papers only after verifying their final ZIPs", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "paperbot-draft-sync-"));
+  const checkpoints = join(workspace, "checkpoints");
+  await mkdir(checkpoints);
+  const projects = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const outputPath = join(workspace, `example__project-${index}`);
+    await mkdir(outputPath);
+    await writeFile(join(outputPath, "paper.md"), `# Paper ${index}\n`);
+    const archiveName = `2026-08-17_project-${index}_${runId(index)}_final.zip`;
+    const archive = Buffer.from(`archive-${index}`);
+    await writeFile(join(checkpoints, archiveName), archive);
+    projects.push({
+      project_index: index,
+      repository_url: `https://github.com/example/project-${index}`,
+      output_path: outputPath,
+      state: "succeeded",
+      result: {
+        run_id: runId(index),
+        run_path: outputPath,
+        state: "needs_author_review",
+        checkpoint: {
+          reason: "needs_author_review",
+          archive: `../checkpoints/${archiveName}`,
+          archive_sha256: sha256(archive),
+        },
+      },
+    });
+  }
+  const batchPath = join(workspace, "batch.json");
+  await writeFile(batchPath, JSON.stringify({ schema_version: "2", projects }));
+  const submittedKeys: string[] = [];
+  const pendingDrafts = Array.from({ length: 5 }, (_, index) => ({
+    paper_uuid: `10000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
+    revision: 1,
+    review: {},
+  }));
+  const report = await submitBatchDrafts(batchPath, 3, {
+    async listDrafts(input) {
+      if (input.review_status !== "pending_review") {
+        throw new Error("submission may list only pending drafts");
+      }
+      return { drafts: [...pendingDrafts] };
+    },
+    async publishDraft() {
+      throw new Error("submission must not publish drafts");
+    },
+    async createDraft(input) {
+      submittedKeys.push(input.idempotency_key);
+      const draft = {
+        paper_uuid: `00000000-0000-4000-8000-00000000000${submittedKeys.length}`,
+        revision: 1,
+      };
+      pendingDrafts.unshift({ ...draft, review: {} });
+      return draft;
+    },
+    async rejectDraft(paperUuid) {
+      const index = pendingDrafts.findIndex(
+        (draft) => draft.paper_uuid === paperUuid,
+      );
+      if (index === -1) {
+        throw new Error("rotated draft should exist");
+      }
+      const [draft] = pendingDrafts.splice(index, 1);
+      if (draft === undefined) {
+        throw new Error("rotated draft should be removable");
+      }
+      return draft;
+    },
+  });
+
+  expect(report.failed).toEqual([]);
+  expect(report.submitted).toHaveLength(3);
+  expect(report.rotated).toHaveLength(3);
+  expect(pendingDrafts).toHaveLength(5);
+  expect(submittedKeys).toEqual([
+    `paperbot-draft:${runId(1)}`,
+    `paperbot-draft:${runId(2)}`,
+    `paperbot-draft:${runId(3)}`,
+  ]);
+  expect(
+    report.submitted.every((submission) =>
+      submission.archive.endsWith("_final.zip"),
+    ),
+  ).toBe(true);
+});
+
+function approvedDraft(paperUuid: string, revision: number) {
+  return {
+    paper_uuid: paperUuid,
+    revision,
+    review: { reviewed_revision: revision },
+  };
+}
+
+function runId(index: number): string {
+  return `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`;
+}
+
+function sha256(value: Uint8Array): string {
+  return new Bun.CryptoHasher("sha256").update(value).digest("hex");
+}

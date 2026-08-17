@@ -1,0 +1,470 @@
+---
+import type { PaperDraft } from "@prodxiv/api-client";
+import SiteLayout from "../../layouts/SiteLayout.astro";
+import {
+  draftReviewChallenge,
+  draftReviewClient,
+  isSameOriginSubmission,
+  isUnauthorizedReviewError,
+  reviewErrorMessage,
+} from "../../lib/draft-review-auth.ts";
+import { renderPaperMarkdown } from "../../lib/render-paper-markdown.ts";
+
+export const prerender = false;
+
+Astro.response.headers.set("cache-control", "no-store");
+Astro.response.headers.set("x-robots-tag", "noindex, nofollow");
+
+const paperUuid = Astro.params.paper_uuid ?? "";
+const client = draftReviewClient(Astro.request, import.meta.env.PRODXIV_API_URL);
+if (client === undefined) {
+  return draftReviewChallenge();
+}
+
+let actionError: string | undefined;
+if (Astro.request.method === "POST") {
+  if (!isSameOriginSubmission(Astro.request)) {
+    return new Response("Cross-origin draft review is forbidden.\n", {
+      status: 403,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  try {
+    const form = await Astro.request.formData();
+    const action = form.get("action");
+    const expectedRevision = Number(form.get("expected_revision"));
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new Error("The draft revision is invalid. Reload and try again.");
+    }
+    if (action === "approve") {
+      await client.approveDraft(paperUuid, {
+        expected_revision: expectedRevision,
+      });
+    } else if (action === "reject") {
+      const reason = form.get("reason");
+      await client.rejectDraft(paperUuid, {
+        expected_revision: expectedRevision,
+        ...(typeof reason === "string" && reason.trim().length > 0
+          ? { reason: reason.trim() }
+          : {}),
+      });
+    } else if (action === "edit") {
+      const sourceMarkdown = form.get("source_markdown");
+      if (typeof sourceMarkdown !== "string") {
+        throw new Error("The edited Markdown is missing.");
+      }
+      await client.updateDraft(paperUuid, {
+        expected_revision: expectedRevision,
+        source_markdown: sourceMarkdown,
+      });
+    } else {
+      throw new Error("The draft review action is invalid.");
+    }
+    return Astro.redirect(`/drafts/${paperUuid}?notice=${action}`, 303);
+  } catch (error) {
+    if (isUnauthorizedReviewError(error)) {
+      return draftReviewChallenge();
+    }
+    actionError = reviewErrorMessage(error);
+  }
+}
+
+let draft: PaperDraft | undefined;
+let loadError: string | undefined;
+try {
+  draft = await client.getDraft(paperUuid);
+} catch (error) {
+  if (isUnauthorizedReviewError(error)) {
+    return draftReviewChallenge();
+  }
+  loadError = reviewErrorMessage(error);
+}
+
+let previewHtml: string | undefined;
+let previewError: string | undefined;
+if (draft !== undefined) {
+  try {
+    previewHtml = renderPaperMarkdown(draft.source_markdown).html;
+  } catch (error) {
+    previewError = reviewErrorMessage(error);
+  }
+}
+
+const notice = noticeMessage(Astro.url.searchParams.get("notice"));
+const statusLabel = draft === undefined ? undefined : {
+  pending_review: "Pending review",
+  approved: "Approved for next run",
+  rejected: "Rejected",
+}[draft.review.status];
+
+function noticeMessage(value: string | null): string | undefined {
+  if (value === "approve") {
+    return "This exact revision is approved for publication during the next daily run.";
+  }
+  if (value === "reject") {
+    return "The draft was rejected and retained privately.";
+  }
+  if (value === "edit") {
+    return "A new draft revision was uploaded and returned to pending review.";
+  }
+  return undefined;
+}
+---
+
+<SiteLayout
+  title={`Draft ${paperUuid} — prodxiv`}
+  description="Private product-paper draft review."
+>
+  <section class="draft-review shell">
+    <a class="back-link" href="/drafts">← Draft review</a>
+
+    {loadError !== undefined ? (
+      <p class="review-notice review-notice--error">{loadError}</p>
+    ) : draft !== undefined ? (
+      <>
+        <header class="draft-heading">
+          <div>
+            <p class="eyebrow">Private unpublished paper</p>
+            <h1>Draft revision {draft.revision}</h1>
+            <p class="draft-uuid">{draft.paper_uuid}</p>
+          </div>
+          <span class:list={["status-badge", `status-badge--${draft.review.status}`]}>
+            {statusLabel}
+          </span>
+        </header>
+
+        {notice !== undefined ? (
+          <p class="review-notice">{notice}</p>
+        ) : null}
+        {actionError !== undefined ? (
+          <p class="review-notice review-notice--error">{actionError}</p>
+        ) : null}
+        {draft.review.rejection_reason !== undefined ? (
+          <aside class="rejection-note">
+            <strong>Rejection reason</strong>
+            <p>{draft.review.rejection_reason}</p>
+          </aside>
+        ) : null}
+
+        <div class="review-grid">
+          <article class="paper-preview">
+            <div class="panel-heading">
+              <h2>Rendered preview</h2>
+              <span>Revision {draft.revision}</span>
+            </div>
+            {previewHtml !== undefined ? (
+              <div class="paper-prose" set:html={previewHtml} />
+            ) : (
+              <p class="preview-error">
+                Preview unavailable: {previewError ?? "invalid Markdown"}
+              </p>
+            )}
+          </article>
+
+          <aside class="review-actions">
+            <section class="action-card">
+              <h2>Review decision</h2>
+              <p>
+                Approval is bound to revision {draft.revision}. Any later edit
+                clears it automatically.
+              </p>
+              {draft.review.status !== "approved" ? (
+                <form method="post">
+                  <input
+                    type="hidden"
+                    name="expected_revision"
+                    value={draft.revision}
+                  />
+                  <button class="button button--primary" name="action" value="approve">
+                    Approve for next run
+                  </button>
+                </form>
+              ) : null}
+
+              {draft.review.status !== "rejected" ? (
+                <form method="post" class="reject-form">
+                  <input
+                    type="hidden"
+                    name="expected_revision"
+                    value={draft.revision}
+                  />
+                  <label for="reason">Optional rejection reason</label>
+                  <textarea id="reason" name="reason" rows="3" maxlength="2000"></textarea>
+                  <button class="button button--secondary" name="action" value="reject">
+                    Reject and retain
+                  </button>
+                </form>
+              ) : null}
+            </section>
+
+            <section class="action-card">
+              <h2>Upload an edited revision</h2>
+              <p>
+                Saving creates revision {draft.revision + 1}; it never overwrites
+                this snapshot.
+              </p>
+              <form method="post">
+                <input
+                  type="hidden"
+                  name="expected_revision"
+                  value={draft.revision}
+                />
+                <label for="source-markdown">Markdown source</label>
+                <textarea
+                  id="source-markdown"
+                  name="source_markdown"
+                  rows="24"
+                  required
+                >{draft.source_markdown}</textarea>
+                <button class="button button--secondary" name="action" value="edit">
+                  Upload new revision
+                </button>
+              </form>
+            </section>
+          </aside>
+        </div>
+      </>
+    ) : null}
+  </section>
+</SiteLayout>
+
+<style>
+  .draft-review {
+    padding-block: clamp(2rem, 5vw, 4rem);
+  }
+
+  .back-link {
+    color: var(--ink-soft);
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .draft-heading {
+    display: flex;
+    gap: 2rem;
+    align-items: start;
+    justify-content: space-between;
+    margin-top: 1.75rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .eyebrow {
+    margin: 0 0 0.5rem;
+    color: var(--accent);
+    font-size: 0.7rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(2.4rem, 6vw, 4.5rem);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .draft-uuid {
+    margin: 0.7rem 0 0;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+  }
+
+  .status-badge {
+    padding: 0.4rem 0.65rem;
+    border: 1px solid var(--line-strong);
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .status-badge--approved {
+    color: #285e4e;
+    border-color: #6d9b8d;
+  }
+
+  .status-badge--rejected {
+    color: var(--accent-dark);
+    border-color: var(--accent);
+  }
+
+  .review-notice,
+  .rejection-note {
+    margin: 1.5rem 0 0;
+    padding: 1rem 1.2rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .review-notice--error {
+    color: var(--accent-dark);
+    border-color: var(--accent);
+  }
+
+  .rejection-note p {
+    margin: 0.3rem 0 0;
+    color: var(--ink-soft);
+  }
+
+  .review-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(19rem, 0.65fr);
+    gap: clamp(1.5rem, 4vw, 3rem);
+    align-items: start;
+    margin-top: 2rem;
+  }
+
+  .paper-preview,
+  .action-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+
+  .panel-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .panel-heading h2,
+  .panel-heading span {
+    margin: 0;
+  }
+
+  .panel-heading h2,
+  .action-card h2 {
+    font-family: var(--serif);
+    font-size: 1.2rem;
+  }
+
+  .panel-heading span {
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+  }
+
+  .paper-prose,
+  .preview-error {
+    padding: clamp(1.4rem, 4vw, 3rem);
+  }
+
+  .paper-prose :global(h1) {
+    margin: 2.2rem 0 0.8rem;
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+  }
+
+  .paper-prose :global(h1:first-child) {
+    margin-top: 0;
+  }
+
+  .paper-prose :global(p),
+  .paper-prose :global(li) {
+    font-family: var(--serif);
+    font-size: 1.02rem;
+  }
+
+  .paper-prose :global(pre) {
+    overflow-x: auto;
+    padding: 1rem;
+    background: var(--paper-deep);
+  }
+
+  .review-actions {
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .action-card {
+    padding: 1.25rem;
+  }
+
+  .action-card h2,
+  .action-card p {
+    margin: 0;
+  }
+
+  .action-card p {
+    margin-top: 0.45rem;
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+  }
+
+  form {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 1.1rem;
+  }
+
+  label {
+    color: var(--ink-soft);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  textarea {
+    width: 100%;
+    padding: 0.7rem;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  .button {
+    width: 100%;
+    padding: 0.68rem 0.8rem;
+    border: 1px solid var(--accent);
+    border-radius: 0;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 750;
+  }
+
+  .button--primary {
+    color: white;
+    background: var(--accent);
+  }
+
+  .button--secondary {
+    color: var(--accent-dark);
+    background: transparent;
+  }
+
+  .reject-form {
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+  }
+
+  @media (max-width: 900px) {
+    .review-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .draft-heading {
+      display: grid;
+    }
+
+    .status-badge {
+      width: fit-content;
+    }
+  }
+</style>
