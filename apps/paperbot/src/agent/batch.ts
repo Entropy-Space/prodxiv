@@ -20,8 +20,12 @@ import {
 import { initializeRunDirectory, writeJsonArtifact } from "./artifacts.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import { runAgent, type AgentRunOptions } from "./runner.ts";
-import type { AgentPaperRequestMetadata, AgentRunResult } from "./types.ts";
-import type { AgentRunMode } from "./types.ts";
+import type {
+  AgentGitHubReleasePolicy,
+  AgentPaperRequestMetadata,
+  AgentRunMode,
+  AgentRunResult,
+} from "./types.ts";
 
 export const AGENT_BATCH_SCHEMA_VERSION = "1";
 export const AGENT_BATCH_REPORT_SCHEMA_VERSION = "2";
@@ -45,6 +49,7 @@ export interface AgentBatchProject {
 
 export interface AgentBatchManifest {
   schema_version: typeof AGENT_BATCH_SCHEMA_VERSION;
+  github_release_policy?: AgentGitHubReleasePolicy;
   projects: AgentBatchProject[];
 }
 
@@ -90,6 +95,7 @@ export interface AgentBatchReport {
     allow_remote_model: true;
     mode: AgentRunMode;
     concurrency: number;
+    github_release_policy: AgentGitHubReleasePolicy;
     authors?: string[];
     status?: AgentPaperStatus;
     model?: string;
@@ -115,6 +121,7 @@ interface ParsedBatchProject extends AgentBatchProject {
 
 interface ParsedBatchManifest {
   schema_version: typeof AGENT_BATCH_SCHEMA_VERSION;
+  github_release_policy: AgentGitHubReleasePolicy;
   projects: ParsedBatchProject[];
 }
 
@@ -148,6 +155,7 @@ export async function runAgentBatch(
       allow_remote_model: true,
       mode: normalizedOptions.mode,
       concurrency: normalizedOptions.concurrency,
+      github_release_policy: manifest.github_release_policy,
       ...(normalizedOptions.authors === undefined
         ? {}
         : { authors: normalizedOptions.authors }),
@@ -206,6 +214,7 @@ export async function runAgentBatch(
         feedback: normalizedOptions.mode === "auto" ? "none" : "async",
         metadata,
         external_sources: project.external_sources ?? [],
+        github_release_policy: manifest.github_release_policy,
         ...(project.ref === undefined ? {} : { ref: project.ref }),
         ...(normalizedOptions.model === undefined
           ? {}
@@ -271,6 +280,7 @@ export async function loadAgentBatchManifest(
   const manifest = await loadParsedBatchManifest(inputPath);
   return {
     schema_version: manifest.schema_version,
+    github_release_policy: manifest.github_release_policy,
     projects: manifest.projects.map(({ repository, ...project }) => project),
   };
 }
@@ -316,7 +326,7 @@ function parseBatchManifest(value: unknown): ParsedBatchManifest {
   }
   assertKnownFields(
     value,
-    ["schema_version", "projects"],
+    ["schema_version", "github_release_policy", "projects"],
     "agent batch manifest",
   );
   if (value.schema_version !== AGENT_BATCH_SCHEMA_VERSION) {
@@ -339,13 +349,20 @@ function parseBatchManifest(value: unknown): ParsedBatchManifest {
   const projects = value.projects.map((project, index) =>
     parseBatchProject(project, index),
   );
+  const githubReleasePolicy = parseGitHubReleasePolicy(
+    value.github_release_policy,
+  );
   const duplicate = findDuplicateRepository(projects);
   if (duplicate !== undefined) {
     throw usageError(
       `agent batch manifest contains the same repository more than once: ${duplicate}`,
     );
   }
-  return { schema_version: AGENT_BATCH_SCHEMA_VERSION, projects };
+  return {
+    schema_version: AGENT_BATCH_SCHEMA_VERSION,
+    github_release_policy: githubReleasePolicy,
+    projects,
+  };
 }
 
 function parseBatchProject(value: unknown, index: number): ParsedBatchProject {
@@ -564,6 +581,18 @@ function findDuplicateRepository(
     seen.add(key);
   }
   return undefined;
+}
+
+function parseGitHubReleasePolicy(value: unknown): AgentGitHubReleasePolicy {
+  if (value === undefined) {
+    return "best_effort";
+  }
+  if (value !== "best_effort" && value !== "disabled") {
+    throw usageError(
+      "agent batch github_release_policy must be best_effort or disabled",
+    );
+  }
+  return value;
 }
 
 function optionalExternalSources(

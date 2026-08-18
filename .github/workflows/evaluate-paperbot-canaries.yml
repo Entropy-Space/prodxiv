@@ -113,5 +113,11 @@ jobs:
               echo '```json'
               jq '.summary' evaluation/runs/batch.json
               echo '```'
+              if jq -e '.summary.failed > 0' evaluation/runs/batch.json >/dev/null; then
+                echo
+                echo "### Failed projects"
+                jq -r '.projects[] | select(.state == "failed") | "- `\(.repository_url)`: \(.error.message // "unknown failure")"' \
+                  evaluation/runs/batch.json
+              fi
             fi
           } >> "${GITHUB_STEP_SUMMARY}"

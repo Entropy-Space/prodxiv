@@ -523,14 +523,17 @@ when a same-repository pull request explicitly carries the
 trusted revision is dispatched manually. The canary workflow evaluates the
 three SHA-pinned repositories in
 `examples/paperbot-evaluation/canaries.json`, uploads private artifacts, and
-has no publishing credential or remote publication step. Fork pull requests
-must use manual dispatch after their code is trusted.
+disables live GitHub release enrichment so remote release changes cannot alter
+the fixed inputs. It has no publishing credential or remote publication step.
+Fork pull requests must use manual dispatch after their code is trusted.
 
-Configure the daily workflow's `production` GitHub Environment with the
-`PRODXIV_API_URL` variable and the `DEEPSEEK_API_KEY` secret. The workflow
-requests its API identity through GitHub OIDC and has no long-lived API secret.
-The fixed-canary workflow uses only the repository `DEEPSEEK_API_KEY` secret.
-Neither workflow needs a database credential.
+Configure `DEEPSEEK_API_KEY` once as a repository Actions secret. Both the
+daily and fixed-canary workflows use that repository secret; do not duplicate
+it in GitHub Environments because an environment secret with the same name
+would override the repository value. Configure the daily workflow's
+`production` GitHub Environment with only the `PRODXIV_API_URL` variable. The
+daily workflow requests its API identity through GitHub OIDC and has no
+long-lived API secret. Neither workflow needs a database credential.
 
 ### Batch public repositories
 
@@ -540,6 +543,7 @@ with one anonymous canonical GitHub repository per project:
 ```json
 {
   "schema_version": "1",
+  "github_release_policy": "best_effort",
   "projects": [
     {
       "repository_url": "https://github.com/different-ai/openwork",
@@ -568,8 +572,13 @@ bun run paperbot agent batch ./projects.json \
 ```
 
 Project-level `authors` and `status` override optional command defaults. When
-they are absent, each project uses its GitHub owner and release snapshot. A
-batch supports up to 100 repositories and
+they are absent, each project uses its GitHub owner and, when available, a
+release snapshot. `github_release_policy` defaults to `best_effort`: bounded
+release metadata is captured concurrently, but an oversized, unavailable, or
+invalid release response is skipped without discarding the pinned repository
+source. The skip reason remains in the run rollout. Set the policy to
+`disabled` for deterministic canaries that must not read mutable release data.
+A batch supports up to 100 repositories and
 one to four concurrent runs. Batch defaults to auto mode. It creates one
 isolated child directory per
 repository plus an incrementally updated `batch.json` report. One project
