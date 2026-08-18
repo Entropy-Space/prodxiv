@@ -104,6 +104,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -206,6 +216,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -273,6 +293,16 @@
           },
           "500": {
             "description": "Reading the draft failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -411,6 +441,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -508,6 +548,16 @@
           },
           "500": {
             "description": "Deleting the draft failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -631,6 +681,16 @@
           },
           "500": {
             "description": "Approving the draft failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -792,7 +852,7 @@
             }
           },
           "503": {
-            "description": "Monthly identifier space is exhausted",
+            "description": "Monthly identifier space is exhausted or GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -944,7 +1004,7 @@
             }
           },
           "503": {
-            "description": "Monthly identifier space is exhausted",
+            "description": "Monthly identifier space is exhausted or GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1085,6 +1145,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1152,6 +1222,16 @@
           },
           "500": {
             "description": "Reading draft revisions failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1236,6 +1316,16 @@
           },
           "500": {
             "description": "Reading the draft revision failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1434,7 +1524,7 @@
             }
           },
           "503": {
-            "description": "Snapshot ingestion is not configured",
+            "description": "Snapshot ingestion is not configured or GitHub OIDC verification is unavailable",
             "content": {
               "application/json": {
                 "schema": {

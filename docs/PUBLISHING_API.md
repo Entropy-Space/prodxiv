@@ -21,7 +21,9 @@ external-observation routes:
 
 The generated contract is checked in at `openapi/prodxiv-api.json`. Draft
 routes are private and accept the author publishing token or the separately
-scoped bot token described in `docs/DRAFTS.md`.
+scoped bot identity described in `docs/DRAFTS.md`. Production GitHub Actions
+jobs use short-lived OIDC tokens; static bot and ingestion tokens remain
+available for local operation and rollback.
 
 The website exposes the private `/drafts` review queue. It accepts the same
 token from browser HTTP Basic authentication and forwards it server-side; do
@@ -31,10 +33,11 @@ events use `PRODXIV_PUBLISH_ACTOR` until real reviewer identity is introduced.
 
 ## Local environment
 
-Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN`,
-`PRODXIV_BOT_TOKEN`, and `PRODXIV_TRENDING_INGEST_TOKEN` with three different
-random values containing at least 32 characters. Then start PostgreSQL, the
-API, and the static website with Podman:
+Copy `.env.example` to `.env` and replace `PRODXIV_PUBLISH_TOKEN` with a random
+value containing at least 32 characters. Replace the distinct
+`PRODXIV_BOT_TOKEN` and `PRODXIV_TRENDING_INGEST_TOKEN` placeholders as well
+when exercising those scheduled-writer paths locally. Then start PostgreSQL,
+the API, and the static website with Podman:
 
 ```sh
 podman compose up --build
@@ -92,20 +95,19 @@ collector selector and is never stored as a snapshot language.
 
 The `Collect GitHub Trending` GitHub Actions workflow runs every day at
 02:17 UTC against the `production` GitHub Environment. It can also be started
-manually, selecting either `production` or `staging`. Configure these values
-as GitHub Environment variables and secrets for each target:
+manually, selecting either `production` or `staging`. Configure this GitHub
+Environment variable for each target:
 
 - the Actions variable `PRODXIV_API_URL` with that environment's public API
-  URL;
-- the Actions secret `PRODXIV_TRENDING_INGEST_TOKEN` with the dedicated token
-  configured on that API.
+  URL.
 
-`PRODXIV_TRENDING_INGEST_ACTOR` is optional. When it is unset, the workflow
-uses `github_actions:daily_trending`; set an environment variable when a
-different audit identity is needed. Do not point `staging` at a per-PR Vercel
-preview. Preview URLs and their backing databases are ephemeral, whereas
-trending snapshots are durable observations. Use a stable staging API and
-database for manual non-production ingestion.
+The workflow requests a short-lived GitHub Actions OIDC token after collection
+and sends it directly to that API with audience `prodxiv-api`. It needs no
+long-lived ingestion secret. The API derives the audit actor from the trusted
+workflow rather than accepting the request header as identity. Do not point
+`staging` at a per-PR Vercel preview. Preview URLs and their backing databases
+are ephemeral, whereas trending snapshots are durable observations. Use a
+stable staging API and database for manual non-production ingestion.
 
 The Bun collector fetches the unfiltered `any` page and the configured concrete
 language scopes, validates GitHub's current Trending HTML, and creates snapshots using
@@ -267,15 +269,41 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
-- `PRODXIV_BOT_TOKEN` to a distinct secret with at least 32 characters. When
-  absent, bot-authenticated draft actions are unavailable.
+- `PRODXIV_GITHUB_OIDC_REPOSITORY_ID` to `1313713424` on stable API
+  deployments that accept the scheduled GitHub workflows. This enables OIDC.
+- `PRODXIV_GITHUB_OIDC_REPOSITORY` only when the trusted repository differs
+  from the default `Entropy-Space/prodxiv`.
+- `PRODXIV_GITHUB_OIDC_ENVIRONMENT` to the exact GitHub Environment name. It
+  defaults to `production`; set it to `staging` on the stable staging API.
+- `PRODXIV_BOT_TOKEN` only when a distinct static fallback is required. When
+  both static bot authentication and OIDC are absent, bot-authenticated draft
+  actions are unavailable.
 - `PRODXIV_BOT_ACTOR` to the scheduler's audit actor; it defaults to
   `paperbot:daily`.
-- `PRODXIV_TRENDING_INGEST_TOKEN` to a different secret with at least 32
-  characters. When absent, reading remains available and ingestion returns
-  `503`.
+- `PRODXIV_TRENDING_INGEST_TOKEN` only when a distinct static fallback is
+  required. When both static ingestion authentication and OIDC are absent,
+  reading remains available and ingestion returns `503`.
+- `PRODXIV_TRENDING_INGEST_ACTOR` to the OIDC scheduler's audit actor; it
+  defaults to `github_actions:daily_trending`.
 - `PRODXIV_BIND_ADDRESS` only outside Vercel when an explicit address is
   required. On Vercel, the API listens on the platform-provided `PORT`.
+
+OIDC verification accepts only GitHub's issuer and RS256 signing keys, the
+`prodxiv-api` audience, the configured Environment and immutable repository
+ID, one of the two named scheduler workflow files on `refs/heads/main`, and a
+`schedule` or `workflow_dispatch` event. Paperbot and Trending tokens map to
+different API capabilities. Legacy and immutable GitHub subject formats are
+both accepted, while the signed repository ID remains mandatory. Configure
+each GitHub Environment to allow deployments from `main` only. Manual runs
+started from another ref are rejected by the API.
+
+For rollout, configure and deploy the API-side OIDC variables before merging
+the workflow change, then manually dispatch both workflows from `main`. Keep
+the static API token variables during this verification window if rollback is
+needed. After both OIDC runs succeed, remove `PRODXIV_BOT_TOKEN` and
+`PRODXIV_TRENDING_INGEST_TOKEN` from the API and delete the old Actions secrets;
+the checked-in workflows no longer read those secrets. Do not enable the OIDC
+repository ID on ephemeral Vercel preview deployments.
 
 On the separate `prodxiv-web` Vercel project, set `PRODXIV_API_URL` to the
 public HTTPS URL of this API. The website uses it only from its on-demand

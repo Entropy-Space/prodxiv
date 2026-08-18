@@ -30,8 +30,11 @@ ownership.
 ## HTTP resources
 
 All draft routes require either the author publishing token or the dedicated
-bot token. There is deliberately no `/v1/drafts/latest` alias; clients discover
-recently edited drafts from the collection and then use a concrete UUID.
+bot identity. The production scheduler presents a short-lived GitHub Actions
+OIDC token; a distinct static bot token remains available for local operation
+and rollback. There is deliberately no `/v1/drafts/latest` alias; clients
+discover recently edited drafts from the collection and then use a concrete
+UUID.
 
 ```text
 POST   /v1/drafts
@@ -134,10 +137,11 @@ Retrying the same request with the same idempotency key returns that paper with
 conflicting reuse of the key returns `409 Conflict`. Validation failures return
 `422 Unprocessable Entity` and leave the draft available for revision.
 
-The Paperbot model and drafting process never receive either API credential.
-The host scheduler alone performs remote writes with its dedicated bot token.
-It may publish an author-approved exact revision, but it cannot approve an
-author-owned revision.
+The Paperbot model and drafting process never receive an API credential. The
+host scheduler alone requests a short-lived GitHub Actions identity and
+performs remote writes. The API maps only the exact daily Paperbot workflow to
+the bot principal. It may publish an author-approved exact revision, but it
+cannot approve an author-owned revision.
 
 ## Retention and audit
 

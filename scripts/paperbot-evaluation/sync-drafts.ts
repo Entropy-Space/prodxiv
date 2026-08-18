@@ -6,6 +6,7 @@ import {
   ProdxivApiError,
   type PublishDraftInput,
 } from "../../packages/api-client/src/client.ts";
+import { resolveApiBearerToken } from "../github-actions/oidc.ts";
 
 interface DraftSyncClient {
   listDrafts(input: {
@@ -478,10 +479,7 @@ function configuredApiUrl(value: string | undefined): string {
 }
 
 async function main(): Promise<void> {
-  const token = process.env.PRODXIV_BOT_TOKEN;
-  if (token === undefined || token.length < 32) {
-    throw new Error("PRODXIV_BOT_TOKEN must contain at least 32 characters");
-  }
+  const token = await resolveApiBearerToken("PRODXIV_BOT_TOKEN");
   const client = new ProdxivApiClient({
     api_url: configuredApiUrl(process.env.PRODXIV_API_URL),
     token,

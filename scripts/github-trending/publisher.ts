@@ -33,6 +33,7 @@ class IngestionRequestError extends Error {
 
 export function readIngestionConfig(
   environment: Record<string, string | undefined> = process.env,
+  resolvedToken?: string,
 ): IngestionConfig {
   const api_url = environment.PRODXIV_API_URL?.replace(/\/+$/, "");
   if (api_url === undefined || api_url.length === 0) {
@@ -45,13 +46,16 @@ export function readIngestionConfig(
     throw new Error("PRODXIV_API_URL must use HTTPS except on localhost");
   }
 
-  const ingest_token = environment.PRODXIV_TRENDING_INGEST_TOKEN;
+  const ingest_token =
+    resolvedToken ?? environment.PRODXIV_TRENDING_INGEST_TOKEN;
   if (ingest_token === undefined || ingest_token.length < 32) {
     throw new Error(
       "PRODXIV_TRENDING_INGEST_TOKEN must contain at least 32 characters",
     );
   }
-  const ingest_actor = environment.PRODXIV_TRENDING_INGEST_ACTOR;
+  const ingest_actor =
+    environment.PRODXIV_TRENDING_INGEST_ACTOR ??
+    "github_actions:daily_trending";
   if (
     ingest_actor === undefined ||
     ingest_actor.length === 0 ||

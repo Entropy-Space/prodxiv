@@ -10,7 +10,10 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
-use prodxiv_api::{AppState, PublicationStore, StoreError, router};
+use prodxiv_api::{
+    AppState, GitHubActionsWorkload, GitHubOidcAuthenticationError, GitHubOidcAuthenticator,
+    PublicationStore, StoreError, router,
+};
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, DraftOwnerKind, DraftReviewStatus, PaperDocument, PaperDraft,
     PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary,
@@ -29,6 +32,30 @@ use tower::ServiceExt;
 const TOKEN: &str = "test_token_with_at_least_32_characters";
 const BOT_TOKEN: &str = "bot_token_with_at_least_32_characters";
 const INGEST_TOKEN: &str = "trending_ingest_token_with_32_characters";
+const PAPERBOT_OIDC_TOKEN: &str = "paperbot.oidc.token";
+const TRENDING_OIDC_TOKEN: &str = "trending.oidc.token";
+
+struct FakeGitHubOidcAuthenticator;
+
+#[async_trait]
+impl GitHubOidcAuthenticator for FakeGitHubOidcAuthenticator {
+    async fn authenticate(
+        &self,
+        token: &str,
+        workload: GitHubActionsWorkload,
+    ) -> Result<(), GitHubOidcAuthenticationError> {
+        let accepted = matches!(
+            (token, workload),
+            (PAPERBOT_OIDC_TOKEN, GitHubActionsWorkload::Paperbot)
+                | (TRENDING_OIDC_TOKEN, GitHubActionsWorkload::Trending)
+        );
+        if accepted {
+            Ok(())
+        } else {
+            Err(GitHubOidcAuthenticationError::InvalidToken)
+        }
+    }
+}
 
 #[derive(Default)]
 struct FakeStore {
@@ -818,7 +845,19 @@ fn app(store: Arc<FakeStore>) -> axum::Router {
     router(
         AppState::new(store, TOKEN, "api_test")
             .with_bot_principal(Some(BOT_TOKEN.to_owned()), "paperbot:daily".to_owned())
-            .with_trending_ingestion(Some(INGEST_TOKEN.to_owned())),
+            .with_trending_ingestion(
+                Some(INGEST_TOKEN.to_owned()),
+                "github_actions:daily_trending".to_owned(),
+            ),
+    )
+}
+
+fn oidc_app(store: Arc<FakeStore>) -> axum::Router {
+    router(
+        AppState::new(store, TOKEN, "api_test")
+            .with_bot_principal(None, "paperbot:daily".to_owned())
+            .with_trending_ingestion(None, "github_actions:daily_trending".to_owned())
+            .with_github_oidc(Some(Arc::new(FakeGitHubOidcAuthenticator))),
     )
 }
 
@@ -1005,6 +1044,95 @@ async fn protects_trending_ingestion_with_a_dedicated_token() {
         .expect("request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn maps_the_paperbot_oidc_workflow_to_bot_owned_drafts_only() {
+    let application = oidc_app(Arc::new(FakeStore::default()));
+    let created = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {PAPERBOT_OIDC_TOKEN}"),
+                )
+                .header("idempotency-key", "draft-create-oidc-paperbot")
+                .body(Body::from(
+                    json!({ "source_markdown": "# Draft" }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("OIDC draft creation should complete");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(json_body(created).await["owner_kind"], "bot");
+
+    let rejected = application
+        .oneshot(
+            Request::post("/v1/drafts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {TRENDING_OIDC_TOKEN}"),
+                )
+                .header("idempotency-key", "draft-create-oidc-trending")
+                .body(Body::from(
+                    json!({ "source_markdown": "# Draft" }).to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("cross-workload request should complete");
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn maps_the_trending_oidc_workflow_to_its_server_owned_actor() {
+    let store = Arc::new(FakeStore::default());
+    let application = oidc_app(store.clone());
+    let rejected = application
+        .clone()
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {PAPERBOT_OIDC_TOKEN}"),
+                )
+                .header("idempotency-key", "github-trending.oidc.cross-role")
+                .body(Body::from(trending_snapshot_json().to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("cross-workload request should complete");
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+
+    let ingested = application
+        .oneshot(
+            Request::post("/v1/github/trending/snapshots")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {TRENDING_OIDC_TOKEN}"),
+                )
+                .header("idempotency-key", "github-trending.oidc.accepted")
+                .header("x-prodxiv-actor", "spoofed:actor")
+                .body(Body::from(trending_snapshot_json().to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("OIDC ingestion should complete");
+    assert_eq!(ingested.status(), StatusCode::CREATED);
+    assert_eq!(
+        store
+            .trending_actors
+            .lock()
+            .expect("fake Trending actors should lock")
+            .as_slice(),
+        ["github_actions:daily_trending"]
+    );
 }
 
 #[tokio::test]

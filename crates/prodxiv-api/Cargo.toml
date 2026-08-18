@@ -9,8 +9,10 @@ rust-version.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 base64.workspace = true
+jsonwebtoken.workspace = true
 prodxiv-domain = { path = "../prodxiv-domain" }
 prodxiv-storage = { path = "../prodxiv-storage" }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true
@@ -22,6 +24,8 @@ tracing-subscriber.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+rand.workspace = true
+rsa.workspace = true
 serde_yaml.workspace = true
 tower.workspace = true
 

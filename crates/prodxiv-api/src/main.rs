@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use prodxiv_api::{ApiConfig, AppState, router};
+use prodxiv_api::{ApiConfig, AppState, GitHubOidcAuthenticator, GitHubOidcVerifier, router};
 use prodxiv_storage::PostgresStorage;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -20,13 +20,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("prodxiv database migrations are current");
 
     let storage = PostgresStorage::connect(&config.database_url, 10).await?;
+    let github_oidc: Option<Arc<dyn GitHubOidcAuthenticator>> = config
+        .github_oidc
+        .map(GitHubOidcVerifier::new)
+        .transpose()?
+        .map(|verifier| Arc::new(verifier) as Arc<dyn GitHubOidcAuthenticator>);
     let state = AppState::new(
         Arc::new(storage),
         config.publish_token,
         config.publish_actor,
     )
     .with_bot_principal(config.bot_token, config.bot_actor)
-    .with_trending_ingestion(config.trending_ingest_token);
+    .with_trending_ingestion(config.trending_ingest_token, config.trending_ingest_actor)
+    .with_github_oidc(github_oidc);
     let listener = TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "prodxiv API listening");
 
