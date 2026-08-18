@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fs, path::Path};
 
-use prodxiv_domain::{DraftReviewStatus, PaperDocument};
+use prodxiv_domain::{DraftOwnerKind, DraftReviewStatus, PaperDocument};
 use prodxiv_storage::{
     GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector, NewGitHubTrendingSnapshot,
     PostgresStorage, StorageError,
@@ -139,7 +139,11 @@ async fn migrates_existing_publications_to_products_and_revisions(pool: PgPool) 
 async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let created = storage
-        .create_draft("# Working notes\n", "integration_test")
+        .create_draft(
+            "# Working notes\n",
+            "integration_test",
+            DraftOwnerKind::Author,
+        )
         .await
         .expect("draft should be created");
     assert_eq!(created.revision, 1);
@@ -152,6 +156,7 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
                 expected_revision,
                 &format!("# Working notes {edit}\n"),
                 "integration_test",
+                DraftOwnerKind::Author,
             )
             .await
             .expect("draft should update")
@@ -187,6 +192,7 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
             1,
             "# Conflicting edit\n",
             "integration_test",
+            DraftOwnerKind::Author,
         )
         .await;
     assert!(matches!(
@@ -198,7 +204,12 @@ async fn retains_five_draft_snapshots_and_keeps_delete_audit(pool: PgPool) {
 
     assert!(
         storage
-            .delete_draft(&created.paper_uuid, 7, "integration_test")
+            .delete_draft(
+                &created.paper_uuid,
+                7,
+                "integration_test",
+                DraftOwnerKind::Author,
+            )
             .await
             .expect("draft should delete")
     );
@@ -241,6 +252,7 @@ async fn creates_daily_drafts_idempotently(pool: PgPool) {
         .create_draft_idempotent(
             "# Daily draft\n",
             "paperbot_daily",
+            DraftOwnerKind::Bot,
             "paperbot-draft-generation-1",
         )
         .await
@@ -249,6 +261,7 @@ async fn creates_daily_drafts_idempotently(pool: PgPool) {
         .create_draft_idempotent(
             "# Daily draft\n",
             "paperbot_daily",
+            DraftOwnerKind::Bot,
             "paperbot-draft-generation-1",
         )
         .await
@@ -261,6 +274,7 @@ async fn creates_daily_drafts_idempotently(pool: PgPool) {
         .create_draft_idempotent(
             "# Different daily draft\n",
             "paperbot_daily",
+            DraftOwnerKind::Bot,
             "paperbot-draft-generation-1",
         )
         .await;
@@ -272,10 +286,11 @@ async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: P
     let storage = PostgresStorage::new(pool.clone());
     let (source, _) = submission();
     let created = storage
-        .create_draft(&source, "paperbot_daily")
+        .create_draft(&source, "paperbot_daily", DraftOwnerKind::Bot)
         .await
         .expect("draft should be created");
     assert_eq!(created.review.status, DraftReviewStatus::PendingReview);
+    assert_eq!(created.owner_kind, DraftOwnerKind::Bot);
 
     let unapproved = storage
         .publish_draft(
@@ -293,6 +308,7 @@ async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: P
             &created.paper_uuid,
             created.revision,
             "author_test",
+            DraftOwnerKind::Author,
             Some("Not ready for publication"),
         )
         .await
@@ -306,7 +322,7 @@ async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: P
     );
     assert_eq!(
         storage
-            .list_drafts(5, Some(DraftReviewStatus::Rejected))
+            .list_drafts(5, Some(DraftReviewStatus::Rejected), None)
             .await
             .expect("rejected drafts should list")
             .len(),
@@ -319,18 +335,36 @@ async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: P
             created.revision,
             &source,
             "author_test",
+            DraftOwnerKind::Author,
         )
         .await
         .expect("rejected draft should remain editable")
         .expect("draft should exist")
         .draft;
     assert_eq!(edited.revision, 2);
+    assert_eq!(edited.owner_kind, DraftOwnerKind::Author);
     assert_eq!(edited.review.status, DraftReviewStatus::PendingReview);
     assert!(edited.review.reviewed_revision.is_none());
     assert!(edited.review.rejection_reason.is_none());
 
+    let bot_edit = storage
+        .update_draft(
+            &created.paper_uuid,
+            edited.revision,
+            &source,
+            "paperbot_daily",
+            DraftOwnerKind::Bot,
+        )
+        .await;
+    assert!(matches!(bot_edit, Err(StorageError::DraftOwnerForbidden)));
+
     let approved = storage
-        .approve_draft(&created.paper_uuid, edited.revision, "author_test")
+        .approve_draft(
+            &created.paper_uuid,
+            edited.revision,
+            "author_test",
+            DraftOwnerKind::Author,
+        )
         .await
         .expect("approval should succeed")
         .expect("draft should exist");
@@ -353,15 +387,67 @@ async fn binds_review_decisions_to_one_revision_and_preserves_rejections(pool: P
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn auto_publishes_only_pending_bot_owned_drafts(pool: PgPool) {
+    let storage = PostgresStorage::new(pool);
+    let (source, _) = submission();
+    let author_draft = storage
+        .create_draft(&source, "author_test", DraftOwnerKind::Author)
+        .await
+        .expect("author draft should be created");
+    let forbidden = storage
+        .approve_and_publish_draft(
+            &author_draft.paper_uuid,
+            author_draft.revision,
+            "paperbot_daily",
+            DraftOwnerKind::Bot,
+            "draft-auto-publish-author-owned",
+            None,
+        )
+        .await;
+    assert!(matches!(forbidden, Err(StorageError::DraftOwnerForbidden)));
+
+    let bot_draft = storage
+        .create_draft(&source, "paperbot_daily", DraftOwnerKind::Bot)
+        .await
+        .expect("bot draft should be created");
+    let published = storage
+        .approve_and_publish_draft(
+            &bot_draft.paper_uuid,
+            bot_draft.revision,
+            "paperbot_daily",
+            DraftOwnerKind::Bot,
+            "draft-auto-publish-bot-owned",
+            None,
+        )
+        .await
+        .expect("bot-owned publication should succeed")
+        .expect("bot-owned draft should exist");
+    assert!(!published.replayed);
+    assert_eq!(published.paper.revision, 1);
+    assert!(
+        storage
+            .find_draft(&bot_draft.paper_uuid)
+            .await
+            .expect("published draft lookup should succeed")
+            .is_none()
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn publishes_one_exact_draft_revision_and_replays_after_content_deletion(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let (source, _) = submission();
     let created = storage
-        .create_draft(&source, "integration_test")
+        .create_draft(&source, "integration_test", DraftOwnerKind::Author)
         .await
         .expect("draft should be created");
     storage
-        .approve_draft(&created.paper_uuid, created.revision, "author_test")
+        .approve_draft(
+            &created.paper_uuid,
+            created.revision,
+            "author_test",
+            DraftOwnerKind::Author,
+        )
         .await
         .expect("draft approval should succeed")
         .expect("draft should exist");
@@ -458,12 +544,21 @@ async fn publishes_one_exact_draft_revision_and_replays_after_content_deletion(p
 async fn keeps_an_invalid_draft_mutable_when_publication_fails(pool: PgPool) {
     let storage = PostgresStorage::new(pool);
     let created = storage
-        .create_draft("# Incomplete working notes\n", "integration_test")
+        .create_draft(
+            "# Incomplete working notes\n",
+            "integration_test",
+            DraftOwnerKind::Author,
+        )
         .await
         .expect("incomplete draft should be created");
 
     let result = storage
-        .approve_draft(&created.paper_uuid, created.revision, "author_test")
+        .approve_draft(
+            &created.paper_uuid,
+            created.revision,
+            "author_test",
+            DraftOwnerKind::Author,
+        )
         .await;
     assert!(matches!(result, Err(StorageError::InvalidDraftMarkdown(_))));
     assert!(
@@ -480,11 +575,16 @@ async fn publishes_a_draft_only_once_across_concurrent_request_keys(pool: PgPool
     let storage = PostgresStorage::new(pool.clone());
     let (source, _) = submission();
     let created = storage
-        .create_draft(&source, "integration_test")
+        .create_draft(&source, "integration_test", DraftOwnerKind::Author)
         .await
         .expect("draft should be created");
     storage
-        .approve_draft(&created.paper_uuid, created.revision, "author_test")
+        .approve_draft(
+            &created.paper_uuid,
+            created.revision,
+            "author_test",
+            DraftOwnerKind::Author,
+        )
         .await
         .expect("draft approval should succeed")
         .expect("draft should exist");

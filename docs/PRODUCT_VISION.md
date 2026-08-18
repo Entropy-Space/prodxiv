@@ -116,13 +116,16 @@ the authoring tool and model and may include its tool version plus a safe
 generation lineage identifier, while `communication_email` is optional and
 available only when at least one human writer chooses to provide a contact.
 
-A product paper speaks on behalf of its credited authors. Its narrative should
-normally use first-person plural voice for the authors' work and decisions,
-while writer metadata discloses whether a human or agent produced the prose.
-An unreviewed agent draft remains private and visibly unendorsed until an author
-confirms it. First-person voice does not authorize invented intent: statements
-about why the authors chose an approach, what they tried, or what they learned
-still require author input or inspectable evidence.
+A human-endorsed product paper speaks on behalf of its credited authors. Its
+narrative should normally use first-person plural voice for the authors' work
+and decisions, while writer metadata discloses whether a human or agent
+produced the prose. An automatically released agent paper remains visibly
+identified as agent-written and does not claim human endorsement. The daily
+archive may publish an unchanged bot-owned draft after its review window. An
+author edit transfers control to the author and removes that draft from
+automatic approval. First-person voice does not authorize invented intent:
+statements about why the authors chose an approach, what they tried, or what
+they learned still require author input or inspectable evidence.
 
 Product status is an observation rather than an unsupported scalar assertion.
 An inferred status records its observation time and evidence. Drafts use

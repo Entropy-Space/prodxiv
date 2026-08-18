@@ -19,11 +19,19 @@ Review decisions are revision-bound. Uploading an edit creates the next draft
 revision and returns the draft to `pending_review`; it never changes an older
 snapshot or carries an approval forward.
 
+Each draft also has one current `owner_kind`: `author` or `bot`. The API derives
+ownership from the authenticated principal rather than trusting request JSON.
+A draft created by the daily scheduler starts bot-owned. An edit authenticated
+as the author transfers it permanently to author ownership; later bot
+mutation attempts are rejected and cannot transfer it back. Creator and
+revision provenance remain in the audit log independently of current
+ownership.
+
 ## HTTP resources
 
-All draft routes require the configured bearer token. There is deliberately no
-`/v1/drafts/latest` alias; clients discover recently edited drafts from the
-collection and then use a concrete UUID.
+All draft routes require either the author publishing token or the dedicated
+bot token. There is deliberately no `/v1/drafts/latest` alias; clients discover
+recently edited drafts from the collection and then use a concrete UUID.
 
 ```text
 POST   /v1/drafts
@@ -31,6 +39,7 @@ GET    /v1/drafts
 GET    /v1/drafts/{paper_uuid}
 PUT    /v1/drafts/{paper_uuid}
 POST   /v1/drafts/{paper_uuid}/approve
+POST   /v1/drafts/{paper_uuid}/approve-and-publish
 POST   /v1/drafts/{paper_uuid}/reject
 DELETE /v1/drafts/{paper_uuid}
 POST   /v1/drafts/{paper_uuid}/publish
@@ -40,10 +49,10 @@ GET    /v1/drafts/{paper_uuid}/revisions/{revision}
 
 `GET /v1/drafts` orders results by `updated_at` descending. Current-draft
 responses include an `ETag` containing the quoted revision number. The
-collection accepts `review_status=pending_review|approved|rejected`. `PUT`,
-review actions, `DELETE`, and publication require the current revision in
-`If-Match`, preventing a stale editor or scheduler from acting on another
-save.
+collection accepts `review_status=pending_review|approved|rejected` and
+`owner_kind=author|bot`. `PUT`, review actions, `DELETE`, and publication
+require the current revision in `If-Match`, preventing a stale editor or
+scheduler from acting on another save.
 
 Creating a draft also requires an `Idempotency-Key` between 8 and 128
 characters. The same actor may safely retry the same key and exact Markdown;
@@ -69,11 +78,13 @@ Authorization: Bearer ...
 If-Match: "3"
 ```
 
-Rejection retains the draft and all snapshots still covered by the normal
-five-revision retention window. Its optional JSON body is
-`{"reason":"..."}`. Editing through the website uploads a new revision of the
-same unpublished paper UUID. The review UI deliberately has no delete or
-direct-publish action.
+The review page also offers **Approve and publish now**, which atomically binds
+approval to the displayed revision and publishes it. A successful request
+redirects to the immutable public paper. Rejection retains the draft and all
+snapshots still covered by the normal five-revision retention window. Its
+optional JSON body is `{"reason":"..."}`. Editing through the website uploads a
+new revision of the same unpublished paper UUID. The review UI deliberately
+has no delete action.
 
 ## Publication handoff
 
@@ -93,11 +104,29 @@ The optional request field `product_id` associates the paper with an existing
 product. Source Markdown is deliberately absent from this request: the service
 locks and publishes the exact saved revision named by `If-Match`.
 
-The exact current revision must already be `approved`. The daily Paperbot
-workflow first publishes approved, unchanged revisions and only then creates
-the day's new private drafts. Publication is therefore delayed until the run
-after author approval. A later edit invalidates the approval and makes the
-scheduler skip the stale revision.
+The exact current revision must already be `approved` when using `/publish`.
+The daily Paperbot workflow first publishes approved, unchanged revisions. It
+may also use the atomic endpoint below to approve and publish a
+`pending_review` revision when that draft is still bot-owned:
+
+```http
+POST /v1/drafts/{paper_uuid}/approve-and-publish
+Authorization: Bearer ...
+If-Match: "3"
+Idempotency-Key: stable-approval-publication-key
+Content-Type: application/json
+
+{}
+```
+
+The combined operation is atomic: validation, approval audit, immutable
+publication, UUID provenance, and mutable-draft removal either all commit or
+all fail. The author principal may use it for any current draft. The bot
+principal may use it only for a pending bot-owned draft. The workflow performs
+promotion before creating the day's new drafts, so a new suggestion remains
+available for review until at least the next run. A human edit transfers
+ownership to the author and makes bot auto-approval fail even if the scheduler
+already listed the draft.
 
 The first successful request returns `201 Created` and the immutable paper.
 Retrying the same request with the same idempotency key returns that paper with
@@ -105,9 +134,10 @@ Retrying the same request with the same idempotency key returns that paper with
 conflicting reuse of the key returns `409 Conflict`. Validation failures return
 `422 Unprocessable Entity` and leave the draft available for revision.
 
-The Paperbot model and drafting process never invoke this endpoint. The
-scheduler executes only the publication authorization previously recorded by
-an author for one exact revision.
+The Paperbot model and drafting process never receive either API credential.
+The host scheduler alone performs remote writes with its dedicated bot token.
+It may publish an author-approved exact revision, but it cannot approve an
+author-owned revision.
 
 ## Retention and audit
 

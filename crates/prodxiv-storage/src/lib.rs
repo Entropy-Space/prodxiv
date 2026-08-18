@@ -3,11 +3,12 @@
 use std::collections::HashMap;
 
 use prodxiv_domain::{
-    DRAFT_REVISION_RETENTION, DraftReviewStatus, MAX_DRAFT_REJECTION_REASON_BYTES, PaperDocument,
-    PaperDraft, PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary,
-    PaperMetadata, PaperParseError, PublicationIdentity, PublicationPreparationError,
-    PublishedPaper, PublishedPaperSummary, ValidationProfile, canonicalize_product_id,
-    encode_paper_id_suffix, prepare_publication, product_id_from_paper_id, validate_paper,
+    DRAFT_REVISION_RETENTION, DraftOwnerKind, DraftReviewStatus, MAX_DRAFT_REJECTION_REASON_BYTES,
+    PaperDocument, PaperDraft, PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary,
+    PaperDraftSummary, PaperMetadata, PaperParseError, PublicationIdentity,
+    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, ValidationProfile,
+    canonicalize_product_id, encode_paper_id_suffix, prepare_publication, product_id_from_paper_id,
+    validate_paper,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::json;
@@ -55,6 +56,22 @@ pub struct DraftUpdateOutcome {
 pub struct DraftCreateOutcome {
     pub draft: PaperDraft,
     pub replayed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DraftPublicationMode {
+    PreviouslyApproved,
+    ApproveNow(DraftOwnerKind),
+}
+
+struct DraftPublicationRequest<'a> {
+    paper_uuid: &'a str,
+    expected_revision: u32,
+    actor: &'a str,
+    idempotency_key: &'a str,
+    requested_product_id: Option<&'a str>,
+    request_sha256: &'a str,
+    mode: DraftPublicationMode,
 }
 
 pub const GITHUB_TRENDING_ANY_LANGUAGE: &str = "any";
@@ -283,10 +300,13 @@ impl PostgresStorage {
         &self,
         source_markdown: &str,
         actor: &str,
+        owner_kind: DraftOwnerKind,
     ) -> Result<PaperDraft, StorageError> {
         validate_draft_write(source_markdown, actor)?;
         let mut transaction = self.pool.begin().await?;
-        let draft = create_draft_in_transaction(&mut transaction, source_markdown, actor).await?;
+        let draft =
+            create_draft_in_transaction(&mut transaction, source_markdown, actor, owner_kind)
+                .await?;
         transaction.commit().await?;
         Ok(draft)
     }
@@ -296,13 +316,14 @@ impl PostgresStorage {
         &self,
         source_markdown: &str,
         actor: &str,
+        owner_kind: DraftOwnerKind,
         idempotency_key: &str,
     ) -> Result<DraftCreateOutcome, StorageError> {
         validate_draft_write(source_markdown, actor)?;
         if !is_valid_idempotency_key(idempotency_key) {
             return Err(StorageError::InvalidIdempotencyKey);
         }
-        let request_sha256 = draft_creation_request_sha256(source_markdown);
+        let request_sha256 = draft_creation_request_sha256(source_markdown, owner_kind);
         let mut transaction = self.pool.begin().await?;
         let lock_key = format!("draft.create:{}:{actor}{idempotency_key}", actor.len());
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -339,7 +360,9 @@ impl PostgresStorage {
             });
         }
 
-        let draft = create_draft_in_transaction(&mut transaction, source_markdown, actor).await?;
+        let draft =
+            create_draft_in_transaction(&mut transaction, source_markdown, actor, owner_kind)
+                .await?;
         sqlx::query(
             r#"
             INSERT INTO paper_draft_creation_requests (
@@ -373,12 +396,14 @@ impl PostgresStorage {
         &self,
         limit: u32,
         review_status: Option<DraftReviewStatus>,
+        owner_kind: Option<DraftOwnerKind>,
     ) -> Result<Vec<PaperDraftSummary>, StorageError> {
         let rows = sqlx::query(
             r#"
             SELECT
               paper_uuid::text AS paper_uuid,
               current_revision,
+              owner_kind,
               review_status,
               reviewed_revision,
               reviewed_by,
@@ -396,12 +421,14 @@ impl PostgresStorage {
                 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
               ) AS updated_at
             FROM paper_drafts
-            WHERE $1::text IS NULL OR review_status = $1
+            WHERE ($1::text IS NULL OR review_status = $1)
+              AND ($2::text IS NULL OR owner_kind = $2)
             ORDER BY updated_at DESC, paper_uuid DESC
-            LIMIT $2
+            LIMIT $3
             "#,
         )
         .bind(review_status.map(DraftReviewStatus::as_str))
+        .bind(owner_kind.map(DraftOwnerKind::as_str))
         .bind(i64::from(limit))
         .fetch_all(&self.pool)
         .await?;
@@ -412,6 +439,7 @@ impl PostgresStorage {
                 Ok(PaperDraftSummary {
                     paper_uuid: row.try_get("paper_uuid")?,
                     revision: decode_revision(revision)?,
+                    owner_kind: decode_draft_owner_kind(&row)?,
                     review: decode_draft_review(&row)?,
                     created_at: row.try_get("created_at")?,
                     updated_at: row.try_get("updated_at")?,
@@ -432,6 +460,7 @@ impl PostgresStorage {
             SELECT
               paper_drafts.paper_uuid::text AS paper_uuid,
               paper_drafts.current_revision,
+              paper_drafts.owner_kind,
               paper_draft_revisions.source_markdown,
               paper_drafts.review_status,
               paper_drafts.reviewed_revision,
@@ -478,6 +507,7 @@ impl PostgresStorage {
         expected_revision: u32,
         source_markdown: &str,
         actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<Option<DraftUpdateOutcome>, StorageError> {
         validate_draft_write(source_markdown, actor)?;
         let expected_revision = i32::try_from(expected_revision)
@@ -486,7 +516,7 @@ impl PostgresStorage {
         let mut transaction = self.pool.begin().await?;
         let current = sqlx::query(
             r#"
-            SELECT current_revision, review_status
+            SELECT current_revision, review_status, owner_kind
             FROM paper_drafts
             WHERE paper_uuid = $1::uuid
             FOR UPDATE
@@ -502,6 +532,11 @@ impl PostgresStorage {
 
         let current_revision: i32 = current.try_get("current_revision")?;
         let previous_review_status: String = current.try_get("review_status")?;
+        let previous_owner_kind = decode_draft_owner_kind(&current)?;
+        if actor_kind == DraftOwnerKind::Bot && previous_owner_kind != DraftOwnerKind::Bot {
+            transaction.rollback().await?;
+            return Err(StorageError::DraftOwnerForbidden);
+        }
         if current_revision != expected_revision {
             if current_revision == expected_revision.saturating_add(1) {
                 let existing_source = sqlx::query_scalar::<_, String>(
@@ -562,12 +597,17 @@ impl PostgresStorage {
               reviewed_by = NULL,
               reviewed_at = NULL,
               rejection_reason = NULL,
+              owner_kind = CASE
+                WHEN $3 = 'author' THEN 'author'
+                ELSE owner_kind
+              END,
               updated_at = CURRENT_TIMESTAMP
             WHERE paper_uuid = $1::uuid
             "#,
         )
         .bind(paper_uuid)
         .bind(next_revision)
+        .bind(actor_kind.as_str())
         .execute(&mut *transaction)
         .await?;
 
@@ -606,6 +646,12 @@ impl PostgresStorage {
           "retained_from_revision": retained_from_revision,
           "retained_revision_limit": DRAFT_REVISION_RETENTION,
           "invalidated_review_status": previous_review_status,
+          "previous_owner_kind": previous_owner_kind.as_str(),
+          "owner_kind": if actor_kind == DraftOwnerKind::Author {
+            DraftOwnerKind::Author.as_str()
+          } else {
+            previous_owner_kind.as_str()
+          },
         })))
         .execute(&mut *transaction)
         .await?;
@@ -630,11 +676,13 @@ impl PostgresStorage {
         paper_uuid: &str,
         expected_revision: u32,
         actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<Option<PaperDraft>, StorageError> {
         self.review_draft(
             paper_uuid,
             expected_revision,
             actor,
+            actor_kind,
             DraftReviewStatus::Approved,
             None,
         )
@@ -647,6 +695,7 @@ impl PostgresStorage {
         paper_uuid: &str,
         expected_revision: u32,
         actor: &str,
+        actor_kind: DraftOwnerKind,
         reason: Option<&str>,
     ) -> Result<Option<PaperDraft>, StorageError> {
         let reason = normalize_rejection_reason(reason)?;
@@ -654,6 +703,7 @@ impl PostgresStorage {
             paper_uuid,
             expected_revision,
             actor,
+            actor_kind,
             DraftReviewStatus::Rejected,
             reason.as_deref(),
         )
@@ -665,6 +715,7 @@ impl PostgresStorage {
         paper_uuid: &str,
         expected_revision: u32,
         actor: &str,
+        actor_kind: DraftOwnerKind,
         status: DraftReviewStatus,
         rejection_reason: Option<&str>,
     ) -> Result<Option<PaperDraft>, StorageError> {
@@ -691,6 +742,14 @@ impl PostgresStorage {
             return Err(StorageError::DraftRevisionConflict {
                 current_revision: decode_revision(current_revision)?,
             });
+        }
+
+        let owner_kind = decode_draft_owner_kind(&current)?;
+        if actor_kind == DraftOwnerKind::Bot
+            && (status != DraftReviewStatus::Rejected || owner_kind != DraftOwnerKind::Bot)
+        {
+            transaction.rollback().await?;
+            return Err(StorageError::DraftOwnerForbidden);
         }
 
         let current_status = decode_draft_review_status(&current)?;
@@ -754,6 +813,8 @@ impl PostgresStorage {
         .bind(current_revision)
         .bind(Json(json!({
           "previous_review_status": current_status.as_str(),
+          "reviewer_kind": actor_kind.as_str(),
+          "owner_kind": owner_kind.as_str(),
           "rejection_reason": rejection_reason,
         })))
         .execute(&mut *transaction)
@@ -870,14 +931,15 @@ impl PostgresStorage {
         paper_uuid: &str,
         expected_revision: u32,
         actor: &str,
+        actor_kind: DraftOwnerKind,
     ) -> Result<bool, StorageError> {
         if actor.trim().is_empty() {
             return Err(StorageError::InvalidActor);
         }
         let mut transaction = self.pool.begin().await?;
-        let current_revision = sqlx::query_scalar::<_, i32>(
+        let current = sqlx::query(
             r#"
-            SELECT current_revision
+            SELECT current_revision, owner_kind
             FROM paper_drafts
             WHERE paper_uuid = $1::uuid
             FOR UPDATE
@@ -886,10 +948,16 @@ impl PostgresStorage {
         .bind(paper_uuid)
         .fetch_optional(&mut *transaction)
         .await?;
-        let Some(current_revision) = current_revision else {
+        let Some(current) = current else {
             transaction.rollback().await?;
             return Ok(false);
         };
+        let current_revision: i32 = current.try_get("current_revision")?;
+        let owner_kind = decode_draft_owner_kind(&current)?;
+        if actor_kind == DraftOwnerKind::Bot && owner_kind != DraftOwnerKind::Bot {
+            transaction.rollback().await?;
+            return Err(StorageError::DraftOwnerForbidden);
+        }
         if decode_revision(current_revision)? != expected_revision {
             transaction.rollback().await?;
             return Err(StorageError::DraftRevisionConflict {
@@ -903,14 +971,19 @@ impl PostgresStorage {
               action,
               actor,
               paper_uuid,
-              revision
+              revision,
+              details
             )
-            VALUES ('draft.deleted', $1, $2::uuid, $3)
+            VALUES ('draft.deleted', $1, $2::uuid, $3, $4)
             "#,
         )
         .bind(actor)
         .bind(paper_uuid)
         .bind(current_revision)
+        .bind(Json(json!({
+          "actor_kind": actor_kind.as_str(),
+          "owner_kind": owner_kind.as_str(),
+        })))
         .execute(&mut *transaction)
         .await?;
         sqlx::query("DELETE FROM paper_drafts WHERE paper_uuid = $1::uuid")
@@ -947,6 +1020,64 @@ impl PostgresStorage {
             expected_revision,
             requested_product_id.as_deref(),
         );
+        self.publish_draft_in_mode(DraftPublicationRequest {
+            paper_uuid,
+            expected_revision,
+            actor,
+            idempotency_key,
+            requested_product_id: requested_product_id.as_deref(),
+            request_sha256: &request_sha256,
+            mode: DraftPublicationMode::PreviouslyApproved,
+        })
+        .await
+    }
+
+    /// Approves and publishes one exact draft revision atomically.
+    ///
+    /// Authors may publish any current draft revision. Bot principals may use
+    /// this operation only for pending drafts that are still bot-owned.
+    pub async fn approve_and_publish_draft(
+        &self,
+        paper_uuid: &str,
+        expected_revision: u32,
+        actor: &str,
+        actor_kind: DraftOwnerKind,
+        idempotency_key: &str,
+        requested_product_id: Option<&str>,
+    ) -> Result<Option<PublishOutcome>, StorageError> {
+        validate_publication_request(actor, idempotency_key)?;
+        let requested_product_id = canonical_requested_product_id(requested_product_id)?;
+        let request_sha256 = draft_approve_and_publish_request_sha256(
+            paper_uuid,
+            expected_revision,
+            actor_kind,
+            requested_product_id.as_deref(),
+        );
+        self.publish_draft_in_mode(DraftPublicationRequest {
+            paper_uuid,
+            expected_revision,
+            actor,
+            idempotency_key,
+            requested_product_id: requested_product_id.as_deref(),
+            request_sha256: &request_sha256,
+            mode: DraftPublicationMode::ApproveNow(actor_kind),
+        })
+        .await
+    }
+
+    async fn publish_draft_in_mode(
+        &self,
+        request: DraftPublicationRequest<'_>,
+    ) -> Result<Option<PublishOutcome>, StorageError> {
+        let DraftPublicationRequest {
+            paper_uuid,
+            expected_revision,
+            actor,
+            idempotency_key,
+            requested_product_id,
+            request_sha256,
+            mode,
+        } = request;
         let expected_revision = i32::try_from(expected_revision)
             .map_err(|_| StorageError::CorruptRevision(i32::MAX))?;
         let mut transaction = self.pool.begin().await?;
@@ -955,7 +1086,7 @@ impl PostgresStorage {
             &mut transaction,
             actor,
             idempotency_key,
-            &request_sha256,
+            request_sha256,
         )
         .await?
         {
@@ -967,6 +1098,7 @@ impl PostgresStorage {
             r#"
             SELECT
               paper_drafts.current_revision,
+              paper_drafts.owner_kind,
               paper_drafts.review_status,
               paper_drafts.reviewed_revision,
               paper_drafts.reviewed_by,
@@ -999,12 +1131,65 @@ impl PostgresStorage {
         }
         let review_status: String = draft.try_get("review_status")?;
         let reviewed_revision: Option<i32> = draft.try_get("reviewed_revision")?;
-        if review_status != DraftReviewStatus::Approved.as_str()
-            || reviewed_revision != Some(current_revision)
-        {
-            transaction.rollback().await?;
-            return Err(StorageError::DraftNotApproved);
-        }
+        let owner_kind = decode_draft_owner_kind(&draft)?;
+        let (approved_by, approved_at, approval_kind) = match mode {
+            DraftPublicationMode::PreviouslyApproved => {
+                if review_status != DraftReviewStatus::Approved.as_str()
+                    || reviewed_revision != Some(current_revision)
+                {
+                    transaction.rollback().await?;
+                    return Err(StorageError::DraftNotApproved);
+                }
+                (
+                    draft.try_get::<String, _>("reviewed_by")?,
+                    draft.try_get::<String, _>("reviewed_at")?,
+                    DraftOwnerKind::Author,
+                )
+            }
+            DraftPublicationMode::ApproveNow(actor_kind) => {
+                if actor_kind == DraftOwnerKind::Bot
+                    && (owner_kind != DraftOwnerKind::Bot
+                        || review_status != DraftReviewStatus::PendingReview.as_str())
+                {
+                    transaction.rollback().await?;
+                    return Err(StorageError::DraftOwnerForbidden);
+                }
+                let approved_at = sqlx::query_scalar::<_, String>(
+                    r#"
+                    SELECT to_char(
+                      CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                    )
+                    "#,
+                )
+                .fetch_one(&mut *transaction)
+                .await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO paper_draft_audit_log (
+                      action,
+                      actor,
+                      paper_uuid,
+                      revision,
+                      details
+                    )
+                    VALUES ('draft.approved', $1, $2::uuid, $3, $4)
+                    "#,
+                )
+                .bind(actor)
+                .bind(paper_uuid)
+                .bind(current_revision)
+                .bind(Json(json!({
+                  "previous_review_status": review_status,
+                  "reviewer_kind": actor_kind.as_str(),
+                  "owner_kind": owner_kind.as_str(),
+                  "immediate_publication": true,
+                })))
+                .execute(&mut *transaction)
+                .await?;
+                (actor.to_owned(), approved_at, actor_kind)
+            }
+        };
         let submitted_markdown: String = draft.try_get("source_markdown")?;
         let paper = PaperDocument::from_markdown(&submitted_markdown)?;
         let report = validate_paper(&paper, ValidationProfile::Submission);
@@ -1020,8 +1205,8 @@ impl PostgresStorage {
             &submitted_markdown,
             actor,
             idempotency_key,
-            requested_product_id.as_deref(),
-            &request_sha256,
+            requested_product_id,
+            request_sha256,
         )
         .await?;
         let paper_revision =
@@ -1062,8 +1247,10 @@ impl PostgresStorage {
         .bind(Json(json!({
           "paper_id": published.paper_id,
           "paper_revision": published.revision,
-          "approved_by": draft.try_get::<String, _>("reviewed_by")?,
-          "approved_at": draft.try_get::<String, _>("reviewed_at")?,
+          "approved_by": approved_by,
+          "approved_at": approved_at,
+          "approval_kind": approval_kind.as_str(),
+          "owner_kind": owner_kind.as_str(),
         })))
         .execute(&mut *transaction)
         .await?;
@@ -1854,9 +2041,30 @@ fn draft_publication_request_sha256(
     format!("{:x}", request_hasher.finalize())
 }
 
-fn draft_creation_request_sha256(source_markdown: &str) -> String {
+fn draft_approve_and_publish_request_sha256(
+    paper_uuid: &str,
+    expected_revision: u32,
+    actor_kind: DraftOwnerKind,
+    requested_product_id: Option<&str>,
+) -> String {
+    let mut request_hasher = Sha256::new();
+    request_hasher.update(b"draft.approve_and_publish");
+    request_hasher.update([0]);
+    request_hasher.update(paper_uuid.as_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(expected_revision.to_be_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(actor_kind.as_str().as_bytes());
+    request_hasher.update([0]);
+    request_hasher.update(requested_product_id.unwrap_or_default().as_bytes());
+    format!("{:x}", request_hasher.finalize())
+}
+
+fn draft_creation_request_sha256(source_markdown: &str, owner_kind: DraftOwnerKind) -> String {
     let mut request_hasher = Sha256::new();
     request_hasher.update(b"draft.create");
+    request_hasher.update([0]);
+    request_hasher.update(owner_kind.as_str().as_bytes());
     request_hasher.update([0]);
     request_hasher.update(source_markdown.as_bytes());
     format!("{:x}", request_hasher.finalize())
@@ -2102,11 +2310,12 @@ async fn create_draft_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     source_markdown: &str,
     actor: &str,
+    owner_kind: DraftOwnerKind,
 ) -> Result<PaperDraft, StorageError> {
     let row = sqlx::query(
         r#"
-        INSERT INTO paper_drafts (created_by)
-        VALUES ($1)
+        INSERT INTO paper_drafts (created_by, owner_kind)
+        VALUES ($1, $2)
         RETURNING
           paper_uuid::text AS paper_uuid,
           current_revision,
@@ -2121,6 +2330,7 @@ async fn create_draft_in_transaction(
         "#,
     )
     .bind(actor)
+    .bind(owner_kind.as_str())
     .fetch_one(&mut **transaction)
     .await?;
     let paper_uuid: String = row.try_get("paper_uuid")?;
@@ -2161,6 +2371,7 @@ async fn create_draft_in_transaction(
     .bind(revision)
     .bind(Json(json!({
       "retained_revision_limit": DRAFT_REVISION_RETENTION,
+      "owner_kind": owner_kind.as_str(),
     })))
     .execute(&mut **transaction)
     .await?;
@@ -2168,6 +2379,7 @@ async fn create_draft_in_transaction(
     Ok(PaperDraft {
         paper_uuid,
         revision: decode_revision(revision)?,
+        owner_kind,
         source_markdown: source_markdown.to_owned(),
         review: PaperDraftReview::pending(),
         created_at: row.try_get("created_at")?,
@@ -2184,6 +2396,7 @@ async fn select_draft_in_transaction(
         SELECT
           paper_drafts.paper_uuid::text AS paper_uuid,
           paper_drafts.current_revision,
+          paper_drafts.owner_kind,
           paper_draft_revisions.source_markdown,
           paper_drafts.review_status,
           paper_drafts.reviewed_revision,
@@ -2223,6 +2436,7 @@ async fn select_draft_for_update_in_transaction(
         SELECT
           paper_drafts.paper_uuid::text AS paper_uuid,
           paper_drafts.current_revision,
+          paper_drafts.owner_kind,
           paper_draft_revisions.source_markdown,
           paper_drafts.review_status,
           paper_drafts.reviewed_revision,
@@ -2259,6 +2473,7 @@ fn decode_draft(row: PgRow) -> Result<PaperDraft, StorageError> {
     Ok(PaperDraft {
         paper_uuid: row.try_get("paper_uuid")?,
         revision: decode_revision(revision)?,
+        owner_kind: decode_draft_owner_kind(&row)?,
         source_markdown: row.try_get("source_markdown")?,
         review: decode_draft_review(&row)?,
         created_at: row.try_get("created_at")?,
@@ -2283,6 +2498,11 @@ fn decode_draft_review(row: &PgRow) -> Result<PaperDraftReview, StorageError> {
 fn decode_draft_review_status(row: &PgRow) -> Result<DraftReviewStatus, StorageError> {
     let status: String = row.try_get("review_status")?;
     DraftReviewStatus::parse(&status).ok_or(StorageError::CorruptDraftReviewStatus(status))
+}
+
+fn decode_draft_owner_kind(row: &PgRow) -> Result<DraftOwnerKind, StorageError> {
+    let owner_kind: String = row.try_get("owner_kind")?;
+    DraftOwnerKind::parse(&owner_kind).ok_or(StorageError::CorruptDraftOwnerKind(owner_kind))
 }
 
 fn decode_revision(revision: i32) -> Result<u32, StorageError> {
@@ -2348,6 +2568,8 @@ pub enum StorageError {
     DraftRevisionConflict { current_revision: u32 },
     #[error("draft revision has not been approved")]
     DraftNotApproved,
+    #[error("draft ownership does not permit this operation")]
+    DraftOwnerForbidden,
     #[error("draft creation was already completed")]
     DraftCreationCompleted,
     #[error("idempotency key is invalid")]
@@ -2360,6 +2582,8 @@ pub enum StorageError {
     CorruptRevision(i32),
     #[error("stored draft review status {0} is invalid")]
     CorruptDraftReviewStatus(String),
+    #[error("stored draft owner kind {0} is invalid")]
+    CorruptDraftOwnerKind(String),
     #[error("product identifier is invalid")]
     InvalidProductId,
     #[error("product {0} does not exist")]

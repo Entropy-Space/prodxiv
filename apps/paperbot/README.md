@@ -174,9 +174,11 @@ auto-mode drafts from the discovery queue per day, skipping repositories that
 already have a published, pending, or approved paper from the current Paperbot
 version. Each draft has one terminal `*_final.zip`, and the workflow uploads
 the private run directories and sealed ZIPs for 30 days. It submits those
-papers as reviewable drafts. At the start of a later run, a separate host step
-publishes only exact revisions an author already approved; Paperbot's model
-sessions never receive the publishing token.
+papers as bot-owned reviewable drafts. At the start of a later run, a separate
+host step publishes exact revisions an author already approved and atomically
+approves and publishes unchanged bot-owned pending drafts. A human edit
+transfers the draft to author ownership and prevents automatic approval.
+Paperbot's model sessions never receive an API token.
 Assumptions and unresolved questions remain review inputs rather than
 evidence. Three exact-revision canaries run separately only for same-repository
 pull requests labeled `paperbot-canaries`, or by manual dispatch, and never

@@ -5,9 +5,11 @@
 Paperbot turns an existing codebase and its documentation into an initial
 product paper draft.
 
-It is a research assistant for authors, not an autonomous publisher. Its role
-is to reduce the work required to create a thoughtful first draft while
-preserving author control and the credibility of prodxiv.
+It is a research assistant for authors, not a holder of publication
+credentials. Its role is to reduce the work required to create a thoughtful
+first draft while preserving traceability and the credibility of prodxiv. A
+separate host scheduler may release unchanged bot-owned evaluation drafts
+under the constrained policy below.
 
 The guiding rule is:
 
@@ -493,18 +495,21 @@ makes it eligible again. Every successful project produces one terminal
 question rather than fabricated evidence.
 
 The run has two ordered remote-write phases. First, it publishes drafts whose
-exact current revisions were approved by an author before the run. Then it
-submits the three newly generated papers as private `pending_review` drafts.
+exact current revisions were approved by an author and atomically approves and
+publishes prior `pending_review` drafts that remain bot-owned. Then it submits
+the three newly generated papers as private, bot-owned `pending_review` drafts.
 Draft creation and publication use stable idempotency keys, so retrying a
 partially completed workflow does not create duplicate papers. The Paperbot
-model and drafting sessions never receive the publishing token and cannot
-submit, approve, or publish.
+model and drafting sessions never receive an API token and cannot submit,
+approve, or publish. The host scheduler uses a dedicated bot token; an author
+edit transfers ownership and makes that draft ineligible for automatic
+approval.
 
-Only five daily drafts remain in the active `pending_review` queue. After new
-submissions, the workflow marks the oldest excess pending drafts `rejected`
-with a rotation reason. Rotation is auditable and retains their content; it is
-not deletion. Approved drafts are outside that limit and remain eligible for
-the next run unless edited.
+Only five bot-owned daily drafts remain in the active `pending_review` queue.
+After new submissions, the workflow marks the oldest excess pending drafts
+`rejected` with a rotation reason. Rotation is auditable and retains their
+content; it is not deletion. Approved drafts are outside that limit and remain
+eligible for the next run unless edited.
 
 GitHub Actions uploads the private run directories, terminal ZIPs, selection,
 batch report, promotion report, submission report, and workflow metadata as
@@ -523,7 +528,7 @@ must use manual dispatch after their code is trusted.
 
 Configure the daily workflow's `production` GitHub Environment with the
 `PRODXIV_API_URL` variable and the `DEEPSEEK_API_KEY` and
-`PRODXIV_PUBLISH_TOKEN` secrets. The fixed-canary workflow uses only the
+`PRODXIV_BOT_TOKEN` secrets. The fixed-canary workflow uses only the
 repository `DEEPSEEK_API_KEY` secret. Neither workflow needs a database
 credential.
 
@@ -630,7 +635,10 @@ edits. The author decides whether the changes justify a new published revision.
 
 Paperbot must:
 
-- Never publish automatically.
+- Never give publication credentials to a model or drafting session.
+- Never automatically approve an author-owned or human-edited draft. The host
+  scheduler may approve and publish only an unchanged bot-owned draft from a
+  previous run.
 - Never invent benchmark results or experimental methodology.
 - Never treat README marketing statements as established facts.
 - Never include secrets, credentials, environment files, user data, or other
@@ -672,7 +680,8 @@ The first version should support:
   exist.
 - Agent-assisted drafting and a focused author interview.
 - Structural validation and private preview.
-- Manual approval before submission.
+- Manual approval for author-owned submission; clearly attributed scheduled
+  release for unchanged bot-owned evaluation drafts.
 
 Private repository integrations can follow once authentication, data retention,
 and user trust are designed deliberately. Issue trackers, chats, analytics, and

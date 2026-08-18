@@ -68,6 +68,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/drafts/{paper_uuid}/approve-and-publish": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["approve_and_publish_draft"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/drafts/{paper_uuid}/publish": {
     parameters: {
       query?: never;
@@ -218,6 +234,8 @@ export interface components {
     /** @enum {string} */
     DiagnosticSeverity: "error" | "warning";
     /** @enum {string} */
+    DraftOwnerKind: "author" | "bot";
+    /** @enum {string} */
     DraftReviewStatus: "pending_review" | "approved" | "rejected";
     ErrorBody: {
       code: string;
@@ -294,6 +312,7 @@ export interface components {
     };
     PaperDraft: {
       created_at: string;
+      owner_kind: components["schemas"]["DraftOwnerKind"];
       paper_uuid: string;
       review: components["schemas"]["PaperDraftReview"];
       /** Format: int32 */
@@ -332,6 +351,7 @@ export interface components {
     };
     PaperDraftSummary: {
       created_at: string;
+      owner_kind: components["schemas"]["DraftOwnerKind"];
       paper_uuid: string;
       review: components["schemas"]["PaperDraftReview"];
       /** Format: int32 */
@@ -483,6 +503,8 @@ export interface operations {
         limit?: number;
         /** @description Optional pending_review, approved, or rejected filter */
         review_status?: string;
+        /** @description Optional author or bot ownership filter */
+        owner_kind?: string;
       };
       header?: never;
       path?: never;
@@ -714,6 +736,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description Bot principal attempted to edit an author-owned draft */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
       /** @description Draft does not exist */
       404: {
         headers: {
@@ -801,6 +832,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description Bot principal attempted to delete an author-owned draft */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
       /** @description Draft does not exist */
       404: {
         headers: {
@@ -881,6 +921,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description Bot principals cannot approve through the author review endpoint */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
       /** @description Draft does not exist */
       404: {
         headers: {
@@ -919,6 +968,128 @@ export interface operations {
       };
       /** @description Approving the draft failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  approve_and_publish_draft: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Quoted current draft revision, for example "3" */
+        "If-Match": string;
+        /** @description Stable key for safely retrying this exact approval and publication */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description Unpublished paper UUID */
+        paper_uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PublishDraftRequest"];
+      };
+    };
+    responses: {
+      /** @description Original publication returned for an idempotent retry */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedPaper"];
+        };
+      };
+      /** @description Exact draft revision was approved and published atomically */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedPaper"];
+        };
+      };
+      /** @description Request, paper UUID, If-Match, or idempotency key is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bearer token is absent or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bot principal attempted to approve a non-pending or author-owned draft */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft does not exist */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft changed or the idempotency key conflicts */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Draft Markdown or requested product is not publishable */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description If-Match is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Approving and publishing failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Monthly identifier space is exhausted */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1080,6 +1251,15 @@ export interface operations {
       };
       /** @description Bearer token is absent or invalid */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Bot principal attempted to reject an author-owned draft */
+      403: {
         headers: {
           [name: string]: unknown;
         };

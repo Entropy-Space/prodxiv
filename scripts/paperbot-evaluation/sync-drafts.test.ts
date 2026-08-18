@@ -4,12 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProdxivApiError } from "../../packages/api-client/src/client.ts";
-import { promoteApprovedDrafts, submitBatchDrafts } from "./sync-drafts.ts";
+import { promoteDrafts, submitBatchDrafts } from "./sync-drafts.ts";
 
-test("promotes only unchanged approved revisions", async () => {
+test("publishes approved drafts and auto-publishes pending bot drafts", async () => {
   const publishedRequests: string[] = [];
-  const report = await promoteApprovedDrafts({
-    async listDrafts() {
+  const report = await promoteDrafts({
+    async listDrafts(input) {
+      if (input.review_status === "pending_review") {
+        expect(input.owner_kind).toBe("bot");
+        return {
+          drafts: [pendingBotDraft("00000000-0000-4000-8000-000000000003", 1)],
+        };
+      }
       return {
         drafts: [
           approvedDraft("00000000-0000-4000-8000-000000000001", 2),
@@ -31,6 +37,15 @@ test("promotes only unchanged approved revisions", async () => {
         replayed: false,
       };
     },
+    async approveAndPublishDraft(paperUuid, input) {
+      publishedRequests.push(
+        `automatic:${paperUuid}:${input.expected_revision}`,
+      );
+      return {
+        paper: { paper_id: "prodxiv:2608.000002", version: 1 },
+        replayed: false,
+      };
+    },
     async createDraft() {
       throw new Error("promotion must not create drafts");
     },
@@ -42,8 +57,14 @@ test("promotes only unchanged approved revisions", async () => {
   expect(publishedRequests).toEqual([
     "00000000-0000-4000-8000-000000000001:2",
     "00000000-0000-4000-8000-000000000002:3",
+    "automatic:00000000-0000-4000-8000-000000000003:1",
   ]);
-  expect(report.published).toHaveLength(1);
+  expect(report.published).toHaveLength(2);
+  expect(report.pending_bot_count).toBe(1);
+  expect(report.published.map((published) => published.approval_kind)).toEqual([
+    "human",
+    "automatic",
+  ]);
   expect(report.skipped).toEqual([
     {
       paper_uuid: "00000000-0000-4000-8000-000000000002",
@@ -89,6 +110,7 @@ test("submits three papers only after verifying their final ZIPs", async () => {
   const pendingDrafts = Array.from({ length: 5 }, (_, index) => ({
     paper_uuid: `10000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
     revision: 1,
+    owner_kind: "bot" as const,
     review: {},
   }));
   const report = await submitBatchDrafts(batchPath, 3, {
@@ -101,13 +123,16 @@ test("submits three papers only after verifying their final ZIPs", async () => {
     async publishDraft() {
       throw new Error("submission must not publish drafts");
     },
+    async approveAndPublishDraft() {
+      throw new Error("submission must not auto-publish drafts");
+    },
     async createDraft(input) {
       submittedKeys.push(input.idempotency_key);
       const draft = {
         paper_uuid: `00000000-0000-4000-8000-00000000000${submittedKeys.length}`,
         revision: 1,
       };
-      pendingDrafts.unshift({ ...draft, review: {} });
+      pendingDrafts.unshift({ ...draft, owner_kind: "bot", review: {} });
       return draft;
     },
     async rejectDraft(paperUuid) {
@@ -145,7 +170,17 @@ function approvedDraft(paperUuid: string, revision: number) {
   return {
     paper_uuid: paperUuid,
     revision,
+    owner_kind: "bot" as const,
     review: { reviewed_revision: revision },
+  };
+}
+
+function pendingBotDraft(paperUuid: string, revision: number) {
+  return {
+    paper_uuid: paperUuid,
+    revision,
+    owner_kind: "bot" as const,
+    review: {},
   };
 }
 
