@@ -501,9 +501,9 @@ the three newly generated papers as private, bot-owned `pending_review` drafts.
 Draft creation and publication use stable idempotency keys, so retrying a
 partially completed workflow does not create duplicate papers. The Paperbot
 model and drafting sessions never receive an API token and cannot submit,
-approve, or publish. The host scheduler uses a dedicated bot token; an author
-edit transfers ownership and makes that draft ineligible for automatic
-approval.
+approve, or publish. The host scheduler requests a short-lived GitHub Actions
+OIDC token that the API maps to the bot principal; an author edit transfers
+ownership and makes that draft ineligible for automatic approval.
 
 Only five bot-owned daily drafts remain in the active `pending_review` queue.
 After new submissions, the workflow marks the oldest excess pending drafts
@@ -527,10 +527,10 @@ has no publishing credential or remote publication step. Fork pull requests
 must use manual dispatch after their code is trusted.
 
 Configure the daily workflow's `production` GitHub Environment with the
-`PRODXIV_API_URL` variable and the `DEEPSEEK_API_KEY` and
-`PRODXIV_BOT_TOKEN` secrets. The fixed-canary workflow uses only the
-repository `DEEPSEEK_API_KEY` secret. Neither workflow needs a database
-credential.
+`PRODXIV_API_URL` variable and the `DEEPSEEK_API_KEY` secret. The workflow
+requests its API identity through GitHub OIDC and has no long-lived API secret.
+The fixed-canary workflow uses only the repository `DEEPSEEK_API_KEY` secret.
+Neither workflow needs a database credential.
 
 ### Batch public repositories
 

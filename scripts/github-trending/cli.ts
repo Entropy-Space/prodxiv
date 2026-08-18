@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { resolveApiBearerToken } from "../github-actions/oidc.ts";
 import {
   ALL_LANGUAGES,
   ANY_LANGUAGE,
@@ -24,7 +25,7 @@ interface Arguments {
 
 export async function runCollector(
   arguments_: Arguments,
-  ingestion_config: IngestionConfig,
+  loadIngestionConfig: () => Promise<IngestionConfig>,
 ): Promise<void> {
   const collected = await collectTrendingSnapshots(arguments_);
   if (arguments_.output_dir !== null) {
@@ -33,6 +34,7 @@ export async function runCollector(
   if (collected.snapshots.length === 0) {
     throw new Error("no valid GitHub Trending snapshots were collected");
   }
+  const ingestion_config = await loadIngestionConfig();
 
   const ingested = await publishTrendingSnapshots(
     collected.snapshots,
@@ -167,9 +169,11 @@ function usage(): string {
 
 if (import.meta.main) {
   try {
-    await runCollector(
-      parseArguments(Bun.argv.slice(2)),
-      readIngestionConfig(),
+    await runCollector(parseArguments(Bun.argv.slice(2)), async () =>
+      readIngestionConfig(
+        process.env,
+        await resolveApiBearerToken("PRODXIV_TRENDING_INGEST_TOKEN"),
+      ),
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

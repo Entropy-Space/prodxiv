@@ -36,7 +36,7 @@
     "schema": "cargo run -p prodxiv-domain --bin generate-schemas -- schemas",
     "test": "bun run test:rust && bun run test:paperbot && bun run test:api-client && bun run test:web && bun run test:collector && bun run test:evaluation",
     "test:api-client": "bun --filter @prodxiv/api-client test",
-    "test:collector": "bun test scripts/github-trending/*.test.ts",
+    "test:collector": "bun test scripts/github-actions/*.test.ts scripts/github-trending/*.test.ts",
     "test:evaluation": "bun test scripts/paperbot-evaluation/*.test.ts",
     "test:domain": "cargo test -p prodxiv-domain",
     "test:paperbot": "bun --filter @prodxiv/paperbot test",

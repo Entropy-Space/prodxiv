@@ -548,6 +548,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   create_draft: {
@@ -629,6 +638,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   get_draft: {
@@ -681,6 +699,15 @@ export interface operations {
       };
       /** @description Reading the draft failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -790,6 +817,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   delete_draft: {
@@ -870,6 +906,15 @@ export interface operations {
       };
       /** @description Deleting the draft failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -968,6 +1013,15 @@ export interface operations {
       };
       /** @description Approving the draft failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1088,7 +1142,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Monthly identifier space is exhausted */
+      /** @description Monthly identifier space is exhausted or GitHub OIDC verification is unavailable */
       503: {
         headers: {
           [name: string]: unknown;
@@ -1201,7 +1255,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Monthly identifier space is exhausted */
+      /** @description Monthly identifier space is exhausted or GitHub OIDC verification is unavailable */
       503: {
         headers: {
           [name: string]: unknown;
@@ -1312,6 +1366,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   list_draft_revisions: {
@@ -1364,6 +1427,15 @@ export interface operations {
       };
       /** @description Reading draft revisions failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1424,6 +1496,15 @@ export interface operations {
       };
       /** @description Reading the draft revision failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description GitHub OIDC verification is unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1561,7 +1642,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Snapshot ingestion is not configured */
+      /** @description Snapshot ingestion is not configured or GitHub OIDC verification is unavailable */
       503: {
         headers: {
           [name: string]: unknown;

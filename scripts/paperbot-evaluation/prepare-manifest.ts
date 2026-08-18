@@ -7,6 +7,7 @@ import {
   type PublishedPaperSummary,
 } from "../../packages/api-client/src/client.ts";
 import { PAPERBOT_VERSION } from "../../apps/paperbot/src/version.ts";
+import { resolveApiBearerToken } from "../github-actions/oidc.ts";
 
 const DISCOVERY_COUNT = 3;
 
@@ -61,7 +62,7 @@ async function main(): Promise<void> {
   }
   const excludedRepositories = await currentPaperbotRepositories(
     process.env.PRODXIV_API_URL,
-    process.env.PRODXIV_BOT_TOKEN,
+    await resolveApiBearerToken("PRODXIV_BOT_TOKEN"),
   );
   const manifest = await prepareEvaluationManifest(
     resolve(selectionPath),
@@ -81,7 +82,7 @@ async function currentPaperbotRepositories(
 ): Promise<Set<string>> {
   if (apiUrlValue === undefined || token === undefined) {
     throw new Error(
-      "PRODXIV_API_URL and PRODXIV_BOT_TOKEN are required to exclude existing Paperbot papers",
+      "PRODXIV_API_URL and an API bearer token are required to exclude existing Paperbot papers",
     );
   }
   const client = new ProdxivApiClient({

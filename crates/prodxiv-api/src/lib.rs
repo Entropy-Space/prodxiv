@@ -1,5 +1,12 @@
 //! Authoritative HTTP API for drafting, publishing, and reading prodxiv papers.
 
+mod github_oidc;
+
+pub use github_oidc::{
+    GitHubActionsWorkload, GitHubOidcAuthenticationError, GitHubOidcAuthenticator, GitHubOidcTrust,
+    GitHubOidcTrustError, GitHubOidcVerifier,
+};
+
 use std::{
     env,
     net::{AddrParseError, SocketAddr},
@@ -47,21 +54,22 @@ pub struct AppState {
     store: Arc<dyn PublicationStore>,
     publish_token: Arc<str>,
     publish_actor: Arc<str>,
-    bot_principal: Option<DraftPrincipal>,
+    bot_token: Option<Arc<str>>,
+    bot_actor: Arc<str>,
     trending_ingest_token: Option<Arc<str>>,
-}
-
-#[derive(Clone)]
-struct DraftPrincipal {
-    token: Arc<str>,
-    actor: Arc<str>,
-    owner_kind: DraftOwnerKind,
+    trending_ingest_actor: Arc<str>,
+    github_oidc: Option<Arc<dyn GitHubOidcAuthenticator>>,
 }
 
 #[derive(Clone, Copy)]
 struct AuthorizedDraftPrincipal<'a> {
     actor: &'a str,
     owner_kind: DraftOwnerKind,
+}
+
+#[derive(Clone, Copy)]
+struct AuthorizedTrendingPrincipal<'a> {
+    actor: &'a str,
 }
 
 impl AppState {
@@ -75,24 +83,34 @@ impl AppState {
             store,
             publish_token: publish_token.into(),
             publish_actor: publish_actor.into(),
-            bot_principal: None,
+            bot_token: None,
+            bot_actor: Arc::from("paperbot:daily"),
             trending_ingest_token: None,
+            trending_ingest_actor: Arc::from("github_actions:daily_trending"),
+            github_oidc: None,
         }
     }
 
     #[must_use]
     pub fn with_bot_principal(mut self, token: Option<String>, actor: String) -> Self {
-        self.bot_principal = token.map(|token| DraftPrincipal {
-            token: Arc::from(token),
-            actor: Arc::from(actor),
-            owner_kind: DraftOwnerKind::Bot,
-        });
+        self.bot_token = token.map(Arc::from);
+        self.bot_actor = Arc::from(actor);
         self
     }
 
     #[must_use]
-    pub fn with_trending_ingestion(mut self, token: Option<String>) -> Self {
+    pub fn with_trending_ingestion(mut self, token: Option<String>, actor: String) -> Self {
         self.trending_ingest_token = token.map(Arc::from);
+        self.trending_ingest_actor = Arc::from(actor);
+        self
+    }
+
+    #[must_use]
+    pub fn with_github_oidc(
+        mut self,
+        authenticator: Option<Arc<dyn GitHubOidcAuthenticator>>,
+    ) -> Self {
+        self.github_oidc = authenticator;
         self
     }
 }
@@ -107,6 +125,8 @@ pub struct ApiConfig {
     pub bot_token: Option<String>,
     pub bot_actor: String,
     pub trending_ingest_token: Option<String>,
+    pub trending_ingest_actor: String,
+    pub github_oidc: Option<GitHubOidcTrust>,
 }
 
 impl ApiConfig {
@@ -161,6 +181,12 @@ impl ApiConfig {
         {
             return Err(ConfigError::ReusedBotToken);
         }
+        let trending_ingest_actor = env::var("PRODXIV_TRENDING_INGEST_ACTOR")
+            .unwrap_or_else(|_| "github_actions:daily_trending".to_owned());
+        if !is_valid_actor(&trending_ingest_actor) {
+            return Err(ConfigError::InvalidTrendingIngestActor);
+        }
+        let github_oidc = github_oidc_trust_from_env()?;
         let bind_address = resolve_bind_address(
             env::var("PRODXIV_BIND_ADDRESS").ok().as_deref(),
             env::var("PORT").ok().as_deref(),
@@ -175,6 +201,8 @@ impl ApiConfig {
             bot_token,
             bot_actor,
             trending_ingest_token,
+            trending_ingest_actor,
+            github_oidc,
         })
     }
 }
@@ -213,8 +241,47 @@ pub enum ConfigError {
     WeakTrendingIngestToken,
     #[error("PRODXIV_TRENDING_INGEST_TOKEN must differ from PRODXIV_PUBLISH_TOKEN")]
     ReusedTrendingIngestToken,
+    #[error("PRODXIV_TRENDING_INGEST_ACTOR must contain 1 to 128 safe identifier characters")]
+    InvalidTrendingIngestActor,
+    #[error(
+        "PRODXIV_GITHUB_OIDC_REPOSITORY or PRODXIV_GITHUB_OIDC_ENVIRONMENT requires PRODXIV_GITHUB_OIDC_REPOSITORY_ID"
+    )]
+    IncompleteGitHubOidcConfiguration,
+    #[error(transparent)]
+    InvalidGitHubOidcTrust(#[from] GitHubOidcTrustError),
     #[error("PRODXIV_BIND_ADDRESS is invalid: {0}")]
     InvalidBindAddress(#[from] AddrParseError),
+}
+
+fn github_oidc_trust_from_env() -> Result<Option<GitHubOidcTrust>, ConfigError> {
+    let repository_id = env::var("PRODXIV_GITHUB_OIDC_REPOSITORY_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let repository = env::var("PRODXIV_GITHUB_OIDC_REPOSITORY")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let environment = env::var("PRODXIV_GITHUB_OIDC_ENVIRONMENT")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let Some(repository_id) = repository_id else {
+        if repository.is_some() || environment.is_some() {
+            return Err(ConfigError::IncompleteGitHubOidcConfiguration);
+        }
+        return Ok(None);
+    };
+    Ok(Some(GitHubOidcTrust::new(
+        repository.unwrap_or_else(|| "Entropy-Space/prodxiv".to_owned()),
+        repository_id,
+        environment.unwrap_or_else(|| "production".to_owned()),
+    )?))
+}
+
+fn is_valid_actor(actor: &str) -> bool {
+    !actor.is_empty()
+        && actor.len() <= 128
+        && actor.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@' | b'/')
+        })
 }
 
 fn resolve_bind_address(
@@ -1026,7 +1093,7 @@ pub fn router(state: AppState) -> Router {
       (status = 409, description = "Idempotency key was reused for different content", body = ErrorResponse),
       (status = 422, description = "Snapshot is invalid", body = ErrorResponse),
       (status = 500, description = "Ingestion failed", body = ErrorResponse),
-      (status = 503, description = "Snapshot ingestion is not configured", body = ErrorResponse)
+      (status = 503, description = "Snapshot ingestion is not configured or GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn ingest_github_trending_snapshot(
@@ -1034,16 +1101,8 @@ async fn ingest_github_trending_snapshot(
     headers: HeaderMap,
     payload: Result<Json<IngestGitHubTrendingRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let token = state.trending_ingest_token.as_deref().ok_or_else(|| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "trending.ingestion_unavailable",
-            "GitHub Trending ingestion is not configured",
-        )
-    })?;
-    authorize(&headers, token)?;
+    let principal = authorize_trending_ingestion(&headers, &state).await?;
     let idempotency_key = idempotency_key(&headers)?;
-    let actor = ingestion_actor(&headers)?;
     let Json(payload) = payload.map_err(|error| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -1060,7 +1119,7 @@ async fn ingest_github_trending_snapshot(
     })?;
     let outcome = state
         .store
-        .ingest_github_trending_snapshot(snapshot, actor, idempotency_key)
+        .ingest_github_trending_snapshot(snapshot, principal.actor, idempotency_key)
         .await
         .map_err(trending_store_error)?;
     let status = if outcome.inserted {
@@ -1192,7 +1251,8 @@ async fn health() -> Json<HealthResponse> {
       (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
       (status = 409, description = "Idempotency key conflicts or its draft already completed", body = ErrorResponse),
       (status = 422, description = "Draft source is empty or too large", body = ErrorResponse),
-      (status = 500, description = "Draft creation failed", body = ErrorResponse)
+      (status = 500, description = "Draft creation failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn create_draft(
@@ -1200,7 +1260,7 @@ async fn create_draft(
     headers: HeaderMap,
     payload: Result<Json<WriteDraftRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let idempotency_key = idempotency_key(&headers)?;
     let Json(payload) = payload.map_err(invalid_json)?;
     validate_draft_source(&payload.source_markdown)?;
@@ -1242,7 +1302,8 @@ async fn create_draft(
       (status = 200, description = "Drafts ordered by most recent edit", body = PaperDraftListResponse),
       (status = 400, description = "Limit is invalid", body = ErrorResponse),
       (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
-      (status = 500, description = "Reading drafts failed", body = ErrorResponse)
+      (status = 500, description = "Reading drafts failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn list_drafts(
@@ -1250,7 +1311,7 @@ async fn list_drafts(
     headers: HeaderMap,
     Query(query): Query<ListDraftsQuery>,
 ) -> Result<Json<PaperDraftListResponse>, ApiError> {
-    authorize_draft(&headers, &state)?;
+    authorize_draft(&headers, &state).await?;
     let limit = query.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(ApiError::new(
@@ -1303,7 +1364,8 @@ async fn list_drafts(
       (status = 400, description = "Paper UUID is invalid", body = ErrorResponse),
       (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
       (status = 404, description = "Draft does not exist", body = ErrorResponse),
-      (status = 500, description = "Reading the draft failed", body = ErrorResponse)
+      (status = 500, description = "Reading the draft failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn get_draft(
@@ -1311,7 +1373,7 @@ async fn get_draft(
     headers: HeaderMap,
     Path(path): Path<DraftPath>,
 ) -> Result<Response, ApiError> {
-    authorize_draft(&headers, &state)?;
+    authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let draft = state
         .store
@@ -1340,7 +1402,8 @@ async fn get_draft(
       (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
       (status = 422, description = "Draft source is empty or too large", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
-      (status = 500, description = "Updating the draft failed", body = ErrorResponse)
+      (status = 500, description = "Updating the draft failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn update_draft(
@@ -1349,7 +1412,7 @@ async fn update_draft(
     Path(path): Path<DraftPath>,
     payload: Result<Json<WriteDraftRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let Json(payload) = payload.map_err(invalid_json)?;
@@ -1386,7 +1449,8 @@ async fn update_draft(
       (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
       (status = 422, description = "Draft is not valid for publication", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
-      (status = 500, description = "Approving the draft failed", body = ErrorResponse)
+      (status = 500, description = "Approving the draft failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn approve_draft(
@@ -1394,7 +1458,7 @@ async fn approve_draft(
     headers: HeaderMap,
     Path(path): Path<DraftPath>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let draft = state
@@ -1429,7 +1493,8 @@ async fn approve_draft(
       (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
       (status = 422, description = "Rejection reason is too large", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
-      (status = 500, description = "Rejecting the draft failed", body = ErrorResponse)
+      (status = 500, description = "Rejecting the draft failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn reject_draft(
@@ -1438,7 +1503,7 @@ async fn reject_draft(
     Path(path): Path<DraftPath>,
     payload: Result<Json<RejectDraftRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let Json(payload) = payload.map_err(invalid_json)?;
@@ -1484,7 +1549,8 @@ async fn reject_draft(
       (status = 404, description = "Draft does not exist", body = ErrorResponse),
       (status = 409, description = "Draft changed since the caller read it", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
-      (status = 500, description = "Deleting the draft failed", body = ErrorResponse)
+      (status = 500, description = "Deleting the draft failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn delete_draft(
@@ -1492,7 +1558,7 @@ async fn delete_draft(
     headers: HeaderMap,
     Path(path): Path<DraftPath>,
 ) -> Result<StatusCode, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let deleted = state
@@ -1521,7 +1587,8 @@ async fn delete_draft(
       (status = 400, description = "Paper UUID is invalid", body = ErrorResponse),
       (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
       (status = 404, description = "Draft does not exist", body = ErrorResponse),
-      (status = 500, description = "Reading draft revisions failed", body = ErrorResponse)
+      (status = 500, description = "Reading draft revisions failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn list_draft_revisions(
@@ -1529,7 +1596,7 @@ async fn list_draft_revisions(
     headers: HeaderMap,
     Path(path): Path<DraftPath>,
 ) -> Result<Json<PaperDraftRevisionListResponse>, ApiError> {
-    authorize_draft(&headers, &state)?;
+    authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let revisions = state
         .store
@@ -1556,7 +1623,8 @@ async fn list_draft_revisions(
       (status = 400, description = "Paper UUID or revision is invalid", body = ErrorResponse),
       (status = 401, description = "Bearer token is absent or invalid", body = ErrorResponse),
       (status = 404, description = "Draft revision is not retained", body = ErrorResponse),
-      (status = 500, description = "Reading the draft revision failed", body = ErrorResponse)
+      (status = 500, description = "Reading the draft revision failed", body = ErrorResponse),
+      (status = 503, description = "GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn get_draft_revision(
@@ -1564,7 +1632,7 @@ async fn get_draft_revision(
     headers: HeaderMap,
     Path(path): Path<DraftRevisionPath>,
 ) -> Result<Json<PaperDraftRevision>, ApiError> {
-    authorize_draft(&headers, &state)?;
+    authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     if !(1..=MAX_DRAFT_REVISION).contains(&path.revision) {
         return Err(ApiError::new(
@@ -1608,7 +1676,7 @@ async fn get_draft_revision(
       (status = 422, description = "Draft Markdown or requested product is not publishable", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
       (status = 500, description = "Publishing failed", body = ErrorResponse),
-      (status = 503, description = "Monthly identifier space is exhausted", body = ErrorResponse)
+      (status = 503, description = "Monthly identifier space is exhausted or GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn publish_draft(
@@ -1617,7 +1685,7 @@ async fn publish_draft(
     Path(path): Path<DraftPath>,
     payload: Result<Json<PublishDraftRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let idempotency_key = idempotency_key(&headers)?;
@@ -1658,7 +1726,7 @@ async fn publish_draft(
       (status = 422, description = "Draft Markdown or requested product is not publishable", body = ErrorResponse),
       (status = 428, description = "If-Match is required", body = ErrorResponse),
       (status = 500, description = "Approving and publishing failed", body = ErrorResponse),
-      (status = 503, description = "Monthly identifier space is exhausted", body = ErrorResponse)
+      (status = 503, description = "Monthly identifier space is exhausted or GitHub OIDC verification is unavailable", body = ErrorResponse)
     )
 )]
 async fn approve_and_publish_draft(
@@ -1667,7 +1735,7 @@ async fn approve_and_publish_draft(
     Path(path): Path<DraftPath>,
     payload: Result<Json<PublishDraftRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let principal = authorize_draft(&headers, &state)?;
+    let principal = authorize_draft(&headers, &state).await?;
     let paper_uuid = canonical_draft_uuid(&path.paper_uuid)?;
     let expected_revision = expected_draft_revision(&headers)?;
     let idempotency_key = idempotency_key(&headers)?;
@@ -2042,15 +2110,15 @@ fn authorize(headers: &HeaderMap, expected_token: &str) -> Result<(), ApiError> 
     }
 }
 
-fn authorize_draft<'a>(
+async fn authorize_draft<'a>(
     headers: &HeaderMap,
     state: &'a AppState,
 ) -> Result<AuthorizedDraftPrincipal<'a>, ApiError> {
     let provided = bearer_token(headers);
     let is_author =
         provided.is_some_and(|token| constant_time_token_eq(token, &state.publish_token));
-    let is_bot = state.bot_principal.as_ref().is_some_and(|principal| {
-        provided.is_some_and(|token| constant_time_token_eq(token, &principal.token))
+    let is_bot = state.bot_token.as_ref().is_some_and(|expected_token| {
+        provided.is_some_and(|token| constant_time_token_eq(token, expected_token))
     });
     if is_author {
         return Ok(AuthorizedDraftPrincipal {
@@ -2059,13 +2127,19 @@ fn authorize_draft<'a>(
         });
     }
     if is_bot {
-        let principal = state
-            .bot_principal
-            .as_ref()
-            .expect("a matching bot token has a configured principal");
         return Ok(AuthorizedDraftPrincipal {
-            actor: &principal.actor,
-            owner_kind: principal.owner_kind,
+            actor: &state.bot_actor,
+            owner_kind: DraftOwnerKind::Bot,
+        });
+    }
+    if let (Some(token), Some(authenticator)) = (provided, state.github_oidc.as_ref()) {
+        authenticator
+            .authenticate(token, GitHubActionsWorkload::Paperbot)
+            .await
+            .map_err(github_oidc_error)?;
+        return Ok(AuthorizedDraftPrincipal {
+            actor: &state.bot_actor,
+            owner_kind: DraftOwnerKind::Bot,
         });
     }
     Err(ApiError::new(
@@ -2073,6 +2147,60 @@ fn authorize_draft<'a>(
         "auth.unauthorized",
         "a valid bearer token is required",
     ))
+}
+
+async fn authorize_trending_ingestion<'a>(
+    headers: &'a HeaderMap,
+    state: &'a AppState,
+) -> Result<AuthorizedTrendingPrincipal<'a>, ApiError> {
+    if state.trending_ingest_token.is_none() && state.github_oidc.is_none() {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "trending.ingestion_unavailable",
+            "GitHub Trending ingestion is not configured",
+        ));
+    }
+    let provided = bearer_token(headers);
+    let is_static_ingestor = state
+        .trending_ingest_token
+        .as_ref()
+        .is_some_and(|expected_token| {
+            provided.is_some_and(|token| constant_time_token_eq(token, expected_token))
+        });
+    if is_static_ingestor {
+        return Ok(AuthorizedTrendingPrincipal {
+            actor: ingestion_actor(headers)?,
+        });
+    }
+    if let (Some(token), Some(authenticator)) = (provided, state.github_oidc.as_ref()) {
+        authenticator
+            .authenticate(token, GitHubActionsWorkload::Trending)
+            .await
+            .map_err(github_oidc_error)?;
+        return Ok(AuthorizedTrendingPrincipal {
+            actor: &state.trending_ingest_actor,
+        });
+    }
+    Err(ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        "auth.unauthorized",
+        "a valid bearer token is required",
+    ))
+}
+
+fn github_oidc_error(error: GitHubOidcAuthenticationError) -> ApiError {
+    match error {
+        GitHubOidcAuthenticationError::InvalidToken => ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "auth.unauthorized",
+            "a valid bearer token is required",
+        ),
+        GitHubOidcAuthenticationError::IdentityProviderUnavailable => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth.identity_provider_unavailable",
+            "GitHub Actions identity verification is temporarily unavailable",
+        ),
+    }
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
