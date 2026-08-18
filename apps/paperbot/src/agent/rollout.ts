@@ -3,6 +3,7 @@ import { appendFile, chmod, readFile } from "node:fs/promises";
 import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import { artifactPath, sha256 } from "./artifacts.ts";
 import type {
+  AgentGitHubReleasePolicy,
   AgentObservedModel,
   AgentRunRecord,
   AgentSessionRole,
@@ -14,7 +15,16 @@ const MAX_ROLLOUT_BYTES = 2 * 1024 * 1024;
 
 type RolloutEvent =
   | {
-      kind: "run_started" | "run_resumed";
+      kind: "run_started";
+      github_release_policy: AgentGitHubReleasePolicy;
+    }
+  | {
+      kind: "run_resumed";
+    }
+  | {
+      kind: "github_releases_skipped";
+      reason_code: string;
+      message: string;
     }
   | {
       kind: "author_answers_recorded";

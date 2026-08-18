@@ -49,6 +49,7 @@ const batchResult: AgentBatchResult = {
       allow_remote_model: true,
       mode: "auto",
       concurrency: 2,
+      github_release_policy: "best_effort",
       authors: ["Research Team"],
       status: "public_beta",
       model: "deepseek-v4-flash",

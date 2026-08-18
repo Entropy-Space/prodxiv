@@ -25,6 +25,7 @@ describe("runAgentBatch", () => {
     const workspace = await createWorkspace();
     const inputPath = await writeManifest(workspace, {
       schema_version: "1",
+      github_release_policy: "disabled",
       projects: [
         {
           repository_url: "https://github.com/Example/first-project.git",
@@ -69,6 +70,7 @@ describe("runAgentBatch", () => {
         allow_remote_model: true,
         mode: "auto",
         feedback: "none",
+        github_release_policy: "disabled",
         metadata: {
           title: "first project research draft",
           product_name: "first project",
@@ -86,6 +88,7 @@ describe("runAgentBatch", () => {
         allow_remote_model: true,
         mode: "auto",
         feedback: "none",
+        github_release_policy: "disabled",
         metadata: {
           title: "Second Project Paper",
           product_name: "Second Project",
@@ -119,6 +122,7 @@ describe("runAgentBatch", () => {
       input: {
         allow_remote_model: true,
         mode: "auto",
+        github_release_policy: "disabled",
         authors: ["Batch Author"],
         status: "concept",
         model: "deepseek-v4-flash",
@@ -372,6 +376,30 @@ describe("runAgentBatch", () => {
     await expect(
       readFile(join(outputPath, "batch.json"), "utf8"),
     ).rejects.toThrow();
+
+    const invalidReleasePolicyPath = await writeManifest(
+      workspace,
+      {
+        schema_version: "1",
+        github_release_policy: "required",
+        projects: [
+          {
+            repository_url: "https://github.com/example/project",
+          },
+        ],
+      },
+      "invalid-release-policy.json",
+    );
+    await expect(
+      runAgentBatch({
+        input_path: invalidReleasePolicyPath,
+        output_path: outputPath,
+        allow_remote_model: true,
+      }),
+    ).rejects.toMatchObject({
+      exit_code: 2,
+      message: expect.stringContaining("github_release_policy"),
+    });
 
     const validInputPath = await writeManifest(
       workspace,

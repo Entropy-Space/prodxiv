@@ -1,5 +1,6 @@
 {
   "schema_version": "1",
+  "github_release_policy": "disabled",
   "projects": [
     {
       "repository_url": "https://github.com/different-ai/openwork",

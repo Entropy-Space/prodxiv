@@ -988,6 +988,94 @@ describe("runAgent", () => {
     expect(runtime.started_roles).toEqual([]);
   });
 
+  test("does not request mutable GitHub releases when release enrichment is disabled", async () => {
+    const outputPath = join(workspacePath, "remote-disabled-releases-run");
+    const requestedUrls: string[] = [];
+    const result = await runAgent(
+      {
+        ...remoteRunOptions(outputPath),
+        github_release_policy: "disabled",
+      },
+      {
+        create_runtime: () => remoteRuntimeWithoutReleases(),
+        fetch: async (url, init) => {
+          requestedUrls.push(url);
+          return remoteGitHubFetch(url, init);
+        },
+        now: () => new Date("2026-08-05T00:00:00.000Z"),
+        producer: async () => testProducer(),
+        run_id: () => RUN_ID,
+      },
+    );
+
+    expect(result.validation.valid).toBe(true);
+    expect(result.source.github_release_status).toEqual({
+      state: "disabled",
+      reason_code: "disabled_by_policy",
+      message: "live GitHub release enrichment was disabled by input policy",
+    });
+    expect(requestedUrls).not.toContain(
+      "https://api.github.com/repos/example/acquired-product/releases?per_page=10&page=1",
+    );
+    const events = await readRolloutEvents(outputPath);
+    expect(events[0]).toMatchObject({
+      kind: "run_started",
+      github_release_policy: "disabled",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "github_releases_skipped",
+        reason_code: "disabled_by_policy",
+      }),
+    );
+    expect(
+      (await readSourceArtifact(outputPath)).github_release_status,
+    ).toEqual(result.source.github_release_status);
+  });
+
+  test("continues with pinned source when release enrichment exceeds its byte limit", async () => {
+    const outputPath = join(workspacePath, "remote-oversized-releases-run");
+    const result = await runAgent(remoteRunOptions(outputPath), {
+      create_runtime: () => remoteRuntimeWithoutReleases(),
+      fetch: async (url, init) => {
+        if (
+          url ===
+          "https://api.github.com/repos/example/acquired-product/releases?per_page=10&page=1"
+        ) {
+          return new Response("", {
+            headers: { "content-length": (512 * 1024 + 1).toString() },
+          });
+        }
+        return remoteGitHubFetch(url, init);
+      },
+      now: () => new Date("2026-08-05T00:00:00.000Z"),
+      producer: async () => testProducer(),
+      run_id: () => RUN_ID,
+    });
+
+    expect(result.validation.valid).toBe(true);
+    expect(result.source.github_release_status).toEqual({
+      state: "skipped",
+      reason_code: "content_limit_exceeded",
+      message: "GitHub response exceeds the 524288-byte content limit",
+    });
+    const events = await readRolloutEvents(outputPath);
+    expect(events[0]).toMatchObject({
+      kind: "run_started",
+      github_release_policy: "best_effort",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "github_releases_skipped",
+        reason_code: "content_limit_exceeded",
+        message: "GitHub response exceeds the 524288-byte content limit",
+      }),
+    );
+    expect(
+      (await readSourceArtifact(outputPath)).github_release_status,
+    ).toEqual(result.source.github_release_status);
+  });
+
   test("uses the GitHub owner and stable release as deterministic metadata", async () => {
     const outputPath = join(workspacePath, "remote-inferred-run");
     const remoteEvidence = JSON.stringify({
@@ -1532,6 +1620,58 @@ function runOptions(outputPath: string) {
     allow_remote_model: true,
     metadata: metadata(),
   };
+}
+
+function remoteRunOptions(outputPath: string) {
+  return {
+    repository: "https://github.com/example/acquired-product",
+    output_path: outputPath,
+    allow_remote_model: true,
+    metadata: {
+      title: "Acquired Product research draft",
+      product_name: "Acquired Product",
+      authors: ["Example Team"],
+      status: "launched" as const,
+      repository_url: "https://github.com/example/acquired-product",
+    },
+    model: "deepseek-v4-flash",
+  };
+}
+
+function remoteRuntimeWithoutReleases(): FakeRuntime {
+  const evidence = JSON.stringify({
+    evidence: [
+      {
+        claim: "The acquired product has a repository README.",
+        evidence_kind: "repository",
+        source_id: "repository:README.md",
+        locator: { line_start: 1, line_end: 1 },
+        confidence: "high",
+      },
+    ],
+    contradictions: [],
+    unknowns: [],
+    questions: [],
+  });
+  const draft = draftResponse({
+    markdown: paperBody().replaceAll(
+      "https://github.com/example/product",
+      "https://github.com/example/acquired-product",
+    ),
+  });
+  return new FakeRuntime({
+    evidence: [evidence],
+    author: [draft, draft],
+  });
+}
+
+async function readRolloutEvents(
+  outputPath: string,
+): Promise<Array<Record<string, unknown>>> {
+  return (await readFile(join(outputPath, "events.jsonl"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 const RUN_ID = "00000000-0000-4000-8000-000000000001";

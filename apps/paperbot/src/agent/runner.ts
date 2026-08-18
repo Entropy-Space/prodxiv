@@ -8,6 +8,8 @@ import {
   fetchGitHubReleases,
   fetchGitHubSource,
   GitHubSourceError,
+  type GitHubReleaseSnapshot,
+  type GitHubSourceErrorCode,
   type GitHubSourceFetch,
 } from "@prodxiv/paperbot-source";
 import {
@@ -104,6 +106,7 @@ import type {
   AgentPaperMetadata,
   AgentPaperRequestMetadata,
   AgentFeedbackMode,
+  AgentGitHubReleasePolicy,
   AgentProducerProvenance,
   AgentRunRecord,
   AgentRunResult,
@@ -141,6 +144,7 @@ export interface AgentRunOptions {
   external_sources?: string[];
   ref?: string;
   model?: string;
+  github_release_policy?: AgentGitHubReleasePolicy;
 }
 
 export interface AgentResumeOptions {
@@ -198,6 +202,9 @@ export async function runAgent(
     options.external_sources ?? [],
   );
   const model = normalizeModelName(options.model ?? "deepseek-v4-flash");
+  const githubReleasePolicy = normalizeGitHubReleasePolicy(
+    options.github_release_policy,
+  );
   const producer = await (dependencies.producer ?? resolveProducerProvenance)();
   const runPath = await initializeRunDirectory(options.output_path);
   const runId = (dependencies.run_id ?? (() => crypto.randomUUID()))();
@@ -215,11 +222,31 @@ export async function runAgent(
   await persistRunRecord(runPath, record);
   await appendRolloutEvent(runPath, record, startedAt, {
     kind: "run_started",
+    github_release_policy: githubReleasePolicy,
   });
   await persistRunRecord(runPath, record);
 
   try {
-    const source = await acquireSource(options, dependencies);
+    const source = await acquireSource(
+      { ...options, github_release_policy: githubReleasePolicy },
+      dependencies,
+    );
+    const githubReleaseStatus = source.github_release_status;
+    if (
+      githubReleaseStatus !== undefined &&
+      githubReleaseStatus.state !== "captured"
+    ) {
+      await appendRolloutEvent(
+        runPath,
+        record,
+        now(dependencies).toISOString(),
+        {
+          kind: "github_releases_skipped",
+          reason_code: githubReleaseStatus.reason_code,
+          message: githubReleaseStatus.message,
+        },
+      );
+    }
     const metadata = completeAgentMetadata(
       requestedMetadata,
       source,
@@ -1224,6 +1251,14 @@ function availableSourceIds(source: AgentSource): Set<string> {
   ]);
 }
 
+type GitHubReleaseOutcome =
+  | { state: "captured"; snapshot: GitHubReleaseSnapshot }
+  | {
+      state: "skipped";
+      reason_code: GitHubSourceErrorCode;
+      message: string;
+    };
+
 async function acquireSource(
   options: AgentRunOptions,
   dependencies: AgentRunnerDependencies,
@@ -1238,15 +1273,32 @@ async function acquireSource(
           : { fetch: dependencies.fetch }),
         now: () => retrievedAt,
       };
-      const [source, releases] = await Promise.all([
-        fetchGitHubSource({
-          ...sourceOptions,
-          ...(options.ref === undefined ? {} : { ref: options.ref }),
-          limits: agent_source_limits,
-        }),
-        fetchGitHubReleases(sourceOptions),
+      const sourceRequest = fetchGitHubSource({
+        ...sourceOptions,
+        ...(options.ref === undefined ? {} : { ref: options.ref }),
+        limits: agent_source_limits,
+      });
+      if (options.github_release_policy === "disabled") {
+        const source = await sourceRequest;
+        return sourceFromGitHubResult(source, undefined, {
+          state: "disabled",
+          reason_code: "disabled_by_policy",
+          message:
+            "live GitHub release enrichment was disabled by input policy",
+        });
+      }
+      const [source, releaseOutcome] = await Promise.all([
+        sourceRequest,
+        fetchGitHubReleaseOutcome(sourceOptions),
       ]);
-      return sourceFromGitHubResult(source, releases);
+      if (releaseOutcome.state === "captured") {
+        return sourceFromGitHubResult(source, releaseOutcome.snapshot);
+      }
+      return sourceFromGitHubResult(source, undefined, {
+        state: "skipped",
+        reason_code: releaseOutcome.reason_code,
+        message: releaseOutcome.message,
+      });
     } catch (error) {
       if (error instanceof GitHubSourceError) {
         throw new PaperbotError(
@@ -1266,6 +1318,41 @@ async function acquireSource(
     );
   }
   return acquireLocalSource(options.repository);
+}
+
+async function fetchGitHubReleaseOutcome(
+  options: Parameters<typeof fetchGitHubReleases>[0],
+): Promise<GitHubReleaseOutcome> {
+  try {
+    return {
+      state: "captured",
+      snapshot: await fetchGitHubReleases(options),
+    };
+  } catch (error) {
+    if (error instanceof GitHubSourceError) {
+      return {
+        state: "skipped",
+        reason_code: error.code,
+        message: error.message,
+      };
+    }
+    throw error;
+  }
+}
+
+function normalizeGitHubReleasePolicy(
+  policy: AgentGitHubReleasePolicy | undefined,
+): AgentGitHubReleasePolicy {
+  if (policy === undefined) {
+    return "best_effort";
+  }
+  if (policy !== "best_effort" && policy !== "disabled") {
+    throw new PaperbotError(
+      "agent GitHub release policy must be best_effort or disabled",
+      ExitCode.usage,
+    );
+  }
+  return policy;
 }
 
 function runtimeFor(
@@ -1345,6 +1432,9 @@ function runResult(
     source: {
       resolved_revision: source.resolved_revision,
       selected_file_count: source.files.length,
+      ...(source.github_release_status === undefined
+        ? {}
+        : { github_release_status: source.github_release_status }),
     },
     checkpoint,
   };

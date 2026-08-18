@@ -23,6 +23,7 @@ import {
 } from "./artifacts.ts";
 import type {
   AgentGitHubRelease,
+  AgentGitHubReleaseStatus,
   AgentSource,
   AgentSourceFile,
 } from "./types.ts";
@@ -103,6 +104,7 @@ export async function acquireLocalSource(
 export function sourceFromGitHubResult(
   result: GitHubSourceResult,
   releaseSnapshot?: GitHubReleaseSnapshot,
+  releaseStatus?: AgentGitHubReleaseStatus,
 ): AgentSource {
   const files = result.files
     .filter((file) => !isSensitivePath(file.path))
@@ -125,6 +127,18 @@ export function sourceFromGitHubResult(
   ) {
     throw new PaperbotError(
       "GitHub release snapshot does not match the acquired repository",
+      ExitCode.scan,
+    );
+  }
+  if (releaseSnapshot === undefined && releaseStatus === undefined) {
+    throw new PaperbotError(
+      "GitHub release acquisition status is required",
+      ExitCode.scan,
+    );
+  }
+  if (releaseSnapshot !== undefined && releaseStatus !== undefined) {
+    throw new PaperbotError(
+      "GitHub release snapshot and skip status cannot both be provided",
       ExitCode.scan,
     );
   }
@@ -153,6 +167,13 @@ export function sourceFromGitHubResult(
             releases: releases ?? [],
           },
         }),
+    github_release_status:
+      releaseSnapshot === undefined
+        ? releaseStatus!
+        : {
+            state: "captured",
+            release_count: releaseSnapshot.releases.length,
+          },
     files,
     scan_manifest: {
       schema_version: "1",
@@ -194,6 +215,9 @@ export async function writeSourceArtifacts(
     ...(source.github_releases === undefined
       ? {}
       : { github_releases: source.github_releases }),
+    ...(source.github_release_status === undefined
+      ? {}
+      : { github_release_status: source.github_release_status }),
     files: source.files.map((file) => ({
       path: file.path,
       file_type: file.file_type,
@@ -265,6 +289,8 @@ export async function readSourceArtifact(
       typeof rawSource.homepage_url !== "string") ||
     (rawSource.github_releases !== undefined &&
       !isRecord(rawSource.github_releases)) ||
+    (rawSource.github_release_status !== undefined &&
+      !isRecord(rawSource.github_release_status)) ||
     !Array.isArray(rawSource.files) ||
     rawSource.files.length === 0 ||
     rawSource.files.length > MAX_AGENT_SOURCE_FILES
@@ -291,6 +317,26 @@ export async function readSourceArtifact(
     typeof rawSource.canonical_url === "string"
       ? readStoredUrl(rawSource.canonical_url, "canonical_url", securedRunPath)
       : undefined;
+  const githubReleases =
+    rawSource.github_releases === undefined
+      ? undefined
+      : readStoredGitHubReleases(
+          rawSource.github_releases,
+          canonicalUrl,
+          securedRunPath,
+        );
+  const githubReleaseStatus =
+    rawSource.github_release_status === undefined
+      ? githubReleases === undefined
+        ? undefined
+        : {
+            state: "captured" as const,
+            release_count: githubReleases.releases.length,
+          }
+      : readStoredGitHubReleaseStatus(
+          rawSource.github_release_status,
+          securedRunPath,
+        );
   const source: AgentSource = {
     kind,
     ...(canonicalUrl === undefined ? {} : { canonical_url: canonicalUrl }),
@@ -312,15 +358,12 @@ export async function readSourceArtifact(
           ),
         }
       : {}),
-    ...(rawSource.github_releases === undefined
+    ...(githubReleases === undefined
       ? {}
-      : {
-          github_releases: readStoredGitHubReleases(
-            rawSource.github_releases,
-            canonicalUrl,
-            securedRunPath,
-          ),
-        }),
+      : { github_releases: githubReleases }),
+    ...(githubReleaseStatus === undefined
+      ? {}
+      : { github_release_status: githubReleaseStatus }),
     files,
     scan_manifest: scanValidation.manifest,
   };
@@ -439,6 +482,55 @@ export const agent_source_limits = {
   max_file_bytes: MAX_AGENT_FILE_BYTES,
   max_total_bytes: MAX_AGENT_TOTAL_BYTES,
 };
+
+function readStoredGitHubReleaseStatus(
+  value: Record<string, unknown>,
+  runPath: string,
+): AgentGitHubReleaseStatus {
+  if (
+    value.state === "captured" &&
+    Object.keys(value).every((field) =>
+      ["state", "release_count"].includes(field),
+    ) &&
+    Number.isSafeInteger(value.release_count) &&
+    (value.release_count as number) >= 0 &&
+    (value.release_count as number) <= 10
+  ) {
+    return {
+      state: "captured",
+      release_count: value.release_count as number,
+    };
+  }
+  if (
+    value.state === "disabled" &&
+    value.reason_code === "disabled_by_policy" &&
+    isBoundedSingleLine(value.message, 512) &&
+    Object.keys(value).every((field) =>
+      ["state", "reason_code", "message"].includes(field),
+    )
+  ) {
+    return {
+      state: "disabled",
+      reason_code: "disabled_by_policy",
+      message: value.message,
+    };
+  }
+  if (
+    value.state === "skipped" &&
+    isBoundedSingleLine(value.reason_code, 128) &&
+    isBoundedSingleLine(value.message, 512) &&
+    Object.keys(value).every((field) =>
+      ["state", "reason_code", "message"].includes(field),
+    )
+  ) {
+    return {
+      state: "skipped",
+      reason_code: value.reason_code,
+      message: value.message,
+    };
+  }
+  throw invalidSourceArtifact(runPath, "invalid GitHub release status");
+}
 
 function readStoredGitHubReleases(
   value: Record<string, unknown>,
@@ -735,9 +827,16 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
     source.scan_manifest.repository.is_dirty !== source.is_dirty ||
     (source.kind === "github" &&
       (source.is_dirty ||
-        source.github_releases === undefined ||
+        source.github_release_status === undefined ||
+        (source.github_release_status.state === "captured"
+          ? source.github_releases === undefined ||
+            source.github_release_status.release_count !==
+              source.github_releases.releases.length
+          : source.github_releases !== undefined) ||
         !isCanonicalGitHubSourceUrl(source.canonical_url))) ||
-    (source.kind === "local" && source.github_releases !== undefined)
+    (source.kind === "local" &&
+      (source.github_releases !== undefined ||
+        source.github_release_status !== undefined))
   ) {
     throw invalidSourceArtifact(
       runPath,

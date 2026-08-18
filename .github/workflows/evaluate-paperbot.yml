@@ -46,7 +46,7 @@ jobs:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
         run: |
           if [ -z "${DEEPSEEK_API_KEY}" ]; then
-            echo "::error::Add the DEEPSEEK_API_KEY production secret for daily Paperbot drafting."
+            echo "::error::Add the DEEPSEEK_API_KEY repository secret for Paperbot workflows."
             exit 1
           fi
           if [ -z "${PRODXIV_API_URL}" ]; then

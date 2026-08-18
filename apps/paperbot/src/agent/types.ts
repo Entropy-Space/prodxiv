@@ -19,6 +19,7 @@ export type AgentSessionRole = "evidence" | "author";
 export type PiSessionRole = AgentSessionRole | "trend_selection";
 export type AgentRunMode = "interactive" | "auto";
 export type AgentFeedbackMode = "sync" | "async" | "none";
+export type AgentGitHubReleasePolicy = "best_effort" | "disabled";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -115,9 +116,26 @@ export interface AgentSource {
   retrieved_at: string;
   homepage_url?: string;
   github_releases?: AgentGitHubReleaseSnapshot;
+  github_release_status?: AgentGitHubReleaseStatus;
   files: AgentSourceFile[];
   scan_manifest: ScanManifest;
 }
+
+export type AgentGitHubReleaseStatus =
+  | {
+      state: "captured";
+      release_count: number;
+    }
+  | {
+      state: "disabled";
+      reason_code: "disabled_by_policy";
+      message: string;
+    }
+  | {
+      state: "skipped";
+      reason_code: string;
+      message: string;
+    };
 
 export interface AgentGitHubRelease {
   tag_name: string;
@@ -357,6 +375,7 @@ export interface AgentRunResult {
   source: {
     resolved_revision: string;
     selected_file_count: number;
+    github_release_status?: AgentGitHubReleaseStatus;
   };
   checkpoint: AgentCheckpointRecord;
 }
