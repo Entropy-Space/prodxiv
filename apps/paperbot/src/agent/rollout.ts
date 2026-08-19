@@ -2,6 +2,7 @@ import { appendFile, chmod, readFile } from "node:fs/promises";
 
 import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
 import { artifactPath, sha256 } from "./artifacts.ts";
+import type { AgentProgressOperation } from "./progress.ts";
 import type {
   AgentGitHubReleasePolicy,
   AgentObservedModel,
@@ -41,6 +42,7 @@ type RolloutEvent =
   | {
       kind: "model_turn_started";
       role: AgentSessionRole;
+      operation: AgentProgressOperation;
       turn_number: number;
       prompt_sha256: string;
       prompt_byte_count: number;
@@ -48,6 +50,7 @@ type RolloutEvent =
   | {
       kind: "model_turn_completed";
       role: AgentSessionRole;
+      operation: AgentProgressOperation;
       turn_number: number;
       duration_ms: number;
       response_sha256: string;
@@ -61,6 +64,7 @@ type RolloutEvent =
   | {
       kind: "model_turn_failed";
       role: AgentSessionRole;
+      operation: AgentProgressOperation;
       turn_number: number;
       duration_ms: number;
       error: string;
@@ -182,12 +186,14 @@ export async function verifyRolloutArtifact(
 
 export function modelTurnStartedEvent(
   role: AgentSessionRole,
+  operation: AgentProgressOperation,
   turnNumber: number,
   prompt: string,
 ): RolloutEvent {
   return {
     kind: "model_turn_started",
     role,
+    operation,
     turn_number: turnNumber,
     prompt_sha256: sha256(prompt),
     prompt_byte_count: Buffer.byteLength(prompt),
@@ -197,6 +203,7 @@ export function modelTurnStartedEvent(
 export function modelTurnCompletedEvent(
   record: AgentRunRecord,
   role: AgentSessionRole,
+  operation: AgentProgressOperation,
   turnNumber: number,
   durationMs: number,
   completion: ModelCompletion,
@@ -214,6 +221,7 @@ export function modelTurnCompletedEvent(
   return {
     kind: "model_turn_completed",
     role,
+    operation,
     turn_number: turnNumber,
     duration_ms: durationMs,
     response_sha256: sha256(completion.final_text),

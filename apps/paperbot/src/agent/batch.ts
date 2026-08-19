@@ -19,6 +19,11 @@ import {
 } from "./input.ts";
 import { initializeRunDirectory, writeJsonArtifact } from "./artifacts.ts";
 import { redactModelSecrets } from "./model-config.ts";
+import {
+  summarizeAgentError,
+  type AgentProgressContext,
+  type AgentProgressEvent,
+} from "./progress.ts";
 import { runAgent, type AgentRunOptions } from "./runner.ts";
 import type {
   AgentGitHubReleasePolicy,
@@ -62,6 +67,10 @@ export interface AgentBatchOptions {
   status?: AgentPaperStatus;
   model?: string;
   concurrency?: number;
+  on_progress?: (
+    event: AgentProgressEvent,
+    context: AgentProgressContext,
+  ) => void;
 }
 
 export interface AgentBatchDependencies {
@@ -205,6 +214,17 @@ export async function runAgentBatch(
       projectReport.state = "running";
       projectReport.started_at = now(dependencies).toISOString();
       await persistReport();
+      const progressContext = projectProgressContext(
+        project,
+        projectIndex,
+        manifest.projects.length,
+      );
+      reportBatchProgress(normalizedOptions.on_progress, progressContext, {
+        kind: "host",
+        operation: "batch_project",
+        status: "started",
+        summary: "starting isolated paper run",
+      });
 
       const result = await (dependencies.run_agent ?? runAgent)({
         repository: project.repository.canonical_url,
@@ -215,6 +235,16 @@ export async function runAgentBatch(
         metadata,
         external_sources: project.external_sources ?? [],
         github_release_policy: manifest.github_release_policy,
+        ...(normalizedOptions.on_progress === undefined
+          ? {}
+          : {
+              on_progress: (event) =>
+                reportBatchProgress(
+                  normalizedOptions.on_progress,
+                  progressContext,
+                  event,
+                ),
+            }),
         ...(project.ref === undefined ? {} : { ref: project.ref }),
         ...(normalizedOptions.model === undefined
           ? {}
@@ -247,9 +277,27 @@ export async function runAgentBatch(
       } else {
         projectReport.state = "succeeded";
       }
+      reportBatchProgress(normalizedOptions.on_progress, progressContext, {
+        kind: "host",
+        operation: "batch_project",
+        status: projectReport.state === "succeeded" ? "completed" : "failed",
+        summary:
+          projectReport.error?.message ??
+          `paper prepared in ${result.state} state with ${result.validation.diagnostics} validation diagnostics`,
+      });
     } catch (error) {
       projectReport.state = "failed";
       projectReport.error = { message: safeErrorMessage(error) };
+      reportBatchProgress(
+        normalizedOptions.on_progress,
+        projectProgressContext(project, projectIndex, manifest.projects.length),
+        {
+          kind: "host",
+          operation: "batch_project",
+          status: "failed",
+          summary: summarizeBatchProgressError(error),
+        },
+      );
     }
 
     projectReport.completed_at = now(dependencies).toISOString();
@@ -451,6 +499,7 @@ function normalizeOptions(options: AgentBatchOptions): {
   status?: AgentPaperStatus;
   model?: string;
   concurrency: number;
+  on_progress?: AgentBatchOptions["on_progress"];
 } {
   if (
     typeof options.input_path !== "string" ||
@@ -501,6 +550,9 @@ function normalizeOptions(options: AgentBatchOptions): {
     ...(status === undefined ? {} : { status }),
     ...(model === undefined ? {} : { model }),
     concurrency,
+    ...(options.on_progress === undefined
+      ? {}
+      : { on_progress: options.on_progress }),
   };
 }
 
@@ -533,6 +585,30 @@ function childOutputPath(
   // collision-free even when repository names contain hyphens or underscores.
   const childName = `${repository.owner.toLowerCase()}__${repository.repository.toLowerCase()}`;
   return join(outputPath, childName);
+}
+
+function projectProgressContext(
+  project: ParsedBatchProject,
+  projectIndex: number,
+  projectCount: number,
+): AgentProgressContext {
+  return {
+    project_index: projectIndex + 1,
+    project_count: projectCount,
+    repository_label: `${project.repository.owner}/${project.repository.repository}`,
+  };
+}
+
+function reportBatchProgress(
+  reporter: AgentBatchOptions["on_progress"],
+  context: AgentProgressContext,
+  event: AgentProgressEvent,
+): void {
+  try {
+    reporter?.(event, context);
+  } catch {
+    // Progress is diagnostic only and must never change the batch outcome.
+  }
 }
 
 function productNameFromRepository(repository: string): string {
@@ -714,6 +790,15 @@ function now(dependencies: AgentBatchDependencies): Date {
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return redactModelSecrets(message);
+}
+
+function summarizeBatchProgressError(error: unknown): string {
+  const message = safeErrorMessage(error);
+  return summarizeAgentError(
+    error instanceof PaperbotError
+      ? new PaperbotError(message, error.exit_code)
+      : new Error(message),
+  );
 }
 
 function usageError(message: string): PaperbotError {

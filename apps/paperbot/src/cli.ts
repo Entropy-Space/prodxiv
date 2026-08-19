@@ -4,6 +4,12 @@ import { parseArguments } from "./arguments.ts";
 import type { AgentBatchOptions, AgentBatchResult } from "./agent/batch.ts";
 import type { ToolsArguments } from "./arguments.ts";
 import type { AgentResumeOptions, AgentRunOptions } from "./agent/runner.ts";
+import {
+  formatAgentProgress,
+  githubRepositoryLabel,
+  type AgentProgressContext,
+  type AgentProgressReporter,
+} from "./agent/progress.ts";
 import type { AgentRunResult } from "./agent/types.ts";
 import type { AuthorQuestion } from "./agent/types.ts";
 import type {
@@ -56,10 +62,10 @@ Usage:
   paperbot tools repo_scan [repository] [--exclude <glob>] [--include <glob>] [--format text|json]
   paperbot tools paper_scaffold <scan.json> [--title <title>] [--format text|json]
   paperbot tools paper_validate <paper.md> [--profile draft|submission|publication] [--format text|json]
-  paperbot agent run <repository> --output <run-directory> --allow-remote-model [--mode interactive|auto] [--feedback sync|async] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json]
-  paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json]
-  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--mode auto|interactive] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json]
-  paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json]
+  paperbot agent run <repository> --output <run-directory> --allow-remote-model [--mode interactive|auto] [--feedback sync|async] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--title <title>] [--product-name <name>] [--product-url <url>] [--repository-url <url>] [--source <url> ...] [--ref <ref>] [--model <model>] [--format text|json] [--quiet]
+  paperbot agent resume <run-directory> --answers <answers.md> --allow-remote-model [--model <model>] [--format text|json] [--quiet]
+  paperbot agent batch <projects.json> --output <runs-directory> --allow-remote-model [--mode auto|interactive] [--author <name> ...] [--status <unknown|concept|private_beta|public_beta|launched|discontinued>] [--model <model>] [--concurrency <1-4>] [--format text|json] [--quiet]
+  paperbot agent select-trending --output <run-directory> --allow-remote-model [--api-url <url> | --snapshot <snapshot.json>] [--model <model>] [--format text|json] [--quiet]
   paperbot auth [init]
   paperbot auth set --api-url <url> [--site-url <url>] [--token-stdin]
   paperbot auth status
@@ -84,6 +90,7 @@ Operator-only remote operations:
 
 Options:
   --format <format>    Output format: text (default) or json
+  --quiet              Suppress live agent progress on stderr
   --exclude <glob>     Exclude an additional repository-relative glob; repeatable
   --include <glob>     Override a default path exclusion; repeatable
   --output <path>      Write a new draft without overwriting existing work
@@ -296,6 +303,13 @@ export async function run(
                 collect_author_answers: createTerminalAnswerCollector(io),
               }
             : {}),
+          ...(parsed.quiet
+            ? {}
+            : {
+                on_progress: progressWriter(io, {
+                  repository_label: githubRepositoryLabel(parsed.repository),
+                }),
+              }),
         });
         writeAgentResult(io, parsed.format, parsed.action, result);
         return result.validation.valid ? ExitCode.success : ExitCode.validation;
@@ -308,6 +322,13 @@ export async function run(
           answers_path: parsed.answers_path,
           allow_remote_model: parsed.allow_remote_model,
           ...(parsed.model === undefined ? {} : { model: parsed.model }),
+          ...(parsed.quiet
+            ? {}
+            : {
+                on_progress: progressWriter(io, {
+                  repository_label: "resume",
+                }),
+              }),
         });
         writeAgentResult(io, parsed.format, parsed.action, result);
         return result.validation.valid ? ExitCode.success : ExitCode.validation;
@@ -324,6 +345,13 @@ export async function run(
             ? {}
             : { snapshot_path: parsed.snapshot_path }),
           ...(parsed.model === undefined ? {} : { model: parsed.model }),
+          ...(parsed.quiet
+            ? {}
+            : {
+                on_progress: progressWriter(io, {
+                  repository_label: "trending",
+                }),
+              }),
         });
         writeTrendSelectionResult(io, parsed.format, result);
         return ExitCode.success;
@@ -342,6 +370,12 @@ export async function run(
         ...(parsed.concurrency === undefined
           ? {}
           : { concurrency: parsed.concurrency }),
+        ...(parsed.quiet
+          ? {}
+          : {
+              on_progress: (event, context) =>
+                io.stderr(formatAgentProgress(event, context)),
+            }),
       });
       writeAgentBatchResult(io, parsed.format, result);
       return result.report.summary.failed === 0
@@ -576,6 +610,13 @@ async function loadTrendSelection(): Promise<
   typeof import("./agent/trend-selection.ts")
 > {
   return import("./agent/trend-selection.ts");
+}
+
+function progressWriter(
+  io: CliIo,
+  context: AgentProgressContext,
+): AgentProgressReporter {
+  return (event) => io.stderr(formatAgentProgress(event, context));
 }
 
 function writeAgentResult(

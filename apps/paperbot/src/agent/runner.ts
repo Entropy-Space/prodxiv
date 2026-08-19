@@ -43,6 +43,13 @@ import {
   type DraftAssessment,
 } from "./paper.ts";
 import { PiAuthoringRuntime } from "./pi.ts";
+import {
+  emitAgentProgress,
+  summarizeAgentError,
+  type AgentProgressEvent,
+  type AgentProgressOperation,
+  type AgentProgressReporter,
+} from "./progress.ts";
 import { resolveProducerProvenance } from "./provenance.ts";
 import {
   createAnswersPrompt,
@@ -120,6 +127,8 @@ import type {
   AuthorQuestion,
   DraftResponse,
   EvidenceItem,
+  EvidenceResponse,
+  ModelCompletion,
 } from "./types.ts";
 
 const MAX_EVIDENCE_REPAIR_ATTEMPTS = 1;
@@ -145,6 +154,7 @@ export interface AgentRunOptions {
   ref?: string;
   model?: string;
   github_release_policy?: AgentGitHubReleasePolicy;
+  on_progress?: AgentProgressReporter;
 }
 
 export interface AgentResumeOptions {
@@ -152,6 +162,7 @@ export interface AgentResumeOptions {
   allow_remote_model: boolean;
   answers_path: string;
   model?: string;
+  on_progress?: AgentProgressReporter;
 }
 
 export interface AgentRunnerDependencies {
@@ -160,6 +171,7 @@ export interface AgentRunnerDependencies {
   now?: () => Date;
   producer?: () => Promise<AgentProducerProvenance>;
   run_id?: () => string;
+  on_progress?: AgentProgressReporter;
 }
 
 export async function runAgent(
@@ -172,6 +184,10 @@ export async function runAgent(
       ExitCode.usage,
     );
   }
+  dependencies = {
+    ...dependencies,
+    on_progress: options.on_progress ?? dependencies.on_progress,
+  };
   const mode = options.mode ?? "interactive";
   const feedback = options.feedback ?? (mode === "auto" ? "none" : "async");
   if (mode !== "interactive" && mode !== "auto") {
@@ -225,8 +241,20 @@ export async function runAgent(
     github_release_policy: githubReleasePolicy,
   });
   await persistRunRecord(runPath, record);
+  reportProgress(dependencies, {
+    kind: "host",
+    operation: "run",
+    status: "started",
+    summary: `${mode} mode with ${feedback} feedback`,
+  });
 
   try {
+    reportProgress(dependencies, {
+      kind: "host",
+      operation: "acquire_source",
+      status: "started",
+      summary: "resolving a bounded repository snapshot",
+    });
     const source = await acquireSource(
       { ...options, github_release_policy: githubReleasePolicy },
       dependencies,
@@ -256,6 +284,12 @@ export async function runAgent(
       runId,
     );
     const sourceArtifacts = await writeSourceArtifacts(runPath, source);
+    reportProgress(dependencies, {
+      kind: "host",
+      operation: "acquire_source",
+      status: "completed",
+      summary: sourceProgressSummary(source),
+    });
     record.input.metadata = metadata;
     record.state = "inputs_ready";
     record.source = sourceRecord(source);
@@ -310,7 +344,11 @@ export async function runAgent(
       record,
       dependencies,
       parseDraftResponse,
-      "initial draft",
+      {
+        operation: "initial_draft",
+        prompt_summary: `Write an initial paper from ${evidence.length} validated evidence items; record unsupported intent as assumptions`,
+        summarize_response: summarizeAuthoringResponse,
+      },
     );
     const initialResolution = await resolveDraftResponse({
       initial_response: initialDraft,
@@ -349,7 +387,12 @@ export async function runAgent(
       record,
       dependencies,
       parseAuthoringResponse,
-      "draft review",
+      {
+        operation: "draft_review",
+        prompt_summary:
+          "Self-review the draft for unsupported intent, missing tradeoffs, and unresolved limitations",
+        summarize_response: summarizeAuthoringResponse,
+      },
     );
     const reviewResolution = await resolveDraftResponse({
       initial_response: reviewResponse,
@@ -441,6 +484,12 @@ export async function runAgent(
       error: record.error.message,
     }).catch(() => undefined);
     await persistRunRecord(runPath, record).catch(() => undefined);
+    reportProgress(dependencies, {
+      kind: "host",
+      operation: "run",
+      status: "failed",
+      summary: progressErrorSummary(error),
+    });
     await sealRunCheckpoint(runPath, record, "failed", dependencies);
     throw error;
   } finally {
@@ -459,6 +508,10 @@ export async function resumeAgent(
       ExitCode.usage,
     );
   }
+  dependencies = {
+    ...dependencies,
+    on_progress: options.on_progress ?? dependencies.on_progress,
+  };
   const runPath = await resolveExistingRun(options.run_path);
   const record = await readRunRecord(runPath);
   if (record.input.mode === "auto") {
@@ -529,6 +582,12 @@ export async function resumeAgent(
     kind: "run_resumed",
   });
   await persistRunRecord(runPath, record);
+  reportProgress(dependencies, {
+    kind: "host",
+    operation: "run",
+    status: "started",
+    summary: "resuming an interactive author session from recorded answers",
+  });
   evidence = await recordAuthorAnswers(
     runPath,
     record,
@@ -574,7 +633,11 @@ export async function resumeAgent(
       record,
       dependencies,
       parseAuthoringResponse,
-      "author-guided revision",
+      {
+        operation: "revise_from_answers",
+        prompt_summary: `Revise the draft using ${pendingQuestions.length} answered author questions while preserving supported content`,
+        summarize_response: summarizeAuthoringResponse,
+      },
     );
     const resolution = await resolveDraftResponse({
       initial_response: response,
@@ -622,6 +685,12 @@ export async function resumeAgent(
       error: record.error.message,
     }).catch(() => undefined);
     await persistRunRecord(runPath, record).catch(() => undefined);
+    reportProgress(dependencies, {
+      kind: "host",
+      operation: "run",
+      status: "failed",
+      summary: progressErrorSummary(error),
+    });
     await sealRunCheckpoint(runPath, record, "failed", dependencies);
     throw error;
   } finally {
@@ -690,7 +759,11 @@ async function completeSynchronousInterview(input: {
       input.record,
       input.dependencies,
       parseAuthoringResponse,
-      "synchronous author-guided revision",
+      {
+        operation: "revise_from_answers",
+        prompt_summary: `Revise the draft using ${pendingQuestions.length} answered author questions while preserving supported content`,
+        summarize_response: summarizeAuthoringResponse,
+      },
     );
     const resolution = await resolveDraftResponse({
       initial_response: response,
@@ -801,7 +874,11 @@ async function produceEvidence(input: {
     input.record,
     input.dependencies,
     parseEvidenceResponse,
-    "evidence analysis",
+    {
+      operation: "evidence_analysis",
+      prompt_summary: `Analyze ${input.source.files.length} pinned source files and build a selective evidence ledger`,
+      summarize_response: summarizeEvidenceResponse,
+    },
   );
   for (let attempt = 0; attempt <= MAX_EVIDENCE_REPAIR_ATTEMPTS; attempt += 1) {
     const candidateArtifact = `evidence-candidates/candidate-${attempt + 1}.json`;
@@ -839,6 +916,13 @@ async function produceEvidence(input: {
       input.record.artifacts.evidence_analysis = "evidence-analysis.json";
       input.record.updated_at = now(input.dependencies).toISOString();
       await persistRunRecord(input.run_path, input.record);
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "evidence",
+        operation: "validate_evidence",
+        status: "completed",
+        summary: `${evidence.length} evidence items passed provenance and range validation`,
+      });
       return { analysis, evidence };
     } catch (error) {
       if (
@@ -846,8 +930,22 @@ async function produceEvidence(input: {
         !(error instanceof PaperbotError) ||
         error.exit_code !== ExitCode.validation
       ) {
+        reportProgress(input.dependencies, {
+          kind: "host",
+          session_role: "evidence",
+          operation: "validate_evidence",
+          status: "failed",
+          summary: progressErrorSummary(error),
+        });
         throw error;
       }
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "evidence",
+        operation: "validate_evidence",
+        status: "retrying",
+        summary: `${progressErrorSummary(error)}; requesting correction ${attempt + 1}/${MAX_EVIDENCE_REPAIR_ATTEMPTS}`,
+      });
       response = await parseWithOneRetry(
         input.runtime_session,
         "evidence",
@@ -856,7 +954,12 @@ async function produceEvidence(input: {
         input.record,
         input.dependencies,
         parseEvidenceResponse,
-        "corrected evidence analysis",
+        {
+          operation: "evidence_correction",
+          prompt_summary:
+            "Correct the evidence items implicated by validation while preserving valid items",
+          summarize_response: summarizeEvidenceResponse,
+        },
       );
     }
   }
@@ -887,9 +990,23 @@ async function resolveDraftResponse(input: {
         throw error;
       }
       if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+        reportProgress(input.dependencies, {
+          kind: "host",
+          session_role: "author",
+          operation: "validate_draft",
+          status: "failed",
+          summary: progressErrorSummary(error),
+        });
         throw error;
       }
       input.record.workflow.repair_attempts = attempt + 1;
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "author",
+        operation: "validate_draft",
+        status: "retrying",
+        summary: `${progressErrorSummary(error)}; requesting correction ${attempt + 1}/${MAX_DRAFT_REPAIR_ATTEMPTS}`,
+      });
       response = await parseWithOneRetry(
         input.session,
         "author",
@@ -907,7 +1024,12 @@ async function resolveDraftResponse(input: {
         input.record,
         input.dependencies,
         input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
-        "evidence-bound draft correction",
+        {
+          operation: "draft_correction",
+          prompt_summary:
+            "Correct invalid evidence references while preserving supported draft content",
+          summarize_response: summarizeAuthoringResponse,
+        },
       );
       continue;
     }
@@ -917,12 +1039,27 @@ async function resolveDraftResponse(input: {
         return response;
       }
       if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+        reportProgress(input.dependencies, {
+          kind: "host",
+          session_role: "author",
+          operation: "validate_draft",
+          status: "failed",
+          summary:
+            "A full draft was required but the response requested author questions",
+        });
         throw new PaperbotError(
           "authoring session exceeded the question-round limit",
           ExitCode.validation,
         );
       }
       input.record.workflow.repair_attempts = attempt + 1;
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "author",
+        operation: "validate_draft",
+        status: "retrying",
+        summary: `A full draft is required in this phase; requesting correction ${attempt + 1}/${MAX_DRAFT_REPAIR_ATTEMPTS}`,
+      });
       response = await parseWithOneRetry(
         input.session,
         "author",
@@ -937,7 +1074,12 @@ async function resolveDraftResponse(input: {
         input.record,
         input.dependencies,
         parseDraftResponse,
-        "required draft correction",
+        {
+          operation: "draft_correction",
+          prompt_summary:
+            "Submit a full draft now because no author-question round is available",
+          summarize_response: summarizeAuthoringResponse,
+        },
       );
       continue;
     }
@@ -950,12 +1092,33 @@ async function resolveDraftResponse(input: {
     );
     if (assessment.diagnostics.length === 0) {
       input.record.workflow.repair_attempts = 0;
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "author",
+        operation: "validate_draft",
+        status: "completed",
+        summary: "deterministic draft validation passed",
+      });
       return assessment;
     }
     if (attempt >= MAX_DRAFT_REPAIR_ATTEMPTS) {
+      reportProgress(input.dependencies, {
+        kind: "host",
+        session_role: "author",
+        operation: "validate_draft",
+        status: "failed",
+        summary: `${assessment.diagnostics.length} validation issues remained after ${MAX_DRAFT_REPAIR_ATTEMPTS} corrections`,
+      });
       throw invalidDraftError(assessment.diagnostics);
     }
     input.record.workflow.repair_attempts = attempt + 1;
+    reportProgress(input.dependencies, {
+      kind: "host",
+      session_role: "author",
+      operation: "validate_draft",
+      status: "retrying",
+      summary: `${assessment.diagnostics.length} validation issues; requesting correction ${attempt + 1}/${MAX_DRAFT_REPAIR_ATTEMPTS}`,
+    });
     response = await parseWithOneRetry(
       input.session,
       "author",
@@ -970,7 +1133,11 @@ async function resolveDraftResponse(input: {
       input.record,
       input.dependencies,
       input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
-      "draft correction",
+      {
+        operation: "draft_correction",
+        prompt_summary: `Correct ${assessment.diagnostics.length} deterministic validation issues while preserving supported content`,
+        summarize_response: summarizeAuthoringResponse,
+      },
     );
   }
   throw new PaperbotError(
@@ -1093,6 +1260,18 @@ async function finalizePaper(
   await persistRunRecord(runPath, record);
 }
 
+interface ModelTurnSpec<T> {
+  operation: AgentProgressOperation;
+  prompt_summary: string;
+  summarize_response: (value: T) => string;
+}
+
+interface CompletedModelTurn {
+  response: string;
+  completion: ModelCompletion;
+  duration_ms: number;
+}
+
 async function parseWithOneRetry<T>(
   session: AuthoringSession,
   role: AgentSessionRole,
@@ -1101,34 +1280,62 @@ async function parseWithOneRetry<T>(
   record: AgentRunRecord,
   dependencies: AgentRunnerDependencies,
   parser: (value: string) => T,
-  operation: string,
+  spec: ModelTurnSpec<T>,
 ): Promise<T> {
-  let response = await completeModelTurn(
+  let turn = await completeModelTurn(
     session,
     role,
     prompt,
+    spec.operation,
+    spec.prompt_summary,
     runPath,
     record,
     dependencies,
   );
   try {
-    return parser(response);
+    const parsed = parser(turn.response);
+    reportAssistantResponse(dependencies, role, spec, parsed, turn);
+    return parsed;
   } catch (firstError) {
     if (!(firstError instanceof PaperbotError)) {
       throw firstError;
     }
-    response = await completeModelTurn(
+    reportInvalidAssistantResponse(dependencies, role, spec.operation, turn);
+    reportProgress(dependencies, {
+      kind: "host",
+      session_role: role,
+      operation: "parse_response",
+      status: "retrying",
+      summary: `${progressErrorSummary(firstError)}; requesting one structured-response correction`,
+    });
+    turn = await completeModelTurn(
       session,
       role,
       [
-        `Your previous ${operation} response could not be parsed: ${firstError.message}`,
+        `Your previous ${formatOperation(spec.operation)} response could not be parsed: ${firstError.message}`,
         "Return exactly one valid fenced JSON object in the shape requested by the previous turn, with no prose outside it.",
       ].join("\n\n"),
+      spec.operation,
+      `Correct the invalid ${formatOperation(spec.operation)} response and return the required structured JSON only`,
       runPath,
       record,
       dependencies,
     );
-    return parser(response);
+    try {
+      const parsed = parser(turn.response);
+      reportAssistantResponse(dependencies, role, spec, parsed, turn);
+      return parsed;
+    } catch (secondError) {
+      reportInvalidAssistantResponse(dependencies, role, spec.operation, turn);
+      reportProgress(dependencies, {
+        kind: "host",
+        session_role: role,
+        operation: "parse_response",
+        status: "failed",
+        summary: progressErrorSummary(secondError),
+      });
+      throw secondError;
+    }
   }
 }
 
@@ -1136,10 +1343,12 @@ async function completeModelTurn(
   session: AuthoringSession,
   role: AgentSessionRole,
   prompt: string,
+  operation: AgentProgressOperation,
+  promptSummary: string,
   runPath: string,
   record: AgentRunRecord,
   dependencies: AgentRunnerDependencies,
-): Promise<string> {
+): Promise<CompletedModelTurn> {
   const currentTurns = record.sessions[role]?.turn_count ?? 0;
   const maximumTurns =
     role === "evidence" ? MAX_EVIDENCE_SESSION_TURNS : MAX_AUTHOR_SESSION_TURNS;
@@ -1156,10 +1365,19 @@ async function completeModelTurn(
     runPath,
     record,
     startedAt.toISOString(),
-    modelTurnStartedEvent(role, turnNumber, prompt),
+    modelTurnStartedEvent(role, operation, turnNumber, prompt),
   );
   record.updated_at = startedAt.toISOString();
   await persistRunRecord(runPath, record);
+  reportProgress(dependencies, {
+    kind: "conversation",
+    session_role: role,
+    message_role: "user",
+    operation,
+    status: "started",
+    summary: promptSummary,
+    turn_number: turnNumber,
+  });
   try {
     completion = await session.complete({ prompt });
   } catch (error) {
@@ -1178,15 +1396,27 @@ async function completeModelTurn(
     await appendRolloutEvent(runPath, record, failedAt.toISOString(), {
       kind: "model_turn_failed",
       role,
+      operation,
       turn_number: turnNumber,
       duration_ms: elapsedMilliseconds(startedAt, failedAt),
       error: safeErrorMessage(error),
     });
     record.updated_at = failedAt.toISOString();
     await persistRunRecord(runPath, record);
+    reportProgress(dependencies, {
+      kind: "conversation",
+      session_role: role,
+      message_role: "assistant",
+      operation,
+      status: "failed",
+      summary: `Model request failed: ${progressErrorSummary(error)}`,
+      turn_number: turnNumber,
+      duration_ms: elapsedMilliseconds(startedAt, failedAt),
+    });
     throw error;
   }
   const completedAt = now(dependencies);
+  const durationMs = elapsedMilliseconds(startedAt, completedAt);
   await appendRolloutEvent(
     runPath,
     record,
@@ -1194,8 +1424,9 @@ async function completeModelTurn(
     modelTurnCompletedEvent(
       record,
       role,
+      operation,
       turnNumber,
-      elapsedMilliseconds(startedAt, completedAt),
+      durationMs,
       completion,
     ),
   );
@@ -1207,7 +1438,11 @@ async function completeModelTurn(
     currentTurns + 1,
     dependencies,
   );
-  return completion.final_text;
+  return {
+    response: completion.final_text,
+    completion,
+    duration_ms: durationMs,
+  };
 }
 
 async function checkpointSession(
@@ -1377,6 +1612,97 @@ function safeErrorMessage(error: unknown): string {
   return redactModelSecrets(message);
 }
 
+function progressErrorSummary(error: unknown): string {
+  const message = safeErrorMessage(error);
+  return summarizeAgentError(
+    error instanceof PaperbotError
+      ? new PaperbotError(message, error.exit_code)
+      : new Error(message),
+  );
+}
+
+function reportProgress(
+  dependencies: AgentRunnerDependencies,
+  event: AgentProgressEvent,
+): void {
+  emitAgentProgress(dependencies.on_progress, event);
+}
+
+function reportAssistantResponse<T>(
+  dependencies: AgentRunnerDependencies,
+  role: AgentSessionRole,
+  spec: ModelTurnSpec<T>,
+  parsed: T,
+  turn: CompletedModelTurn,
+): void {
+  reportProgress(dependencies, {
+    kind: "conversation",
+    session_role: role,
+    message_role: "assistant",
+    operation: spec.operation,
+    status: "completed",
+    summary: spec.summarize_response(parsed),
+    duration_ms: turn.duration_ms,
+    response_byte_count: Buffer.byteLength(turn.response),
+    ...(turn.completion.usage === undefined
+      ? {}
+      : {
+          input_tokens: turn.completion.usage.input_tokens,
+          output_tokens: turn.completion.usage.output_tokens,
+        }),
+  });
+}
+
+function reportInvalidAssistantResponse(
+  dependencies: AgentRunnerDependencies,
+  role: AgentSessionRole,
+  operation: AgentProgressOperation,
+  turn: CompletedModelTurn,
+): void {
+  reportProgress(dependencies, {
+    kind: "conversation",
+    session_role: role,
+    message_role: "assistant",
+    operation,
+    status: "failed",
+    summary: `Returned a response that did not match the required ${formatOperation(operation)} structure`,
+    duration_ms: turn.duration_ms,
+    response_byte_count: Buffer.byteLength(turn.response),
+    ...(turn.completion.usage === undefined
+      ? {}
+      : {
+          input_tokens: turn.completion.usage.input_tokens,
+          output_tokens: turn.completion.usage.output_tokens,
+        }),
+  });
+}
+
+function summarizeEvidenceResponse(response: EvidenceResponse): string {
+  return `Returned ${response.evidence.length} evidence candidates, ${response.contradictions.length} contradictions, ${response.unknowns.length} unknowns, and ${response.questions.length} questions`;
+}
+
+function summarizeAuthoringResponse(response: AuthoringResponse): string {
+  if (response.action === "ask_questions") {
+    return `Requested ${response.questions.length} author questions`;
+  }
+  return `Submitted a draft with ${response.topics.length} topics, ${response.assumptions.length} assumptions, ${response.unresolved_questions.length} unresolved questions, and ${response.evidence_ids.length} evidence references`;
+}
+
+function sourceProgressSummary(source: AgentSource): string {
+  const releaseStatus = source.github_release_status;
+  const releaseSummary =
+    releaseStatus === undefined
+      ? "not_requested"
+      : releaseStatus.state === "captured"
+        ? `captured:${releaseStatus.release_count}`
+        : releaseStatus.state;
+  return `revision=${source.resolved_revision.slice(0, 12)}, files=${source.files.length}, releases=${releaseSummary}`;
+}
+
+function formatOperation(operation: AgentProgressOperation): string {
+  return operation.replaceAll("_", " ");
+}
+
 function remainingQuestionRounds(record: AgentRunRecord): number {
   return MAX_AUTHOR_QUESTION_ROUNDS - record.workflow.question_rounds;
 }
@@ -1462,6 +1788,12 @@ async function sealRunCheckpoint(
   );
   record.checkpoints.push(checkpoint);
   await persistRunRecord(runPath, record);
+  reportProgress(dependencies, {
+    kind: "host",
+    operation: "checkpoint",
+    status: "completed",
+    summary: `checkpoint ${checkpoint.checkpoint_number} sealed for ${reason}`,
+  });
 }
 
 function hasCurrentCheckpoint(record: AgentRunRecord): boolean {

@@ -134,6 +134,69 @@ describe("runAgentBatch", () => {
     expect(JSON.stringify(report)).not.toContain("externalSources");
   });
 
+  test("adds stable project context to concurrent progress events", async () => {
+    const workspace = await createWorkspace();
+    const inputPath = await writeManifest(workspace, {
+      schema_version: "1",
+      projects: [
+        {
+          repository_url: "https://github.com/Example/first-project.git",
+        },
+      ],
+    });
+    const progress: Array<{
+      event: Parameters<NonNullable<AgentRunOptions["on_progress"]>>[0];
+      context: {
+        project_index?: number;
+        project_count?: number;
+        repository_label: string;
+      };
+    }> = [];
+
+    await runAgentBatch(
+      {
+        input_path: inputPath,
+        output_path: join(workspace, "runs"),
+        allow_remote_model: true,
+        on_progress: (event, context) => progress.push({ event, context }),
+      },
+      {
+        run_agent: async (options) => {
+          options.on_progress?.({
+            kind: "conversation",
+            session_role: "evidence",
+            message_role: "user",
+            operation: "evidence_analysis",
+            status: "started",
+            summary: "Analyze the pinned source files",
+          });
+          return successfulRun(options.output_path);
+        },
+      },
+    );
+
+    expect(
+      progress.map(({ event }) => `${event.kind}:${event.status}`),
+    ).toEqual(["host:started", "conversation:started", "host:completed"]);
+    expect(progress.map(({ context }) => context)).toEqual([
+      {
+        project_index: 1,
+        project_count: 1,
+        repository_label: "Example/first-project",
+      },
+      {
+        project_index: 1,
+        project_count: 1,
+        repository_label: "Example/first-project",
+      },
+      {
+        project_index: 1,
+        project_count: 1,
+        repository_label: "Example/first-project",
+      },
+    ]);
+  });
+
   test("leaves omitted attribution and status for per-project GitHub inference", async () => {
     const workspace = await createWorkspace();
     const inputPath = await writeManifest(workspace, {
