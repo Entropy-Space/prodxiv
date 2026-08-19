@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { PaperbotError } from "@prodxiv/paperbot-core";
+import type { AgentProgressEvent } from "../src/agent/progress.ts";
 import { resumeAgent, runAgent } from "../src/agent/runner.ts";
 import { readSourceArtifact } from "../src/agent/source.ts";
 import type {
@@ -49,13 +50,20 @@ describe("runAgent", () => {
   test("uses one evidence session and one author session to produce validated paper artifacts", async () => {
     const outputPath = join(workspacePath, "run");
     const runtime = completeRuntime();
+    const progress: AgentProgressEvent[] = [];
 
-    const result = await runAgent(runOptions(outputPath), {
-      create_runtime: () => runtime,
-      now: () => new Date("2026-08-01T00:00:00.000Z"),
-      producer: async () => testProducer(),
-      run_id: () => RUN_ID,
-    });
+    const result = await runAgent(
+      {
+        ...runOptions(outputPath),
+        on_progress: (event) => progress.push(event),
+      },
+      {
+        create_runtime: () => runtime,
+        now: () => new Date("2026-08-01T00:00:00.000Z"),
+        producer: async () => testProducer(),
+        run_id: () => RUN_ID,
+      },
+    );
 
     expect(result).toEqual({
       run_id: "00000000-0000-4000-8000-000000000001",
@@ -126,6 +134,41 @@ describe("runAgent", () => {
     );
     expect(runtime.prompts[2]?.prompt).toContain(
       "resubmit the candidate byte-for-byte unchanged as explicit approval",
+    );
+    expect(progress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "conversation",
+          session_role: "evidence",
+          message_role: "user",
+          operation: "evidence_analysis",
+          summary: expect.stringContaining("pinned source files"),
+        }),
+        expect.objectContaining({
+          kind: "conversation",
+          session_role: "evidence",
+          message_role: "assistant",
+          operation: "evidence_analysis",
+          summary: expect.stringContaining("evidence candidates"),
+        }),
+        expect.objectContaining({
+          kind: "host",
+          session_role: "evidence",
+          operation: "validate_evidence",
+          status: "completed",
+        }),
+        expect.objectContaining({
+          kind: "conversation",
+          session_role: "author",
+          message_role: "user",
+          operation: "draft_review",
+        }),
+        expect.objectContaining({
+          kind: "host",
+          operation: "checkpoint",
+          status: "completed",
+        }),
+      ]),
     );
 
     const [paper, draft, evidenceText, runText, questions] = await Promise.all([
@@ -241,6 +284,11 @@ describe("runAgent", () => {
       "assumptions_recorded",
       "checkpoint_sealing",
     ]);
+    expect(
+      events
+        .filter((event) => event.kind === "model_turn_started")
+        .map((event) => event.operation),
+    ).toEqual(["evidence_analysis", "initial_draft", "draft_review"]);
     expect(events.at(-1)?.event_sha256).toBe(
       parsedRun.rollout.last_event_sha256,
     );

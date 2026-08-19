@@ -148,6 +148,7 @@ test("parses explicit author and status overrides", () => {
       "v1.2.3",
       "--model=deepseek-v4-flash",
       "--format=json",
+      "--quiet",
     ]),
   ).toEqual({
     command: "agent",
@@ -172,6 +173,7 @@ test("parses explicit author and status overrides", () => {
     ref: "v1.2.3",
     model: "deepseek-v4-flash",
     format: "json",
+    quiet: true,
   });
 });
 
@@ -229,6 +231,7 @@ test("parses auto mode without a feedback transport", () => {
       "--allow-remote-model",
       "--mode",
       "auto",
+      "--quiet",
     ]),
   ).not.toThrow();
   expect(
@@ -324,6 +327,7 @@ test("parses an explicitly consented agent resume", () => {
       "--allow-remote-model",
       "--format",
       "json",
+      "--quiet",
     ]),
   ).toEqual({
     command: "agent",
@@ -333,6 +337,7 @@ test("parses an explicitly consented agent resume", () => {
     allow_remote_model: true,
     model: "deepseek-v4-flash",
     format: "json",
+    quiet: true,
   });
 });
 
@@ -352,6 +357,7 @@ test("parses a consented agent batch with manifest defaults", () => {
       "--concurrency=2",
       "--allow-remote-model",
       "--format=json",
+      "--quiet",
     ]),
   ).toEqual({
     command: "agent",
@@ -365,6 +371,7 @@ test("parses a consented agent batch with manifest defaults", () => {
     model: "deepseek-v4-flash",
     concurrency: 2,
     format: "json",
+    quiet: true,
   });
 });
 
@@ -380,6 +387,7 @@ test("parses a consented daily trend selection", () => {
       "--model=deepseek-v4-flash",
       "--allow-remote-model",
       "--format=json",
+      "--quiet",
     ]),
   ).toEqual({
     command: "agent",
@@ -389,6 +397,7 @@ test("parses a consented daily trend selection", () => {
     api_url: "https://api.prodxiv.example",
     model: "deepseek-v4-flash",
     format: "json",
+    quiet: true,
   });
 });
 
@@ -524,6 +533,14 @@ test("writes only the agent result to stdout in JSON mode", async () => {
           authors: ["Research Team"],
           status: "concept",
         });
+        input.on_progress?.({
+          kind: "conversation",
+          session_role: "evidence",
+          message_role: "user",
+          operation: "evidence_analysis",
+          status: "started",
+          summary: "Analyze 16 pinned source files",
+        });
         return agentResult;
       },
     },
@@ -533,6 +550,7 @@ test("writes only the agent result to stdout in JSON mode", async () => {
   expect(receivedRepository).toBe("https://github.com/different-ai/openwork");
   expect(stdout).toEqual([JSON.stringify(agentResult, null, 2)]);
   expect(stderr).toEqual([
+    "paperbot: [different-ai/openwork] [evidence] user: Analyze 16 pinned source files",
     "paperbot: agent run completed with 0 validation diagnostics",
   ]);
 });
@@ -636,6 +654,7 @@ test("dispatches auto mode without an author answer collector", async () => {
       "--allow-remote-model",
       "--mode",
       "auto",
+      "--quiet",
     ],
     {
       stdout: () => {},
@@ -649,6 +668,7 @@ test("dispatches auto mode without an author answer collector", async () => {
         dispatched = true;
         expect(input).toMatchObject({ mode: "auto", feedback: "none" });
         expect(input.collect_author_answers).toBeUndefined();
+        expect(input.on_progress).toBeUndefined();
         return { ...agentResult, mode: "auto", feedback: "none" };
       },
     },
@@ -750,11 +770,23 @@ test("writes only the selection artifact to stdout in JSON mode", async () => {
     {
       run_trend_selection: async (input) => {
         receivedOutputPath = input.output_path;
-        expect(input).toEqual({
+        const { on_progress, ...request } = input;
+        expect(request).toEqual({
           output_path: "runs/trending",
           allow_remote_model: true,
           snapshot_path: "snapshots/2026-08-03.json",
           model: "deepseek-v4-flash",
+        });
+        on_progress?.({
+          kind: "conversation",
+          session_role: "trend_selection",
+          message_role: "assistant",
+          operation: "trend_selection",
+          status: "completed",
+          summary: "Selected 10 unique repositories",
+          duration_ms: 42_300,
+          input_tokens: 1_200,
+          output_tokens: 800,
         });
         return trendSelectionResult;
       },
@@ -767,6 +799,7 @@ test("writes only the selection artifact to stdout in JSON mode", async () => {
     JSON.stringify(trendSelectionResult.selection, null, 2),
   ]);
   expect(stderr).toEqual([
+    "paperbot: [trending] [trend_selection] assistant: Selected 10 unique repositories (42.3s, tokens=1200/800)",
     "paperbot: selected 10 repositories in /tmp/paperbot-trending/selection.json",
   ]);
 });
@@ -800,6 +833,21 @@ test("dispatches an agent batch and uses a nonzero result for failed projects", 
     {
       run_agent_batch: async (input) => {
         receivedConcurrency = input.concurrency;
+        input.on_progress?.(
+          {
+            kind: "host",
+            session_role: "evidence",
+            operation: "validate_evidence",
+            status: "retrying",
+            summary:
+              "2 invalid ranges; requesting correction 1/2\nprivate detail omitted",
+          },
+          {
+            project_index: 1,
+            project_count: 2,
+            repository_label: "owner/repo",
+          },
+        );
         return batchResult;
       },
     },
@@ -809,6 +857,7 @@ test("dispatches an agent batch and uses a nonzero result for failed projects", 
   expect(receivedConcurrency).toBe(2);
   expect(stdout).toEqual([JSON.stringify(batchResult, null, 2)]);
   expect(stderr).toEqual([
+    "paperbot: [1/2 owner/repo] [evidence] host(validate_evidence): retrying — 2 invalid ranges; requesting correction 1/2 private detail omitted",
     "paperbot: agent batch completed with 2 succeeded and 0 failed projects",
   ]);
 

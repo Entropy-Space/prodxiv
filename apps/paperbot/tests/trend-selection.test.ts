@@ -9,6 +9,7 @@ import type {
   GitHubTrendingSnapshot,
 } from "@prodxiv/api-client";
 import { ExitCode, PaperbotError } from "@prodxiv/paperbot-core";
+import type { AgentProgressEvent } from "../src/agent/progress.ts";
 import {
   parseTrendSelectionResponse,
   runTrendSelection,
@@ -179,12 +180,14 @@ describe("runTrendSelection", () => {
       selectionResponse(snapshot.entries.slice(0, 9)),
       selectionResponse(snapshot.entries.slice(1, 11)),
     ]);
+    const progress: AgentProgressEvent[] = [];
 
     const result = await runTrendSelection(
       {
         output_path: outputPath,
         allow_remote_model: true,
         api_url: archiveApiUrl,
+        on_progress: (event) => progress.push(event),
       },
       {
         fetch: archiveFetch(snapshot),
@@ -208,6 +211,24 @@ describe("runTrendSelection", () => {
         (repository) => repository.repository_full_name,
       ),
     ).toEqual(snapshot.entries.slice(1, 11).map(repositoryName));
+    expect(
+      progress.map((event) =>
+        event.kind === "conversation"
+          ? `${event.message_role}:${event.status}`
+          : `host(${event.operation}):${event.status}`,
+      ),
+    ).toEqual([
+      "user:started",
+      "assistant:failed",
+      "host(validate_selection):retrying",
+      "user:started",
+      "assistant:completed",
+      "host(validate_selection):completed",
+    ]);
+    expect(progress[0]).toMatchObject({
+      session_role: "trend_selection",
+      summary: expect.stringContaining("12 normalized candidates"),
+    });
   });
 
   test("fails closed when the correction still selects an unknown candidate", async () => {

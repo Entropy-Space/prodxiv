@@ -6,6 +6,11 @@ import { normalizeModelName } from "./input.ts";
 import { redactModelSecrets } from "./model-config.ts";
 import { PiAgentRuntime } from "./pi.ts";
 import {
+  emitAgentProgress,
+  summarizeAgentError,
+  type AgentProgressReporter,
+} from "./progress.ts";
+import {
   captureSessionArtifact,
   type CapturedSessionArtifact,
 } from "./session-store.ts";
@@ -41,6 +46,7 @@ export interface TrendSelectionOptions extends TrendSnapshotInputOptions {
   output_path: string;
   allow_remote_model: boolean;
   model?: string;
+  on_progress?: AgentProgressReporter;
 }
 
 export interface TrendSelectionRuntime {
@@ -161,23 +167,55 @@ export async function runTrendSelection(
       run_path: outputPath,
     });
     const completions: ModelCompletion[] = [];
-    let completion = await session.complete({
-      prompt: createTrendSelectionPrompt(snapshot, candidates),
-    });
+    let turn = await completeTrendSelectionTurn(
+      session,
+      createTrendSelectionPrompt(snapshot, candidates),
+      `Rank exactly ${TREND_SELECTION_COUNT} repositories from ${candidates.length} normalized candidates across ${snapshot.scopes.length} scopes`,
+      1,
+      options.on_progress,
+    );
+    let completion = turn.completion;
     completions.push(completion);
 
     let parsed: ParsedTrendSelection[];
     try {
       parsed = parseTrendSelectionResponse(completion.final_text, candidates);
+      reportTrendSelectionResponse(options.on_progress, parsed, turn);
     } catch (error) {
       if (!(error instanceof PaperbotError)) {
         throw error;
       }
-      completion = await session.complete({
-        prompt: createTrendSelectionCorrectionPrompt(error.message),
+      reportInvalidTrendSelectionResponse(options.on_progress, turn);
+      emitAgentProgress(options.on_progress, {
+        kind: "host",
+        session_role: "trend_selection",
+        operation: "validate_selection",
+        status: "retrying",
+        summary: `${progressErrorSummary(error)}; requesting one structured-response correction`,
       });
+      turn = await completeTrendSelectionTurn(
+        session,
+        createTrendSelectionCorrectionPrompt(error.message),
+        "Correct the invalid repository selection and return the required structured JSON only",
+        2,
+        options.on_progress,
+      );
+      completion = turn.completion;
       completions.push(completion);
-      parsed = parseTrendSelectionResponse(completion.final_text, candidates);
+      try {
+        parsed = parseTrendSelectionResponse(completion.final_text, candidates);
+        reportTrendSelectionResponse(options.on_progress, parsed, turn);
+      } catch (secondError) {
+        reportInvalidTrendSelectionResponse(options.on_progress, turn);
+        emitAgentProgress(options.on_progress, {
+          kind: "host",
+          session_role: "trend_selection",
+          operation: "validate_selection",
+          status: "failed",
+          summary: progressErrorSummary(secondError),
+        });
+        throw secondError;
+      }
     }
 
     const sessionArtifact = await captureSessionArtifact(
@@ -199,6 +237,13 @@ export async function runTrendSelection(
       "selection.json",
       selection,
     );
+    emitAgentProgress(options.on_progress, {
+      kind: "host",
+      session_role: "trend_selection",
+      operation: "validate_selection",
+      status: "completed",
+      summary: `${selection.selected_repositories.length} repositories passed deterministic selection validation`,
+    });
     return {
       output_path: outputPath,
       snapshot_path: snapshotPath,
@@ -206,6 +251,13 @@ export async function runTrendSelection(
       selection,
     };
   } catch (error) {
+    emitAgentProgress(options.on_progress, {
+      kind: "host",
+      session_role: "trend_selection",
+      operation: "run",
+      status: "failed",
+      summary: progressErrorSummary(error),
+    });
     if (error instanceof PaperbotError) {
       throw error;
     }
@@ -216,6 +268,99 @@ export async function runTrendSelection(
   } finally {
     await session?.dispose();
   }
+}
+
+interface CompletedTrendSelectionTurn {
+  completion: ModelCompletion;
+  duration_ms: number;
+  turn_number: number;
+}
+
+async function completeTrendSelectionTurn(
+  session: AuthoringSession,
+  prompt: string,
+  promptSummary: string,
+  turnNumber: number,
+  reporter: AgentProgressReporter | undefined,
+): Promise<CompletedTrendSelectionTurn> {
+  emitAgentProgress(reporter, {
+    kind: "conversation",
+    session_role: "trend_selection",
+    message_role: "user",
+    operation: "trend_selection",
+    status: "started",
+    summary: promptSummary,
+    turn_number: turnNumber,
+  });
+  const startedAt = performance.now();
+  try {
+    const completion = await session.complete({ prompt });
+    return {
+      completion,
+      duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
+      turn_number: turnNumber,
+    };
+  } catch (error) {
+    emitAgentProgress(reporter, {
+      kind: "conversation",
+      session_role: "trend_selection",
+      message_role: "assistant",
+      operation: "trend_selection",
+      status: "failed",
+      summary: `Model request failed: ${progressErrorSummary(error)}`,
+      turn_number: turnNumber,
+      duration_ms: Math.max(0, Math.round(performance.now() - startedAt)),
+    });
+    throw error;
+  }
+}
+
+function reportTrendSelectionResponse(
+  reporter: AgentProgressReporter | undefined,
+  parsed: ParsedTrendSelection[],
+  turn: CompletedTrendSelectionTurn,
+): void {
+  emitAgentProgress(reporter, {
+    kind: "conversation",
+    session_role: "trend_selection",
+    message_role: "assistant",
+    operation: "trend_selection",
+    status: "completed",
+    summary: `Selected ${parsed.length} unique repositories for deeper paper research`,
+    turn_number: turn.turn_number,
+    duration_ms: turn.duration_ms,
+    response_byte_count: Buffer.byteLength(turn.completion.final_text),
+    ...(turn.completion.usage === undefined
+      ? {}
+      : {
+          input_tokens: turn.completion.usage.input_tokens,
+          output_tokens: turn.completion.usage.output_tokens,
+        }),
+  });
+}
+
+function reportInvalidTrendSelectionResponse(
+  reporter: AgentProgressReporter | undefined,
+  turn: CompletedTrendSelectionTurn,
+): void {
+  emitAgentProgress(reporter, {
+    kind: "conversation",
+    session_role: "trend_selection",
+    message_role: "assistant",
+    operation: "trend_selection",
+    status: "failed",
+    summary:
+      "Returned a response that did not match the required trend selection structure",
+    turn_number: turn.turn_number,
+    duration_ms: turn.duration_ms,
+    response_byte_count: Buffer.byteLength(turn.completion.final_text),
+    ...(turn.completion.usage === undefined
+      ? {}
+      : {
+          input_tokens: turn.completion.usage.input_tokens,
+          output_tokens: turn.completion.usage.output_tokens,
+        }),
+  });
 }
 
 export function createTrendSelectionPrompt(
@@ -450,6 +595,15 @@ function now(dependencies: TrendSelectionDependencies): Date {
 
 function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function progressErrorSummary(error: unknown): string {
+  const message = redactModelSecrets(safeMessage(error));
+  return summarizeAgentError(
+    error instanceof PaperbotError
+      ? new PaperbotError(message, error.exit_code)
+      : new Error(message),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

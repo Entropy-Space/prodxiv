@@ -247,6 +247,28 @@ runs and remain safely resumable. `agent run` defaults to interactive async;
 author interview is desired instead. Batch manifests remain schema version 1;
 batch reports are schema version 2 and record the requested mode.
 
+Agent commands write a compact live transcript to stderr while preserving
+stdout for their existing text or versioned JSON result. Concurrent batches
+prefix every line with the project index, total, and canonical public
+repository name. Model inputs and parsed outputs are represented by
+deterministic summaries rather than excerpts:
+
+```text
+paperbot: [1/3 owner/repo] [evidence] user: Analyze 16 pinned source files and build a selective evidence ledger
+paperbot: [1/3 owner/repo] [evidence] assistant: Returned 13 evidence candidates, 2 contradictions, 4 unknowns, and 3 questions (41.2s, tokens=42150/2840, response=8.0KiB)
+paperbot: [1/3 owner/repo] [evidence] host(validate_evidence): retrying — Deterministic validation failed; requesting correction 1/1
+```
+
+`user` identifies a host-generated prompt summary, `assistant` identifies a
+summary derived from a parsed structured response, and `host(operation)`
+identifies deterministic orchestration such as source acquisition, validation,
+or checkpoint sealing. `tool(name)` is reserved for a future genuine
+model-requested tool call; the current sessions have no tools. Progress never
+prints prompts, replies, evidence excerpts, draft prose, author answers, or raw
+provider response bodies. Provider failures are reduced to a category and safe
+status code. Pass `--quiet` to suppress this live transcript. `--format json`
+continues to emit exactly one machine-readable result on stdout.
+
 For a public GitHub source, Paperbot uses the repository owner as the default
 organization author, represented by a namespaced ID such as `github:owner`.
 It never inspects commits, contributors, or commit email addresses to derive
@@ -309,9 +331,10 @@ The agent writes a new private run directory with:
   draft/paper SHA-256 values. A run resumed by a different build retains the
   prior producer in `producer_history` and uses the new build for later events;
 - `events.jsonl` — a Paperbot-owned, hash-chained rollout log with workflow-state snapshots,
-  prompt and response digests, durations, provider/model observations, token
-  usage, failures, and checkpoint boundaries. Full private prompts and replies
-  remain in the Pi session artifacts;
+  semantic model operations, prompt and response digests, durations,
+  provider/model observations, token usage, failures, and checkpoint
+  boundaries. Full private prompts and replies remain in the Pi session
+  artifacts;
 - `source.json`, `scan.json`, and `source/` — the bounded private source
   snapshot, original scan inventory, repository-owner context, and any bounded
   GitHub release metadata and notes used for status inference;

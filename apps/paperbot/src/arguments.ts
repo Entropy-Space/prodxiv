@@ -106,6 +106,7 @@ export interface AgentRunArguments {
   ref?: string;
   model?: string;
   format: OutputFormat;
+  quiet?: true;
 }
 
 export interface AgentResumeArguments {
@@ -116,6 +117,7 @@ export interface AgentResumeArguments {
   allow_remote_model: boolean;
   model?: string;
   format: OutputFormat;
+  quiet?: true;
 }
 
 export interface AgentBatchArguments {
@@ -130,6 +132,7 @@ export interface AgentBatchArguments {
   model?: string;
   concurrency?: number;
   format: OutputFormat;
+  quiet?: true;
 }
 
 export interface AgentSelectTrendingArguments {
@@ -141,6 +144,7 @@ export interface AgentSelectTrendingArguments {
   snapshot_path?: string;
   model?: string;
   format: OutputFormat;
+  quiet?: true;
 }
 
 export type AuthArguments =
@@ -244,6 +248,7 @@ function parseAgentRunArguments(
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let quiet = false;
   let mode: AgentRunMode = "interactive";
   let feedback: AgentFeedbackMode | undefined;
   const authors: string[] = [];
@@ -259,6 +264,10 @@ function parseAgentRunArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--quiet") {
+      quiet = true;
       continue;
     }
     if (argument === "--mode") {
@@ -380,6 +389,7 @@ function parseAgentRunArguments(
     ...(ref === undefined ? {} : { ref }),
     ...(model === undefined ? {} : { model }),
     format,
+    ...(quiet ? { quiet: true as const } : {}),
   };
 }
 
@@ -391,6 +401,7 @@ function parseAgentResumeArguments(
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let quiet = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -402,6 +413,10 @@ function parseAgentResumeArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--quiet") {
+      quiet = true;
       continue;
     }
     if (argument === "--format") {
@@ -459,6 +474,7 @@ function parseAgentResumeArguments(
     allow_remote_model,
     ...(model === undefined ? {} : { model }),
     format,
+    ...(quiet ? { quiet: true as const } : {}),
   };
 }
 
@@ -472,6 +488,7 @@ function parseAgentBatchArguments(
   let concurrency: number | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let quiet = false;
   let mode: AgentRunMode = "auto";
   const authors: string[] = [];
 
@@ -485,6 +502,10 @@ function parseAgentBatchArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--quiet") {
+      quiet = true;
       continue;
     }
     if (argument === "--mode") {
@@ -589,6 +610,7 @@ function parseAgentBatchArguments(
     ...(model === undefined ? {} : { model }),
     ...(concurrency === undefined ? {} : { concurrency }),
     format,
+    ...(quiet ? { quiet: true as const } : {}),
   };
 }
 
@@ -601,6 +623,7 @@ function parseAgentSelectTrendingArguments(
   let model: string | undefined;
   let format: OutputFormat = "text";
   let allow_remote_model = false;
+  let quiet = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -612,6 +635,10 @@ function parseAgentSelectTrendingArguments(
     }
     if (argument === "--allow-remote-model") {
       allow_remote_model = true;
+      continue;
+    }
+    if (argument === "--quiet") {
+      quiet = true;
       continue;
     }
     if (argument === "--output") {
@@ -687,6 +714,7 @@ function parseAgentSelectTrendingArguments(
     ...(snapshot_path === undefined ? {} : { snapshot_path }),
     ...(model === undefined ? {} : { model }),
     format,
+    ...(quiet ? { quiet: true as const } : {}),
   };
 }
 
