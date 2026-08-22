@@ -1696,7 +1696,18 @@ function sourceProgressSummary(source: AgentSource): string {
       : releaseStatus.state === "captured"
         ? `captured:${releaseStatus.release_count}`
         : releaseStatus.state;
-  return `revision=${source.resolved_revision.slice(0, 12)}, files=${source.files.length}, releases=${releaseSummary}`;
+  const selection = source.github_source_selection;
+  const skippedEntries =
+    selection === undefined
+      ? []
+      : (["symlink", "submodule"] as const)
+          .filter((reason) => selection.skipped_file_counts[reason] > 0)
+          .map(
+            (reason) => `${reason}:${selection.skipped_file_counts[reason]}`,
+          );
+  const skippedSummary =
+    skippedEntries.length === 0 ? "" : `, skipped=${skippedEntries.join(",")}`;
+  return `revision=${source.resolved_revision.slice(0, 12)}, files=${source.files.length}, releases=${releaseSummary}${skippedSummary}`;
 }
 
 function formatOperation(operation: AgentProgressOperation): string {

@@ -1,4 +1,5 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
+import type { GitHubSourceSelection } from "@prodxiv/paperbot-source";
 
 export const AGENT_RUN_SCHEMA_VERSION = "5";
 
@@ -115,6 +116,7 @@ export interface AgentSource {
   is_dirty: boolean;
   retrieved_at: string;
   homepage_url?: string;
+  github_source_selection?: GitHubSourceSelection;
   github_releases?: AgentGitHubReleaseSnapshot;
   github_release_status?: AgentGitHubReleaseStatus;
   files: AgentSourceFile[];

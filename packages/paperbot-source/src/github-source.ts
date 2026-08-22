@@ -138,11 +138,18 @@ export interface GitHubRepositorySnapshot {
   resolved_ref: string;
   resolved_revision: string;
   homepage_url?: string;
+  tree_file_count: number;
+  skipped_file_counts: Record<GitHubSourceSkipReason, number>;
   files: GitHubSourceTreeFile[];
 }
 
 export type GitHubSourceSkipReason =
-  "excluded" | "unsupported" | "oversized" | "selection_limit";
+  | "excluded"
+  | "unsupported"
+  | "oversized"
+  | "symlink"
+  | "submodule"
+  | "selection_limit";
 
 export interface GitHubSourceSelection {
   selected_paths: string[];
@@ -208,8 +215,6 @@ export type GitHubSourceErrorCode =
   | "invalid_github_response"
   | "truncated_tree"
   | "unsafe_tree_path"
-  | "symlink_not_supported"
-  | "submodule_not_supported"
   | "unsupported_tree_entry"
   | "tree_too_large"
   | "invalid_selection"
@@ -287,7 +292,7 @@ export async function inspectGitHubRepository(
     resolvedRef,
     limits.max_commit_bytes,
   );
-  const files = await loadTree(fetch, repository, revision, limits);
+  const tree = await loadTree(fetch, repository, revision, limits);
 
   return {
     canonical_url: repository.canonical_url,
@@ -297,7 +302,9 @@ export async function inspectGitHubRepository(
     resolved_ref: resolvedRef,
     resolved_revision: revision,
     ...homepageFromMetadata(metadata),
-    files,
+    tree_file_count: tree.tree_file_count,
+    skipped_file_counts: tree.skipped_file_counts,
+    files: tree.files,
   };
 }
 
@@ -312,7 +319,7 @@ export function selectDefaultGitHubSourcePaths(
   preferred_paths: readonly string[] = [],
 ): GitHubSourceSelection {
   const resolvedLimits = resolveLimits(limits);
-  const skipped_file_counts = emptySkipCounts();
+  const skipped_file_counts = { ...snapshot.skipped_file_counts };
   const eligible = snapshot.files.filter((file) => {
     if (file.file_type === undefined) {
       skipped_file_counts.unsupported += 1;
@@ -347,7 +354,7 @@ export function selectDefaultGitHubSourcePaths(
 
   return {
     selected_paths: selected.map((file) => file.path),
-    tree_file_count: snapshot.files.length,
+    tree_file_count: snapshot.tree_file_count,
     skipped_file_counts,
   };
 }
@@ -904,7 +911,11 @@ async function loadTree(
   repository: CanonicalGitHubRepository,
   revision: string,
   limits: GitHubSourceLimits,
-): Promise<GitHubSourceTreeFile[]> {
+): Promise<{
+  files: GitHubSourceTreeFile[];
+  tree_file_count: number;
+  skipped_file_counts: Record<GitHubSourceSkipReason, number>;
+}> {
   const value = await readJson(
     fetch,
     `${repositoryApiUrl(repository)}/git/trees/${revision}?recursive=1`,
@@ -936,6 +947,8 @@ async function loadTree(
 
   const paths = new Set<string>();
   const files: GitHubSourceTreeFile[] = [];
+  const skipped_file_counts = emptySkipCounts();
+  let treeFileCount = 0;
   for (const entry of value.tree) {
     const parsed = parseTreeEntry(entry);
     if (paths.has(parsed.path)) {
@@ -945,6 +958,9 @@ async function loadTree(
       );
     }
     paths.add(parsed.path);
+    if (parsed.kind !== "directory") {
+      treeFileCount += 1;
+    }
     if (parsed.kind === "file") {
       const fileType = classifySourcePath(parsed.path);
       files.push({
@@ -955,9 +971,15 @@ async function loadTree(
           : { byte_count: parsed.byte_count }),
         ...(fileType === undefined ? {} : { file_type: fileType }),
       });
+    } else if (parsed.kind === "skipped") {
+      skipped_file_counts[parsed.reason] += 1;
     }
   }
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  return {
+    files: files.sort((left, right) => left.path.localeCompare(right.path)),
+    tree_file_count: treeFileCount,
+    skipped_file_counts,
+  };
 }
 
 type ParsedTreeEntry =
@@ -970,6 +992,11 @@ type ParsedTreeEntry =
       path: string;
       blob_sha: string;
       byte_count?: number;
+    }
+  | {
+      kind: "skipped";
+      path: string;
+      reason: "symlink" | "submodule";
     };
 
 function parseTreeEntry(value: unknown): ParsedTreeEntry {
@@ -990,16 +1017,16 @@ function parseTreeEntry(value: unknown): ParsedTreeEntry {
     );
   }
   if (value.type === "commit" || value.mode === "160000") {
-    throw new GitHubSourceError(
-      "submodule_not_supported",
-      `GitHub repository contains a submodule: ${value.path}`,
-    );
+    if (value.type !== "commit" || value.mode !== "160000") {
+      throw new GitHubSourceError(
+        "unsupported_tree_entry",
+        `GitHub repository contains an unsupported tree entry: ${value.path}`,
+      );
+    }
+    return { kind: "skipped", path: value.path, reason: "submodule" };
   }
   if (value.type === "blob" && value.mode === "120000") {
-    throw new GitHubSourceError(
-      "symlink_not_supported",
-      `GitHub repository contains a symbolic link: ${value.path}`,
-    );
+    return { kind: "skipped", path: value.path, reason: "symlink" };
   }
   if (value.type === "tree") {
     if (value.mode !== "040000" && value.mode !== "40000") {
@@ -1118,8 +1145,8 @@ function explicitSelection(
 
   return {
     selected_paths,
-    tree_file_count: snapshot.files.length,
-    skipped_file_counts: emptySkipCounts(),
+    tree_file_count: snapshot.tree_file_count,
+    skipped_file_counts: { ...snapshot.skipped_file_counts },
   };
 }
 
@@ -1182,6 +1209,8 @@ function emptySkipCounts(): Record<GitHubSourceSkipReason, number> {
     excluded: 0,
     unsupported: 0,
     oversized: 0,
+    symlink: 0,
+    submodule: 0,
     selection_limit: 0,
   };
 }

@@ -13,6 +13,7 @@ import {
   scanRepository,
   type GitHubReleaseSnapshot,
   type GitHubSourceResult,
+  type GitHubSourceSelection,
 } from "@prodxiv/paperbot-source";
 import {
   artifactPath,
@@ -159,6 +160,7 @@ export function sourceFromGitHubResult(
     ...(result.homepage_url === undefined
       ? {}
       : { homepage_url: result.homepage_url }),
+    github_source_selection: result.selection,
     ...(releaseSnapshot === undefined
       ? {}
       : {
@@ -212,6 +214,9 @@ export async function writeSourceArtifacts(
     ...(source.homepage_url === undefined
       ? {}
       : { homepage_url: source.homepage_url }),
+    ...(source.github_source_selection === undefined
+      ? {}
+      : { github_source_selection: source.github_source_selection }),
     ...(source.github_releases === undefined
       ? {}
       : { github_releases: source.github_releases }),
@@ -287,6 +292,8 @@ export async function readSourceArtifact(
       typeof rawSource.requested_ref !== "string") ||
     (rawSource.homepage_url !== undefined &&
       typeof rawSource.homepage_url !== "string") ||
+    (rawSource.github_source_selection !== undefined &&
+      !isRecord(rawSource.github_source_selection)) ||
     (rawSource.github_releases !== undefined &&
       !isRecord(rawSource.github_releases)) ||
     (rawSource.github_release_status !== undefined &&
@@ -337,6 +344,13 @@ export async function readSourceArtifact(
           rawSource.github_release_status,
           securedRunPath,
         );
+  const githubSourceSelection =
+    rawSource.github_source_selection === undefined
+      ? undefined
+      : readStoredGitHubSourceSelection(
+          rawSource.github_source_selection,
+          securedRunPath,
+        );
   const source: AgentSource = {
     kind,
     ...(canonicalUrl === undefined ? {} : { canonical_url: canonicalUrl }),
@@ -361,6 +375,9 @@ export async function readSourceArtifact(
     ...(githubReleases === undefined
       ? {}
       : { github_releases: githubReleases }),
+    ...(githubSourceSelection === undefined
+      ? {}
+      : { github_source_selection: githubSourceSelection }),
     ...(githubReleaseStatus === undefined
       ? {}
       : { github_release_status: githubReleaseStatus }),
@@ -819,6 +836,72 @@ function readStoredTimestamp(value: string, runPath: string): string {
   return date.toISOString();
 }
 
+function readStoredGitHubSourceSelection(
+  value: Record<string, unknown>,
+  runPath: string,
+): GitHubSourceSelection {
+  const reasons = [
+    "excluded",
+    "unsupported",
+    "oversized",
+    "symlink",
+    "submodule",
+    "selection_limit",
+  ] as const;
+  const skippedCounts = value.skipped_file_counts;
+  if (
+    !Number.isSafeInteger(value.tree_file_count) ||
+    (value.tree_file_count as number) < 1 ||
+    !Array.isArray(value.selected_paths) ||
+    value.selected_paths.length < 1 ||
+    value.selected_paths.length > MAX_AGENT_SOURCE_FILES ||
+    !isRecord(skippedCounts)
+  ) {
+    throw invalidSourceArtifact(runPath, "invalid github_source_selection");
+  }
+  const selectedPaths = value.selected_paths;
+  if (
+    !selectedPaths.every(
+      (path): path is string =>
+        typeof path === "string" && isSafeRelativePath(path),
+    ) ||
+    new Set(selectedPaths).size !== selectedPaths.length ||
+    selectedPaths.length > (value.tree_file_count as number)
+  ) {
+    throw invalidSourceArtifact(runPath, "invalid github source paths");
+  }
+  const skippedFileCounts = Object.fromEntries(
+    reasons.map((reason) => {
+      const count = skippedCounts[reason];
+      if (!Number.isSafeInteger(count) || (count as number) < 0) {
+        throw invalidSourceArtifact(
+          runPath,
+          "invalid github source skip counts",
+        );
+      }
+      return [reason, count as number];
+    }),
+  ) as Record<(typeof reasons)[number], number>;
+  const skippedFileCount = Object.values(skippedFileCounts).reduce(
+    (total, count) => total + count,
+    0,
+  );
+  if (
+    selectedPaths.length + skippedFileCount >
+    (value.tree_file_count as number)
+  ) {
+    throw invalidSourceArtifact(
+      runPath,
+      "github source counts exceed the repository tree",
+    );
+  }
+  return {
+    tree_file_count: value.tree_file_count as number,
+    selected_paths: selectedPaths,
+    skipped_file_counts: skippedFileCounts,
+  };
+}
+
 function validateRestoredSource(source: AgentSource, runPath: string): void {
   if (
     source.files.length === 0 ||
@@ -836,7 +919,8 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
         !isCanonicalGitHubSourceUrl(source.canonical_url))) ||
     (source.kind === "local" &&
       (source.github_releases !== undefined ||
-        source.github_release_status !== undefined))
+        source.github_release_status !== undefined ||
+        source.github_source_selection !== undefined))
   ) {
     throw invalidSourceArtifact(
       runPath,
@@ -869,6 +953,18 @@ function validateRestoredSource(source: AgentSource, runPath: string): void {
     }
     totalBytes += file.byte_count;
     paths.add(file.path);
+  }
+  const githubSourceSelection = source.github_source_selection;
+  if (
+    githubSourceSelection !== undefined &&
+    source.files.some(
+      (file) => !githubSourceSelection.selected_paths.includes(file.path),
+    )
+  ) {
+    throw invalidSourceArtifact(
+      runPath,
+      "GitHub source selection does not contain every retained file",
+    );
   }
   if (totalBytes > MAX_AGENT_TOTAL_BYTES) {
     throw invalidSourceArtifact(

@@ -84,6 +84,8 @@ jobs:
             evaluation-manifest.json
 
       - name: Generate private evaluation drafts
+        id: generate
+        continue-on-error: true
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
@@ -95,7 +97,9 @@ jobs:
             --concurrency 2 \
             --format json > evaluation-batch-result.json
 
-      - name: Submit generated papers as private drafts
+      - name: Submit successful papers as private drafts
+        id: submit
+        continue-on-error: true
         env:
           PRODXIV_API_URL: ${{ vars.PRODXIV_API_URL }}
         run: |
@@ -149,8 +153,20 @@ jobs:
             done
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Fail after preserving a promotion error
-        if: always() && steps.promote.outcome == 'failure'
+      - name: Fail after preserving daily draft errors
+        if: always()
         run: |
-          echo "::error::One or more eligible drafts could not be published; see the promotion report."
-          exit 1
+          failed=0
+          if [ "${{ steps.promote.outcome }}" = "failure" ]; then
+            echo "::error::One or more eligible drafts could not be published; see the promotion report."
+            failed=1
+          fi
+          if [ "${{ steps.generate.outcome }}" = "failure" ]; then
+            echo "::error::Paperbot did not generate every requested draft; successful runs continued to submission."
+            failed=1
+          fi
+          if [ "${{ steps.submit.outcome }}" = "failure" ]; then
+            echo "::error::The draft submission target was not met; see the submission report."
+            failed=1
+          fi
+          exit "${failed}"

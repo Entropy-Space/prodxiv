@@ -299,9 +299,12 @@ reads Paperbot publishing credentials and has no publication capability.
 For a remote source, Paperbot accepts only
 `https://github.com/<owner>/<repo>` (optionally ending in `.git`). It resolves
 the requested or default ref to an exact commit SHA through GitHub, rejects
-private repositories, symlinks, submodules, unsafe paths, truncated trees, and
-oversized content, then verifies each raw file against its Git blob SHA before
-reading a small SHA-pinned UTF-8 source bundle. The default sixteen-file
+private repositories, unsafe paths, malformed or truncated trees, and
+oversized content. Well-formed Git symlinks and submodules are counted and
+skipped without being followed or fetched. Their counts remain in the private
+source-selection artifact. Paperbot then verifies each selected raw file
+against its Git blob SHA before reading a small SHA-pinned UTF-8 source bundle.
+The default sixteen-file
 selection recognizes supported implementation languages, including Zig, and
 reserves deterministic coverage for architecture or design documentation,
 core implementation, public interfaces, verification, performance, and
@@ -520,7 +523,11 @@ question rather than fabricated evidence.
 The run has two ordered remote-write phases. First, it publishes drafts whose
 exact current revisions were approved by an author and atomically approves and
 publishes prior `pending_review` drafts that remain bot-owned. Then it submits
-the three newly generated papers as private, bot-owned `pending_review` drafts.
+every successfully generated paper as a private, bot-owned `pending_review`
+draft. Three remains the daily target, but one failed repository no longer
+blocks the other successful drafts from reaching the review queue. An
+incomplete generation or submission still makes the workflow fail after its
+reports and private artifacts have been preserved.
 Draft creation and publication use stable idempotency keys, so retrying a
 partially completed workflow does not create duplicate papers. The Paperbot
 model and drafting sessions never receive an API token and cannot submit,
