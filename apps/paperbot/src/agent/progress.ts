@@ -105,6 +105,13 @@ export function summarizeAgentError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const httpStatus = extractHttpStatus(message);
   if (error instanceof PaperbotError) {
+    const githubSourceSummary = summarizeGitHubSourceFailure(
+      message,
+      httpStatus,
+    );
+    if (githubSourceSummary !== undefined) {
+      return githubSourceSummary;
+    }
     if (error.exit_code === ExitCode.validation) {
       return "Deterministic validation failed";
     }
@@ -136,6 +143,53 @@ export function summarizeAgentError(error: unknown): string {
     }
   }
   return "Unexpected agent failure";
+}
+
+function summarizeGitHubSourceFailure(
+  message: string,
+  httpStatus: string | undefined,
+): string | undefined {
+  const code = message.match(/^GitHub source ([a-z_]+):/)?.[1];
+  switch (code) {
+    case "repository_not_public":
+      return "GitHub repository is not public";
+    case "truncated_tree":
+      return "GitHub repository tree was truncated";
+    case "unsafe_tree_path":
+      return "GitHub repository tree failed path safety validation";
+    case "unsupported_tree_entry":
+      return "GitHub repository contains an unsupported tree entry";
+    case "tree_too_large":
+      return "GitHub repository tree exceeded the entry limit";
+    case "invalid_selection":
+      return "GitHub source selection was invalid";
+    case "no_selectable_files":
+      return "GitHub repository contained no selectable source files";
+    case "content_limit_exceeded":
+      return "GitHub source content exceeded its size limit";
+    case "non_text_content":
+      return "GitHub selected source was not valid text";
+    case "github_response_failed":
+      return requestFailureSummary(
+        "GitHub source request failed",
+        message,
+        httpStatus,
+      );
+    case "invalid_github_response":
+      return "GitHub returned an invalid source response";
+    case "invalid_repository_url":
+      return "GitHub repository URL was invalid";
+    case "invalid_ref":
+      return "GitHub repository ref was invalid";
+    case "network_request_failed":
+      return requestFailureSummary(
+        "GitHub source network request failed",
+        message,
+        httpStatus,
+      );
+    default:
+      return undefined;
+  }
 }
 
 function conversationMetrics(

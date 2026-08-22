@@ -75,7 +75,7 @@ test("publishes approved drafts and auto-publishes pending bot drafts", async ()
   expect(report.failed).toEqual([]);
 });
 
-test("submits three papers only after verifying their final ZIPs", async () => {
+test("submits complete batches only after verifying their final ZIPs", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "paperbot-draft-sync-"));
   const checkpoints = join(workspace, "checkpoints");
   await mkdir(checkpoints);
@@ -151,6 +151,13 @@ test("submits three papers only after verifying their final ZIPs", async () => {
   });
 
   expect(report.failed).toEqual([]);
+  expect(report).toMatchObject({
+    schema_version: "2",
+    expected_count: 3,
+    successful_run_count: 3,
+    shortfall_count: 0,
+    batch_failed: [],
+  });
   expect(report.submitted).toHaveLength(3);
   expect(report.rotated).toHaveLength(3);
   expect(pendingDrafts).toHaveLength(5);
@@ -164,6 +171,88 @@ test("submits three papers only after verifying their final ZIPs", async () => {
       submission.archive.endsWith("_final.zip"),
     ),
   ).toBe(true);
+});
+
+test("submits successful projects and records an incomplete batch", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "paperbot-partial-sync-"));
+  const checkpoints = join(workspace, "checkpoints");
+  await mkdir(checkpoints);
+  const projects = [];
+  for (let index = 1; index <= 2; index += 1) {
+    const outputPath = join(workspace, `example__project-${index}`);
+    await mkdir(outputPath);
+    await writeFile(join(outputPath, "paper.md"), `# Paper ${index}\n`);
+    const archiveName = `2026-08-21_project-${index}_${runId(index)}_final.zip`;
+    const archive = Buffer.from(`archive-${index}`);
+    await writeFile(join(checkpoints, archiveName), archive);
+    projects.push({
+      project_index: index,
+      repository_url: `https://github.com/example/project-${index}`,
+      output_path: outputPath,
+      state: "succeeded",
+      result: {
+        run_id: runId(index),
+        run_path: outputPath,
+        state: "needs_author_review",
+        checkpoint: {
+          reason: "needs_author_review",
+          archive: `../checkpoints/${archiveName}`,
+          archive_sha256: sha256(archive),
+        },
+      },
+    });
+  }
+  projects.push({
+    project_index: 3,
+    repository_url: "https://github.com/example/failed-project",
+    output_path: join(workspace, "example__failed-project"),
+    state: "failed",
+  });
+  const batchPath = join(workspace, "batch.json");
+  await writeFile(batchPath, JSON.stringify({ schema_version: "2", projects }));
+  const submittedKeys: string[] = [];
+
+  const report = await submitBatchDrafts(batchPath, 3, {
+    async listDrafts() {
+      return { drafts: [] };
+    },
+    async publishDraft() {
+      throw new Error("submission must not publish drafts");
+    },
+    async approveAndPublishDraft() {
+      throw new Error("submission must not auto-publish drafts");
+    },
+    async createDraft(input) {
+      submittedKeys.push(input.idempotency_key);
+      return {
+        paper_uuid: `00000000-0000-4000-8000-00000000000${submittedKeys.length}`,
+        revision: 1,
+      };
+    },
+    async rejectDraft() {
+      throw new Error("an empty pending queue must not rotate drafts");
+    },
+  });
+
+  expect(report).toMatchObject({
+    schema_version: "2",
+    expected_count: 3,
+    successful_run_count: 2,
+    shortfall_count: 1,
+    batch_failed: [
+      {
+        project_index: 3,
+        repository_url: "https://github.com/example/failed-project",
+        state: "failed",
+      },
+    ],
+    failed: [],
+  });
+  expect(report.submitted).toHaveLength(2);
+  expect(submittedKeys).toEqual([
+    `paperbot-draft:${runId(1)}`,
+    `paperbot-draft:${runId(2)}`,
+  ]);
 });
 
 function approvedDraft(paperUuid: string, revision: number) {

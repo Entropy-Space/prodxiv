@@ -1158,6 +1158,7 @@ describe("runAgent", () => {
       evidence: [remoteEvidence],
       author: [remoteDraft, remoteDraft],
     });
+    const progress: AgentProgressEvent[] = [];
 
     await runAgent(
       {
@@ -1174,6 +1175,7 @@ describe("runAgent", () => {
         create_runtime: () => runtime,
         fetch: remoteGitHubFetch,
         now: () => new Date("2026-08-05T00:00:00.000Z"),
+        on_progress: (event) => progress.push(event),
       },
     );
 
@@ -1188,6 +1190,15 @@ describe("runAgent", () => {
     expect(paper).toContain('model: "deepseek-v4-flash"');
     expect(paper).toContain('value: "launched"');
     expect(paper).toContain('determination: "inferred"');
+    expect(progress).toContainEqual(
+      expect.objectContaining({
+        kind: "host",
+        operation: "acquire_source",
+        status: "completed",
+        summary:
+          "revision=0123456789ab, files=1, releases=captured:1, skipped=symlink:1,submodule:1",
+      }),
+    );
     expect(JSON.parse(run)).toMatchObject({
       input: {
         metadata: {
@@ -1215,6 +1226,11 @@ describe("runAgent", () => {
     });
     expect(JSON.parse(source)).toMatchObject({
       schema_version: "2",
+      github_source_selection: {
+        tree_file_count: 3,
+        selected_paths: ["README.md"],
+        skipped_file_counts: { symlink: 1, submodule: 1 },
+      },
       github_releases: {
         releases: [
           {
@@ -1225,6 +1241,21 @@ describe("runAgent", () => {
         ],
       },
     });
+
+    const tamperedSelection = JSON.parse(source) as {
+      github_source_selection: {
+        skipped_file_counts: { symlink: number };
+      };
+    };
+    tamperedSelection.github_source_selection.skipped_file_counts.symlink = -1;
+    await writeFile(
+      join(outputPath, "source.json"),
+      `${JSON.stringify(tamperedSelection, null, 2)}\n`,
+    );
+    await expect(readSourceArtifact(outputPath)).rejects.toThrow(
+      "invalid github source skip counts",
+    );
+    await writeFile(join(outputPath, "source.json"), source);
 
     const tamperedSource = JSON.parse(source) as {
       github_releases: { releases: Array<{ url: string }> };
@@ -1892,6 +1923,18 @@ async function remoteGitHubFetch(
           type: "blob",
           sha: gitBlobSha(REMOTE_README),
           size: Buffer.byteLength(REMOTE_README),
+        },
+        {
+          path: "linked.md",
+          mode: "120000",
+          type: "blob",
+          sha: "89abcdef0123456789abcdef0123456789abcdef",
+        },
+        {
+          path: "nested",
+          mode: "160000",
+          type: "commit",
+          sha: "89abcdef0123456789abcdef0123456789abcdef",
         },
       ],
     });

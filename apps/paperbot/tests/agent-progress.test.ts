@@ -65,6 +65,20 @@ describe("agent progress", () => {
     expect(summary).not.toContain("private draft text");
   });
 
+  test("reports actionable GitHub source failures without private paths", () => {
+    const summary = summarizeAgentError(
+      new PaperbotError(
+        "GitHub source unsupported_tree_entry: unsupported entry at /private/worktree/secret",
+        ExitCode.scan,
+      ),
+    );
+
+    expect(summary).toBe(
+      "GitHub repository contains an unsupported tree entry",
+    );
+    expect(summary).not.toContain("/private/worktree/secret");
+  });
+
   test("uses only canonical GitHub owner and repository labels", () => {
     expect(
       githubRepositoryLabel("https://github.com/Owner/repository.git"),

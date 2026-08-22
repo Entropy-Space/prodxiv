@@ -71,8 +71,15 @@ export interface PromotionReport {
 }
 
 export interface SubmissionReport {
-  schema_version: "1";
+  schema_version: "2";
   expected_count: number;
+  successful_run_count: number;
+  shortfall_count: number;
+  batch_failed: Array<{
+    project_index: number;
+    repository_url: string;
+    state: "pending" | "running" | "failed";
+  }>;
   submitted: Array<{
     project_index: number;
     repository_url: string;
@@ -222,8 +229,11 @@ export async function submitBatchDrafts(
     JSON.parse(await readFile(absoluteBatchPath, "utf8")) as unknown,
   );
   const report: SubmissionReport = {
-    schema_version: "1",
+    schema_version: "2",
     expected_count: expectedCount,
+    successful_run_count: 0,
+    shortfall_count: 0,
+    batch_failed: [],
     submitted: [],
     rotated: [],
     failed: [],
@@ -231,11 +241,26 @@ export async function submitBatchDrafts(
   const succeeded = batch.projects.filter(
     (project) => project.state === "succeeded",
   );
-  if (succeeded.length !== expectedCount) {
+  if (batch.projects.length !== expectedCount) {
     throw new Error(
-      `expected ${expectedCount} successful Paperbot runs, found ${succeeded.length}`,
+      `expected ${expectedCount} Paperbot batch projects, found ${batch.projects.length}`,
     );
   }
+  report.successful_run_count = succeeded.length;
+  report.shortfall_count = expectedCount - succeeded.length;
+  report.batch_failed = batch.projects
+    .filter(
+      (
+        project,
+      ): project is ParsedBatchProject & {
+        state: "pending" | "running" | "failed";
+      } => project.state !== "succeeded",
+    )
+    .map((project) => ({
+      project_index: project.project_index,
+      repository_url: project.repository_url,
+      state: project.state,
+    }));
 
   for (const project of succeeded) {
     try {
@@ -497,7 +522,10 @@ async function main(): Promise<void> {
     );
   }
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  if (report.failed.length > 0) {
+  if (
+    report.failed.length > 0 ||
+    ("shortfall_count" in report && report.shortfall_count > 0)
+  ) {
     process.exitCode = 1;
   }
 }

@@ -186,6 +186,8 @@ describe("fetchGitHubSource", () => {
           excluded: 0,
           unsupported: 0,
           oversized: 0,
+          symlink: 0,
+          submodule: 0,
           selection_limit: 0,
         },
       },
@@ -247,6 +249,8 @@ describe("fetchGitHubSource", () => {
       repository: "product",
       resolved_ref: "main",
       resolved_revision: REVISION,
+      tree_file_count: 20,
+      skipped_file_counts: noGitHubSourceSkips(),
       files: [
         {
           path: "README.md",
@@ -301,6 +305,8 @@ describe("fetchGitHubSource", () => {
       repository: "product",
       resolved_ref: "main",
       resolved_revision: REVISION,
+      tree_file_count: 19,
+      skipped_file_counts: noGitHubSourceSkips(),
       files: [
         ["README.md", "documentation"],
         ["docs/architecture.md", "documentation"],
@@ -356,6 +362,8 @@ describe("fetchGitHubSource", () => {
       repository: "product",
       resolved_ref: "main",
       resolved_revision: REVISION,
+      tree_file_count: 8,
+      skipped_file_counts: noGitHubSourceSkips(),
       files: paths.map((path) => ({
         path,
         blob_sha: BLOB_SHA,
@@ -384,6 +392,8 @@ describe("fetchGitHubSource", () => {
       repository: "product",
       resolved_ref: "main",
       resolved_revision: REVISION,
+      tree_file_count: 7,
+      skipped_file_counts: noGitHubSourceSkips(),
       files: [
         {
           path: "README.md",
@@ -494,6 +504,8 @@ describe("fetchGitHubSource", () => {
       repository: "product",
       resolved_ref: "main",
       resolved_revision: REVISION,
+      tree_file_count: 15,
+      skipped_file_counts: noGitHubSourceSkips(),
       files: [
         "README.md",
         ...preferredPaths,
@@ -602,27 +614,63 @@ describe("fetchGitHubSource", () => {
     expect(mock.calls.map((call) => call.url)).toEqual([endpoint.metadata]);
   });
 
-  test("rejects a truncated tree, symlinks, submodules, and path traversal", async () => {
+  test("skips symlinks and submodules without fetching their contents", async () => {
+    const endpoint = urls();
+    const readme = "hello\n";
+    const mock = fetchMock(
+      new Map([
+        [endpoint.metadata, jsonResponse(repositoryMetadata())],
+        [endpoint.commit, jsonResponse({ sha: REVISION })],
+        [
+          endpoint.tree,
+          jsonResponse(
+            tree([
+              blob("README.md", Buffer.byteLength(readme), gitBlobSha(readme)),
+              {
+                path: "linked.md",
+                mode: "120000",
+                type: "blob",
+                sha: BLOB_SHA,
+              },
+              {
+                path: "nested",
+                mode: "160000",
+                type: "commit",
+                sha: BLOB_SHA,
+              },
+            ]),
+          ),
+        ],
+        [endpoint.readme, new Response(readme)],
+      ]),
+    );
+
+    const result = await fetchGitHubSource({
+      repository_url: "https://github.com/example/product",
+      selected_paths: ["README.md"],
+      fetch: mock.fetch,
+    });
+
+    expect(result.files.map((file) => file.path)).toEqual(["README.md"]);
+    expect(result.selection).toMatchObject({
+      tree_file_count: 3,
+      skipped_file_counts: { symlink: 1, submodule: 1 },
+    });
+    expect(mock.calls.map((call) => call.url)).toEqual([
+      endpoint.metadata,
+      endpoint.commit,
+      endpoint.tree,
+      endpoint.readme,
+    ]);
+  });
+
+  test("rejects a truncated tree and path traversal", async () => {
     const endpoint = urls();
     const unsafeTrees = [
       {
         name: "truncated",
         payload: tree([blob("README.md")], true),
         code: "truncated_tree",
-      },
-      {
-        name: "symlink",
-        payload: tree([
-          { path: "linked", mode: "120000", type: "blob", sha: BLOB_SHA },
-        ]),
-        code: "symlink_not_supported",
-      },
-      {
-        name: "submodule",
-        payload: tree([
-          { path: "nested", mode: "160000", type: "commit", sha: BLOB_SHA },
-        ]),
-        code: "submodule_not_supported",
       },
       {
         name: "traversal",
@@ -702,6 +750,17 @@ describe("fetchGitHubSource", () => {
     ).rejects.toMatchObject({ code: "content_limit_exceeded" });
   });
 });
+
+function noGitHubSourceSkips() {
+  return {
+    excluded: 0,
+    unsupported: 0,
+    oversized: 0,
+    symlink: 0,
+    submodule: 0,
+    selection_limit: 0,
+  };
+}
 
 describe("fetchGitHubReleases", () => {
   test("captures bounded public release notes for deterministic status evidence", async () => {
