@@ -2,6 +2,7 @@ import {
   ProdxivApiClient,
   type ApiFetch,
   type PublishedPaperSummary,
+  type PaperMetadata,
 } from "@prodxiv/api-client";
 import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 
@@ -14,6 +15,9 @@ export interface PaperIndexEntry {
   title: string;
   summary: string;
   authors: string[];
+  writers?: PaperMetadata["writers"];
+  product_name?: string;
+  repository_url?: string;
   topics: string[];
   href: string;
 }
@@ -22,6 +26,8 @@ export type PaperIndexResult =
   | {
       ok: true;
       papers: PaperIndexEntry[];
+      topics: string[];
+      topics_available: boolean;
       next_cursor?: string;
     }
   | {
@@ -33,6 +39,8 @@ export interface PaperIndexOptions {
   api_url?: string;
   cursor?: string;
   limit?: number;
+  q?: string;
+  topic?: string;
   fetch?: ApiFetch;
 }
 
@@ -52,13 +60,20 @@ export async function readPublishedPaperIndex(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const page = await client.listPapers({
-      ...(options.limit === undefined ? {} : { limit: options.limit }),
-      ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-    });
+    const [page, topicList] = await Promise.all([
+      client.listPapers({
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+        ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+        ...(options.q === undefined ? {} : { q: options.q }),
+        ...(options.topic === undefined ? {} : { topic: options.topic }),
+      }),
+      client.listPaperTopics().catch(() => undefined),
+    ]);
     return {
       ok: true,
       papers: page.papers.map(paperIndexEntry),
+      topics: topicList?.topics ?? [],
+      topics_available: topicList !== undefined,
       ...(page.next_cursor === undefined
         ? {}
         : { next_cursor: page.next_cursor }),
@@ -79,6 +94,15 @@ function paperIndexEntry(paper: PublishedPaperSummary): PaperIndexEntry {
     title: paper.metadata.title,
     summary: paper.metadata.summary,
     authors: paper.metadata.authors.map((author) => author.name),
+    ...(paper.metadata.writers === undefined
+      ? {}
+      : { writers: paper.metadata.writers }),
+    ...(paper.metadata.product_name == null
+      ? {}
+      : { product_name: paper.metadata.product_name }),
+    ...(paper.metadata.repository_url == null
+      ? {}
+      : { repository_url: paper.metadata.repository_url }),
     topics: paper.metadata.topics,
     href: publicPaperPath(paper.paper_id, paper.version),
   };

@@ -130,5 +130,63 @@ describe("readPublishedPaper", () => {
     }
     expect(result.paper.paper_id).toBe("prodxiv:2607.000001");
     expect(result.rendered.html).toContain('<h1 id="summary">Summary</h1>');
+    expect(result.history_available).toBe(false);
+    expect(result.revisions).toEqual([]);
+  });
+
+  test("returns real history without inferring missing revision numbers", async () => {
+    const newer = {
+      ...publishedPaper,
+      version: 3,
+      metadata: { ...publishedPaper.metadata, version: 3 },
+    };
+    const result = await readPublishedPaper({
+      paper_id: publishedPaper.paper_id,
+      revision: "1",
+      api_url: "https://api.prodxiv.example",
+      fetch: async (input) =>
+        input.toString().endsWith("/revisions")
+          ? Response.json({ revisions: [publishedPaper, newer] })
+          : Response.json(publishedPaper),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected readable paper");
+    expect(result.history_available).toBe(true);
+    expect(result.revisions.map((entry) => entry.version)).toEqual([3, 1]);
+    expect(result.paper.version).toBe(1);
+    expect(result.rendered.html).toContain("Rendered from the API.");
+  });
+
+  test("falls back when history omits the selected revision", async () => {
+    const newer = {
+      ...publishedPaper,
+      version: 2,
+      metadata: { ...publishedPaper.metadata, version: 2 },
+    };
+    const result = await readPublishedPaper({
+      paper_id: publishedPaper.paper_id,
+      revision: "1",
+      api_url: "https://api.prodxiv.example",
+      fetch: async (input) =>
+        input.toString().endsWith("/revisions")
+          ? Response.json({ revisions: [newer] })
+          : Response.json(publishedPaper),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      paper: { version: 1 },
+      history_available: false,
+      revisions: [],
+    });
+  });
+
+  test("does not show a different revision under the requested URL", async () => {
+    const result = await readPublishedPaper({
+      paper_id: publishedPaper.paper_id,
+      revision: "2",
+      api_url: "https://api.prodxiv.example",
+      fetch: async () => Response.json(publishedPaper),
+    });
+    expect(result).toMatchObject({ ok: false, error: { status: 502 } });
   });
 });

@@ -1,6 +1,7 @@
 # Public website design
 
-Status: approved design direction; not a production implementation.
+Status: approved design direction, implemented in the Astro public experience.
+The checked-in wireframes remain illustrative design artifacts, not deployed pages.
 
 This design starts with public reading: finding published papers, reading an
 exact revision, and following pending drafts before publication. It preserves
@@ -51,7 +52,7 @@ local prototype state; it does not exercise real routes or authentication.
 ### Pending drafts
 
 - Public readers can browse the pending queue and read a current draft without
-  signing in. This is the target behavior, not the current access policy.
+  signing in when the API's public-draft read feature is explicitly enabled.
 - Order the queue by most recently edited. Show useful titles and summaries,
   revision, last edit time, writer disclosure, ownership, and `pending_review`
   status instead of UUID-only rows.
@@ -122,25 +123,20 @@ mutable source. Do not revive `/v1/drafts/latest` or use a global latest-draft
 alias. Draft history remains bounded to five retained snapshots per paper;
 published revision history remains immutable.
 
-## Current implementation and required follow-ups
+## Implementation and rollout
 
-This document records a future public experience. The operational behavior in
-[DRAFTS.md](../../DRAFTS.md), [PUBLISHING_API.md](../../PUBLISHING_API.md), and the
-current contracts still applies. This PR does not change the database, API,
-generated client, website routes, authentication, or deployment configuration.
+The real experience is implemented in `apps/web`, backed by generated API
+contracts. The prototype remains a reference for interaction and visual design.
+See [DRAFTS.md](../../DRAFTS.md) and [PUBLISHING_API.md](../../PUBLISHING_API.md)
+for operational behavior. No database migration or new credential is required.
 
 ### Public draft read boundary
 
-Today all draft API reads require authorization, and the website draft pages
-use HTTP Basic authentication. Current management responses can contain review
-actors and rejection details. Do not make them public by simply removing an
-authentication check or forwarding the full privileged response to a browser.
-
-Implement a deliberately limited public read projection in the Axum API, with
-generated OpenAPI and TypeScript contracts. It needs safe listing metadata and
-reader content for the publicly readable draft state. Current list responses
-do not contain the titles and summaries required by this design. Handle
-incomplete or malformed draft metadata without inventing publication readiness.
+Authenticated management remains under `/v1/drafts`, with the private website
+workspace at `/review/drafts`. Public readers use `/v1/public/drafts` and its
+concrete UUID route, which return deliberately limited projections with optional
+canonical paper metadata. Incomplete or malformed metadata is visibly incomplete,
+not a claim of publication readiness.
 
 Keep write authorization, revision checks, ownership rules, and audit records
 authoritative in the API. Reviewer identity, rejection notes, private scan
@@ -148,35 +144,37 @@ manifests, evidence bundles, source snapshots, model conversations, audit logs,
 and `final.zip` are not part of the public read projection. Safe writer/model/
 tool-version metadata is distinct from private run data.
 
-Before enabling public reads, explicitly settle how existing private drafts,
-approved or rejected drafts, deleted drafts, and retained historical snapshots
-are exposed or withheld. The prototype only depicts current pending drafts; it
-does not authorize bulk exposure of existing private content or decide those
-availability policies. Account redesign remains deferred.
+Public draft reading is disabled by default. Setting
+`PRODXIV_PUBLIC_DRAFTS_ENABLED=true` on the API opts existing and future current
+pending draft content into public reading, regardless of bot/author ownership.
+Confirm those contents may be public before enabling it. Approved/rejected,
+deleted, and unknown draft UUIDs expose no draft source through public reads;
+retained draft history remains private. Published UUID mappings resolve to the
+exact immutable paper. Public draft responses are not cached or indexed, but
+rejection cannot retract content a reader already saved. Account redesign and
+finer-grained availability policies remain deferred.
 
 ### Archive and revision discovery
 
-The existing public paper collection provides latest-revision summaries with
-cursor pagination; it does not yet provide archive-wide search or topic query
-parameters. Exact-revision reads already provide the archived source and
-metadata, but a revision picker and “newer revision” notice need authoritative
-revision discovery. Do not infer available revisions from fixture arrays or
-probe every possible version in the browser.
+The public paper collection supports latest-revision summaries, cursor
+pagination, archive-wide metadata search, and topic filtering. Topic and revision
+discovery have their own API endpoints. The reader uses confirmed revisions and
+keeps the exact selected paper readable if history lookup fails. Raw Markdown
+downloads return the archived source, not a reconstruction of rendered HTML.
 
 Keep these contracts in Rust and generate the website types. Do not introduce
 parallel hand-written paper models or a separate search service for this work.
 
-### Delivery order
+### Deployment sequence
 
-1. Define the safe public draft read contract and rollout policy. Add anonymous
-   read tests, restricted-write tests, malformed-source cases, and publication
-   mapping resolution. Preserve all current review and ownership guarantees.
-2. Implement the public archive shell, pending list, and shared reader in Astro,
-   using the generated client and existing Markdown renderer. Keep authenticated
-   review routes working and connect citations/source to exact revisions.
-3. Add archive-wide discovery and revision-history support, then connect the
-   search, topic, and revision controls. Until supported, do not present local
-   page filtering or guessed revision history as real archive features.
+1. Deploy the API with public draft reads disabled; existing writers and
+   authenticated review contracts remain compatible.
+2. Point the Astro website's `PRODXIV_API_URL` at that compatible API. The public
+   pending page explains when reading is disabled; it does not show a false
+   successful empty queue. Author review remains available separately.
+3. After reviewing existing pending contents, explicitly enable public draft
+   reads on the API. Verify anonymous reading and authenticated review writes
+   separately before relying on the public queue.
 
 ## Acceptance checks for implementation
 
@@ -198,5 +196,6 @@ parallel hand-written paper models or a separate search service for this work.
   credentials, internal review data, or private run archives.
 
 The wireframes illustrate the primary reading flows, not every acceptance
-state. Production error handling, complete Markdown rendering, real pagination,
-backend access controls, accounts, and deployment are not implemented here.
+state. The real application supplies API data, rendering, pagination, and access
+controls. The design artifacts do not deploy anything; accounts and any
+additional availability policy remain follow-ups.

@@ -1,0 +1,162 @@
+---
+interface Props {
+  identifier: string;
+  citation?: string;
+  source_markdown?: string;
+  source_href?: string;
+  draft_url?: string;
+}
+
+const { identifier, citation, source_markdown, source_href, draft_url } = Astro.props;
+const dialogs = [
+  ...(citation === undefined ? [] : [{
+    id: "paper-citation",
+    title: "Cite this revision",
+    caption: "This citation identifies the exact published revision you are reading.",
+    text: citation,
+  }]),
+  ...(source_markdown === undefined ? [] : [{
+    id: "paper-source",
+    title: "Archived Markdown",
+    caption: "The original source stored with this published revision, not a reconstruction of the page.",
+    text: source_markdown,
+  }]),
+  ...(draft_url === undefined ? [] : [{
+    id: "paper-draft-link",
+    title: "Link to this draft",
+    caption: "This working-paper link follows the current draft. It is not an immutable publication citation.",
+    text: draft_url,
+  }]),
+];
+---
+
+<div class="paper-actions">
+  {
+    dialogs.map((dialog) => (
+      <button
+        class="button"
+        type="button"
+        aria-controls={dialog.id}
+        aria-haspopup="dialog"
+        data-paper-dialog-trigger
+        hidden
+      >{dialog.title === "Archived Markdown" ? "View source" : dialog.title}</button>
+    ))
+  }
+  {source_href && <a class="button" href={source_href} download>Download .md</a>}
+</div>
+
+{
+  dialogs.map((dialog) => (
+    <dialog id={dialog.id} aria-labelledby={`${dialog.id}-title`} aria-describedby={`${dialog.id}-caption`}>
+      <header class="dialog-heading">
+        <h2 id={`${dialog.id}-title`}>{dialog.title}</h2>
+        <form method="dialog"><button class="button" type="submit">Close</button></form>
+      </header>
+      <p class="dialog-identifier">{identifier}</p>
+      <p class="dialog-caption" id={`${dialog.id}-caption`}>{dialog.caption}</p>
+      <label class="source-label" for={`${dialog.id}-text`}>
+        Select and copy
+        <textarea id={`${dialog.id}-text`} readonly rows={dialog.id === "paper-source" ? 16 : 5} spellcheck="false">{dialog.text}</textarea>
+      </label>
+      <noscript>
+        <p>JavaScript is not required to read or download the paper.</p>
+      </noscript>
+    </dialog>
+  ))
+}
+
+<noscript>
+  {citation && <details class="citation-fallback"><summary>Cite this revision</summary><p>{citation}</p></details>}
+  {draft_url && <p class="draft-link-fallback"><a href={draft_url}>Link to this draft</a></p>}
+</noscript>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>("[data-paper-dialog-trigger]").forEach((trigger) => {
+    const target = document.getElementById(trigger.getAttribute("aria-controls") ?? "");
+    if (!(target instanceof HTMLDialogElement)) return;
+    trigger.hidden = false;
+    trigger.addEventListener("click", () => target.showModal());
+  });
+</script>
+
+<style>
+  .paper-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  [hidden] {
+    display: none;
+  }
+
+  dialog {
+    width: min(42rem, calc(100% - 2rem));
+    max-height: calc(100% - 2rem);
+    margin: auto;
+    padding: clamp(1rem, 3vw, 1.5rem);
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line-strong);
+    border-radius: 0.25rem;
+    box-shadow: var(--shadow);
+  }
+
+  dialog::backdrop {
+    background: light-dark(rgb(28 33 30 / 45%), rgb(0 0 0 / 65%));
+  }
+
+  .dialog-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .dialog-heading h2 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 1.65rem;
+    font-weight: 400;
+  }
+
+  .dialog-identifier {
+    margin: 0.75rem 0 0;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+
+  .dialog-caption,
+  .source-label {
+    color: var(--ink-soft);
+    font-size: 0.8rem;
+  }
+
+  .source-label {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  textarea {
+    width: 100%;
+    padding: 0.8rem;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 0.15rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    resize: vertical;
+  }
+
+  .citation-fallback,
+  .draft-link-fallback {
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+</style>

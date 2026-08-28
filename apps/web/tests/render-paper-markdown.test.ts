@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   PublishedPaperFormatError,
+  renderDraftMarkdown,
   renderPaperMarkdown,
 } from "../src/lib/render-paper-markdown.ts";
 
@@ -110,5 +111,43 @@ schema_version: "1"
     expect(() =>
       renderPaperMarkdown('---\nschema_version: "1"\n# Summary'),
     ).toThrow("unterminated YAML front matter");
+  });
+});
+
+describe("renderDraftMarkdown", () => {
+  test("renders bare drafts safely without calling them publication-valid", () => {
+    const rendered = renderDraftMarkdown(
+      "# Summary\n\nDraft <script>bad()</script>\n\n[unsafe](javascript:bad())",
+    );
+    expect(rendered.front_matter_complete).toBe(false);
+    expect(rendered.html).toContain('<h1 id="summary">Summary</h1>');
+    expect(rendered.html).not.toContain("<script");
+    expect(rendered.html).not.toContain("javascript:");
+  });
+
+  test("strips malformed but delimited YAML instead of interpreting it as prose", () => {
+    const rendered = renderDraftMarkdown(
+      "\uFEFF---\r\ntitle: [broken\r\n---\r\n# Summary\r\n\r\nReadable body.",
+    );
+    expect(rendered.front_matter_complete).toBe(true);
+    expect(rendered.html).toContain("Readable body");
+    expect(rendered.html).not.toContain("broken");
+  });
+
+  test("withholds an unterminated front matter block with no reliable body boundary", () => {
+    const rendered = renderDraftMarkdown("---\ntitle: [broken\n# Summary\n");
+    expect(rendered.front_matter_complete).toBe(false);
+    expect(rendered.html).toBe("");
+    expect(rendered.section_headings).toEqual([]);
+  });
+
+  test("uses the published renderer's SVG sanitization for drafts too", () => {
+    const rendered = renderDraftMarkdown(
+      "<svg viewBox='0 0 10 10' onload='bad()'><foreignObject>unsafe</foreignObject><rect width='10' height='10' /></svg>",
+    );
+    expect(rendered.html).toContain("<rect");
+    expect(rendered.html).not.toContain("onload");
+    expect(rendered.html).not.toContain("foreignObject");
+    expect(rendered.html).not.toContain("unsafe");
   });
 });

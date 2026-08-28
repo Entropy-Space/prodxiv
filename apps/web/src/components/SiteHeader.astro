@@ -1,14 +1,15 @@
 ---
 const navigation = [
-  { href: "/#recent", label: "Recent" },
+  { href: "/", label: "Papers" },
+  { href: "/drafts", label: "Drafts" },
   { href: "/trending", label: "Trending" },
-  { href: "/#topics", label: "Topics" },
-  { href: "/#about", label: "About" },
+  { href: "/about", label: "About" },
 ];
+const pathname = Astro.url.pathname.replace(/\/$/, "") || "/";
+const currentPath = pathname.startsWith("/papers/") ? "/" : pathname;
 ---
 
 <header class="site-header">
-  <div class="accent-rule" aria-hidden="true"></div>
   <div class="site-header__inner shell">
     <a class="wordmark" href="/" aria-label="prodxiv home">
       <span>prod</span><strong>xiv</strong>
@@ -17,11 +18,14 @@ const navigation = [
     <nav aria-label="Primary navigation">
       <ul class="site-nav">
         {navigation.map((item) => (
-          <li><a href={item.href}>{item.label}</a></li>
+          <li>
+            <a
+              href={item.href}
+              aria-current={currentPath === item.href || (item.href !== "/" && currentPath.startsWith(`${item.href}/`)) ? "page" : undefined}
+            >{item.label}</a>
+          </li>
         ))}
       </ul>
     </nav>
-
-    <a class="header-action" href="/#submit">Submit a paper</a>
   </div>
 </header>

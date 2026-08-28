@@ -9,8 +9,14 @@ export function configuredApiUrl(
     const isLocal =
       url.hostname === "localhost" ||
       url.hostname === "127.0.0.1" ||
-      url.hostname === "::1";
-    if (url.protocol !== "https:" && !(isLocal && url.protocol === "http:")) {
+      url.hostname === "[::1]";
+    if (
+      (url.protocol !== "https:" && !(isLocal && url.protocol === "http:")) ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
       return undefined;
     }
     return url.toString().replace(/\/+$/, "");

@@ -1,0 +1,66 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout title="About the archive — prodxiv" description="How prodxiv preserves product reasoning, distinguishes drafts from publications, and discloses authorship.">
+  <article class="page-shell">
+    <header class="page-heading">
+      <p class="eyebrow">About prodxiv</p>
+      <h1>Product ideas, documented properly.</h1>
+      <p>A versioned archive of how products work, why decisions matter, and what remains uncertain.</p>
+    </header>
+    <div class="about-copy">
+      <section>
+        <h2>Published papers preserve a record.</h2>
+        <p>Every published revision has a stable identifier and its original Markdown source. A correction creates a new revision; it does not silently rewrite history. Cite the exact revision you read.</p>
+        <p><a href="/">Browse published papers →</a></p>
+      </section>
+      <section>
+        <h2>Drafts make work in progress readable.</h2>
+        <p>Public pending drafts are working copies, not publications, author endorsements, or promises of publication. A readable draft may still have incomplete metadata, unsupported assumptions, or unanswered questions.</p>
+        <p>Reading is public; editing, approving, rejecting, and publishing remain restricted. An edit creates a new draft revision. Rejection retains the draft rather than deleting it.</p>
+        <p>The daily bot may approve and publish an unchanged, bot-owned draft from a previous run. It never automatically approves an author-owned draft. An author can also explicitly approve and publish a reviewed revision.</p>
+        <p><a href="/drafts">Read pending drafts →</a></p>
+      </section>
+      <section>
+        <h2>Authorship stays explicit.</h2>
+        <p>Authors identify the people or organizations attributed to a paper. Writers identify who produced the prose. These are different things: naming a repository owner does not establish that they reviewed or endorsed an agent-written paper.</p>
+        <p>When recorded, an agent’s model and tool version appear beside the paper. Private research logs, model conversations, source snapshots, and run archives are not public reading material.</p>
+      </section>
+      <section>
+        <h2>Limitations belong in the paper.</h2>
+        <p>Useful product knowledge includes constraints, rejected alternatives, and lessons—not just features. Measured claims need reproducible methodology. Missing evidence should remain visible rather than become confident prose.</p>
+      </section>
+      <section>
+        <h2>Trending is a separate observation.</h2>
+        <p>The dated GitHub Trending archive provides context about repositories. Rankings are external observations, not paper-quality scores, product claims, or endorsements.</p>
+        <p><a href="/trending">Explore Trending history →</a></p>
+      </section>
+    </div>
+  </article>
+</SiteLayout>
+
+<style>
+  .about-copy {
+    max-width: 66ch;
+  }
+
+  .about-copy section + section {
+    margin-top: 2rem;
+  }
+
+  .about-copy h2 {
+    margin: 0 0 0.75rem;
+    font-family: var(--serif);
+    font-size: 1.65rem;
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  .about-copy p {
+    margin: 0 0 1rem;
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+    line-height: 1.7;
+  }
+</style>
