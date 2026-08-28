@@ -175,6 +175,14 @@ export function normalizeAgentMetadata(value: unknown): AgentPaperMetadata {
     "completed agent metadata writer generation_id",
   );
   const status = normalizeAgentProductStatus(value.status);
+  const license =
+    value.license === undefined
+      ? undefined
+      : normalizeText(
+          value.license,
+          "completed agent metadata license",
+          MAX_AGENT_TEXT_LENGTH,
+        );
   return {
     title: request.title,
     product_name: request.product_name,
@@ -189,6 +197,7 @@ export function normalizeAgentMetadata(value: unknown): AgentPaperMetadata {
       },
     ],
     status,
+    ...(license === undefined ? {} : { license }),
     ...(request.product_url === undefined
       ? {}
       : { product_url: request.product_url }),

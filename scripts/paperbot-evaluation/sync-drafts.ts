@@ -6,6 +6,7 @@ import {
   ProdxivApiError,
   type PublishDraftInput,
 } from "../../packages/api-client/src/client.ts";
+import { validatePaperSource } from "../../packages/paperbot-core/src/validator.ts";
 import { resolveApiBearerToken } from "../github-actions/oidc.ts";
 
 interface DraftSyncClient {
@@ -62,11 +63,20 @@ export interface PromotionReport {
     draft_revision: number;
     reason: "draft_changed" | "ownership_changed";
   }>;
+  rejected: Array<{
+    paper_uuid: string;
+    draft_revision: number;
+    reason: "publication_invalid";
+    error_code: string;
+    message: string;
+    diagnostics: ProdxivApiError["diagnostics"];
+  }>;
   failed: Array<{
     paper_uuid: string;
     draft_revision: number;
     error_code: string;
     message: string;
+    diagnostics: ProdxivApiError["diagnostics"];
   }>;
 }
 
@@ -113,6 +123,7 @@ export async function promoteDrafts(
     pending_bot_count: 0,
     published: [],
     skipped: [],
+    rejected: [],
     failed: [],
   };
   for (const draft of approved.drafts) {
@@ -123,6 +134,7 @@ export async function promoteDrafts(
         draft_revision: draft.revision,
         error_code: "draft.invalid_review",
         message: "approved draft did not name its reviewed revision",
+        diagnostics: [],
       });
       continue;
     }
@@ -161,6 +173,7 @@ export async function promoteDrafts(
             ? error.code
             : "sync.unexpected_error",
         message: safeErrorMessage(error),
+        diagnostics: apiErrorDiagnostics(error),
       });
     }
   }
@@ -185,6 +198,51 @@ export async function promoteDrafts(
         approval_kind: "automatic",
       });
     } catch (error) {
+      if (isUnpublishableBotDraftError(error)) {
+        try {
+          await client.rejectDraft(draft.paper_uuid, {
+            expected_revision: draft.revision,
+            reason:
+              "Automatic publication validation failed; retained for audit.",
+          });
+          report.rejected.push({
+            paper_uuid: draft.paper_uuid,
+            draft_revision: draft.revision,
+            reason: "publication_invalid",
+            error_code: error.code,
+            message: error.message,
+            diagnostics: [...error.diagnostics],
+          });
+        } catch (rejectionError) {
+          if (
+            rejectionError instanceof ProdxivApiError &&
+            (rejectionError.code === "draft.revision_conflict" ||
+              rejectionError.code === "draft.not_found" ||
+              rejectionError.code === "draft.owner_forbidden")
+          ) {
+            report.skipped.push({
+              paper_uuid: draft.paper_uuid,
+              draft_revision: draft.revision,
+              reason:
+                rejectionError.code === "draft.owner_forbidden"
+                  ? "ownership_changed"
+                  : "draft_changed",
+            });
+          } else {
+            report.failed.push({
+              paper_uuid: draft.paper_uuid,
+              draft_revision: draft.revision,
+              error_code:
+                rejectionError instanceof ProdxivApiError
+                  ? rejectionError.code
+                  : "sync.unexpected_error",
+              message: safeErrorMessage(rejectionError),
+              diagnostics: [...error.diagnostics],
+            });
+          }
+        }
+        continue;
+      }
       if (
         error instanceof ProdxivApiError &&
         (error.code === "draft.revision_conflict" ||
@@ -209,6 +267,7 @@ export async function promoteDrafts(
             ? error.code
             : "sync.unexpected_error",
         message: safeErrorMessage(error),
+        diagnostics: apiErrorDiagnostics(error),
       });
     }
   }
@@ -292,6 +351,16 @@ export async function submitBatchDrafts(
         readFile(paperPath, "utf8"),
         readFile(archivePath),
       ]);
+      const submissionValidation = validatePaperSource(
+        sourceMarkdown,
+        paperPath,
+        "submission",
+      );
+      if (!submissionValidation.report.valid) {
+        throw new Error(
+          `generated paper is not submission-ready: ${formatValidationDiagnostics(submissionValidation.report.diagnostics)}`,
+        );
+      }
       const archiveSha256 = new Bun.CryptoHasher("sha256")
         .update(archive)
         .digest("hex");
@@ -486,6 +555,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown draft sync failure";
+}
+
+function apiErrorDiagnostics(error: unknown): ProdxivApiError["diagnostics"] {
+  return error instanceof ProdxivApiError ? [...error.diagnostics] : [];
+}
+
+function isUnpublishableBotDraftError(
+  error: unknown,
+): error is ProdxivApiError {
+  return (
+    error instanceof ProdxivApiError &&
+    (error.code === "paper.invalid" ||
+      error.code === "paper.invalid_markdown" ||
+      error.code === "draft.source_required")
+  );
+}
+
+function formatValidationDiagnostics(
+  diagnostics: Array<{
+    code: string;
+    path: string;
+    message: string;
+  }>,
+): string {
+  return diagnostics
+    .map(
+      (diagnostic) =>
+        `${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}`,
+    )
+    .join("; ");
 }
 
 function configuredApiUrl(value: string | undefined): string {

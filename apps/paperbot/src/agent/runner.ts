@@ -282,6 +282,7 @@ export async function runAgent(
       now(dependencies).toISOString(),
       producer,
       runId,
+      mode,
     );
     const sourceArtifacts = await writeSourceArtifacts(runPath, source);
     reportProgress(dependencies, {
@@ -1089,6 +1090,7 @@ async function resolveDraftResponse(input: {
       input.evidence,
       input.run_path,
       response,
+      input.record.input.mode === "auto" ? "submission" : "draft",
     );
     if (assessment.diagnostics.length === 0) {
       input.record.workflow.repair_attempts = 0;

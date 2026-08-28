@@ -94,6 +94,7 @@ export interface AgentPaperMetadata {
   authors: AgentAuthor[];
   writers: AgentWriter[];
   status: AgentProductStatus;
+  license?: string;
   product_url?: string;
   repository_url?: string;
 }

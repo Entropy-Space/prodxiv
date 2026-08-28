@@ -75,6 +75,110 @@ test("publishes approved drafts and auto-publishes pending bot drafts", async ()
   expect(report.failed).toEqual([]);
 });
 
+test("rejects an unpublishable pending bot draft and preserves diagnostics", async () => {
+  const paperUuid = "00000000-0000-4000-8000-000000000004";
+  const rejected: string[] = [];
+  const diagnostic = {
+    severity: "error" as const,
+    code: "submission.license_required",
+    path: "metadata.license",
+    message: "submitted papers require a license",
+  };
+  const report = await promoteDrafts({
+    async listDrafts(input) {
+      return {
+        drafts:
+          input.review_status === "pending_review"
+            ? [pendingBotDraft(paperUuid, 1)]
+            : [],
+      };
+    },
+    async publishDraft() {
+      throw new Error("no approved draft should be published");
+    },
+    async approveAndPublishDraft() {
+      throw new ProdxivApiError(
+        422,
+        "paper.invalid",
+        "paper submission failed validation",
+        [diagnostic],
+      );
+    },
+    async createDraft() {
+      throw new Error("promotion must not create drafts");
+    },
+    async rejectDraft(rejectedUuid, input) {
+      rejected.push(
+        `${rejectedUuid}:${input.expected_revision}:${input.reason}`,
+      );
+      return { paper_uuid: rejectedUuid, revision: input.expected_revision };
+    },
+  });
+
+  expect(rejected).toEqual([
+    `${paperUuid}:1:Automatic publication validation failed; retained for audit.`,
+  ]);
+  expect(report.rejected).toEqual([
+    {
+      paper_uuid: paperUuid,
+      draft_revision: 1,
+      reason: "publication_invalid",
+      error_code: "paper.invalid",
+      message: "paper submission failed validation",
+      diagnostics: [diagnostic],
+    },
+  ]);
+  expect(report.failed).toEqual([]);
+});
+
+test("keeps an invalid author-approved draft for correction", async () => {
+  const paperUuid = "00000000-0000-4000-8000-000000000005";
+  const diagnostic = {
+    severity: "error" as const,
+    code: "submission.license_required",
+    path: "metadata.license",
+    message: "submitted papers require a license",
+  };
+  const report = await promoteDrafts({
+    async listDrafts(input) {
+      return {
+        drafts:
+          input.review_status === "approved"
+            ? [approvedDraft(paperUuid, 2)]
+            : [],
+      };
+    },
+    async publishDraft() {
+      throw new ProdxivApiError(
+        422,
+        "paper.invalid",
+        "paper submission failed validation",
+        [diagnostic],
+      );
+    },
+    async approveAndPublishDraft() {
+      throw new Error("no pending bot draft should be published");
+    },
+    async createDraft() {
+      throw new Error("promotion must not create drafts");
+    },
+    async rejectDraft() {
+      throw new Error("approved drafts must remain available for correction");
+    },
+  });
+
+  expect(report.rejected).toEqual([]);
+  expect(report.failed).toEqual([
+    {
+      paper_uuid: paperUuid,
+      draft_revision: 2,
+      error_code: "paper.invalid",
+      message: "paper submission failed validation",
+      diagnostics: [diagnostic],
+    },
+  ]);
+});
+
 test("submits complete batches only after verifying their final ZIPs", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "paperbot-draft-sync-"));
   const checkpoints = join(workspace, "checkpoints");
@@ -83,7 +187,7 @@ test("submits complete batches only after verifying their final ZIPs", async () 
   for (let index = 1; index <= 3; index += 1) {
     const outputPath = join(workspace, `example__project-${index}`);
     await mkdir(outputPath);
-    await writeFile(join(outputPath, "paper.md"), `# Paper ${index}\n`);
+    await writeFile(join(outputPath, "paper.md"), submissionReadyPaper(index));
     const archiveName = `2026-08-17_project-${index}_${runId(index)}_final.zip`;
     const archive = Buffer.from(`archive-${index}`);
     await writeFile(join(checkpoints, archiveName), archive);
@@ -181,7 +285,7 @@ test("submits successful projects and records an incomplete batch", async () => 
   for (let index = 1; index <= 2; index += 1) {
     const outputPath = join(workspace, `example__project-${index}`);
     await mkdir(outputPath);
-    await writeFile(join(outputPath, "paper.md"), `# Paper ${index}\n`);
+    await writeFile(join(outputPath, "paper.md"), submissionReadyPaper(index));
     const archiveName = `2026-08-21_project-${index}_${runId(index)}_final.zip`;
     const archive = Buffer.from(`archive-${index}`);
     await writeFile(join(checkpoints, archiveName), archive);
@@ -255,6 +359,78 @@ test("submits successful projects and records an incomplete batch", async () => 
   ]);
 });
 
+test("does not upload an auto draft that fails submission validation", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "paperbot-invalid-sync-"));
+  const checkpoints = join(workspace, "checkpoints");
+  const outputPath = join(workspace, "example__project-1");
+  await mkdir(checkpoints);
+  await mkdir(outputPath);
+  await writeFile(
+    join(outputPath, "paper.md"),
+    submissionReadyPaper(1).replace('license: "CC BY 4.0"\n', ""),
+  );
+  const archiveName = `2026-08-28_project-1_${runId(1)}_final.zip`;
+  const archive = Buffer.from("archive-1");
+  await writeFile(join(checkpoints, archiveName), archive);
+  const batchPath = join(workspace, "batch.json");
+  await writeFile(
+    batchPath,
+    JSON.stringify({
+      schema_version: "2",
+      projects: [
+        {
+          project_index: 1,
+          repository_url: "https://github.com/example/project-1",
+          output_path: outputPath,
+          state: "succeeded",
+          result: {
+            run_id: runId(1),
+            run_path: outputPath,
+            state: "needs_author_review",
+            checkpoint: {
+              reason: "needs_author_review",
+              archive: `../checkpoints/${archiveName}`,
+              archive_sha256: sha256(archive),
+            },
+          },
+        },
+      ],
+    }),
+  );
+  let createCalled = false;
+
+  const report = await submitBatchDrafts(batchPath, 1, {
+    async listDrafts() {
+      return { drafts: [] };
+    },
+    async publishDraft() {
+      throw new Error("submission must not publish drafts");
+    },
+    async approveAndPublishDraft() {
+      throw new Error("submission must not auto-publish drafts");
+    },
+    async createDraft() {
+      createCalled = true;
+      throw new Error("invalid papers must not be uploaded");
+    },
+    async rejectDraft() {
+      throw new Error("an empty pending queue must not rotate drafts");
+    },
+  });
+
+  expect(createCalled).toBe(false);
+  expect(report.submitted).toEqual([]);
+  expect(report.failed).toEqual([
+    {
+      project_index: 1,
+      repository_url: "https://github.com/example/project-1",
+      message: expect.stringContaining(
+        "submission.license_required metadata.license",
+      ),
+    },
+  ]);
+});
+
 function approvedDraft(paperUuid: string, revision: number) {
   return {
     paper_uuid: paperUuid,
@@ -271,6 +447,64 @@ function pendingBotDraft(paperUuid: string, revision: number) {
     owner_kind: "bot" as const,
     review: {},
   };
+}
+
+function submissionReadyPaper(index: number): string {
+  return `---
+schema_version: "2"
+title: "Paper ${index}"
+product_name: "Product ${index}"
+scope:
+  kind: product
+summary: "A submission-ready Paperbot evaluation fixture."
+authors:
+  - kind: "organization"
+    name: "Example"
+writers:
+  - kind: "agent"
+    name: "paperbot"
+    model: "fixture-model"
+status:
+  value: "concept"
+  determination: "declared"
+  confidence: "high"
+topics:
+  - "developer_tools"
+license: "CC BY 4.0"
+---
+
+# Summary
+
+This fixture is complete.
+
+# Background
+
+It exercises scheduled draft submission.
+
+# Motivation
+
+It keeps the submission boundary covered.
+
+# Related Work
+
+No comparison claims are made.
+
+# Core Features
+
+The fixture contains every required section.
+
+# Insights and Lessons
+
+Submission validation must happen before a remote write.
+
+# Limitations
+
+This is only a test fixture.
+
+# References
+
+No external references are required by this fixture.
+`;
 }
 
 function runId(index: number): string {

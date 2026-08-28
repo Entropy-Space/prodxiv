@@ -5,6 +5,7 @@ import {
   PaperbotError,
   validatePaperSource,
   type PaperValidationResult,
+  type ValidationProfile,
 } from "@prodxiv/paperbot-core";
 import { artifactPath } from "./artifacts.ts";
 import { evidenceIds } from "./evidence.ts";
@@ -75,6 +76,9 @@ export function renderPaper(
         ]),
     "topics:",
     ...draft.topics.map((topic) => `  - ${JSON.stringify(topic)}`),
+    ...(metadata.license === undefined
+      ? []
+      : [`license: ${JSON.stringify(metadata.license)}`]),
     ...(metadata.product_url === undefined
       ? []
       : [`product_url: ${JSON.stringify(metadata.product_url)}`]),
@@ -96,6 +100,7 @@ export function assessDraft(
   evidence: EvidenceItem[],
   runPath: string,
   draft: DraftResponse,
+  validationProfile: ValidationProfile,
 ): DraftAssessment {
   const diagnostics = draftFieldDiagnostics(draft);
   if (evidence.length > 0 && draft.evidence_ids.length === 0) {
@@ -117,7 +122,7 @@ export function assessDraft(
   const validation = validatePaperSource(
     paper,
     artifactPath(runPath, "paper.md"),
-    "draft",
+    validationProfile,
   );
   diagnostics.push(
     ...validation.report.diagnostics

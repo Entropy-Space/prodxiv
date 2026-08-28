@@ -123,7 +123,10 @@ produced the prose. An automatically released agent paper remains visibly
 identified as agent-written and does not claim human endorsement. The daily
 archive may publish an unchanged bot-owned draft after its review window. An
 author edit transfers control to the author and removes that draft from
-automatic approval. First-person voice does not authorize invented intent:
+automatic approval. Bot-generated paper prose released by the daily archive
+uses `CC BY 4.0`; this paper-content license does not copy, replace, or make a
+claim about the analyzed repository's software license. First-person voice
+does not authorize invented intent:
 statements about why the authors chose an approach, what they tried, or what
 they learned still require author input or inspectable evidence.
 

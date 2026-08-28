@@ -6,8 +6,11 @@ import type {
   AgentPaperMetadata,
   AgentPaperRequestMetadata,
   AgentProducerProvenance,
+  AgentRunMode,
   AgentSource,
 } from "./types.ts";
+
+export const AUTO_PAPER_LICENSE = "CC BY 4.0";
 
 export function completeAgentMetadata(
   requested: AgentPaperRequestMetadata,
@@ -16,6 +19,7 @@ export function completeAgentMetadata(
   timestamp: string,
   producer: AgentProducerProvenance,
   runId: string,
+  mode: AgentRunMode,
 ): AgentPaperMetadata {
   const repositoryUrl = normalizeOptionalSourceUrl(source.canonical_url);
   const homepageUrl = normalizeOptionalSourceUrl(source.homepage_url);
@@ -63,6 +67,7 @@ export function completeAgentMetadata(
       },
     ],
     status: completeStatus(requested, source, timestamp),
+    ...(mode === "auto" ? { license: AUTO_PAPER_LICENSE } : {}),
     ...(requested.repository_url === undefined && repositoryUrl !== undefined
       ? { repository_url: repositoryUrl }
       : {}),
