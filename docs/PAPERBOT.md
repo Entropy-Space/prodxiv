@@ -237,7 +237,11 @@ and an unattended auto mode:
   records material working assumptions in `assumptions.json`, renders them as
   explicitly unverified and conditional in the private paper, and keeps open
   issues in `questions.md`. A successful run ends at `needs_author_review` and
-  seals exactly one `*_final.zip`.
+  seals exactly one `*_final.zip`. Auto papers license Paperbot's generated
+  prose as `CC BY 4.0` and must pass the canonical `submission` validation
+  profile. That paper-content license is independent of the analyzed
+  repository's software license. Interactive papers remain ordinary private
+  drafts and use the less restrictive `draft` validation profile.
 
 The run record stores `mode` and the selected `feedback` value; auto uses
 `feedback: none`.
@@ -528,6 +532,12 @@ draft. Three remains the daily target, but one failed repository no longer
 blocks the other successful drafts from reaching the review queue. An
 incomplete generation or submission still makes the workflow fail after its
 reports and private artifacts have been preserved.
+The submission host revalidates every generated paper with the canonical
+`submission` profile before making a remote write. Promotion reports preserve
+the API's structured validation diagnostics. If a pending bot-owned draft is
+not publishable, the scheduler marks it `rejected` and retains it for audit;
+an invalid author-approved draft remains available for author correction and
+keeps the promotion step failed.
 Draft creation and publication use stable idempotency keys, so retrying a
 partially completed workflow does not create duplicate papers. The Paperbot
 model and drafting sessions never receive an API token and cannot submit,

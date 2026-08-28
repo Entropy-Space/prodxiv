@@ -660,6 +660,7 @@ describe("runAgent", () => {
     );
     expect([...archiveEntries.keys()]).toContain("assumptions.json");
     const paper = await readFile(join(outputPath, "paper.md"), "utf8");
+    expect(paper).toContain('license: "CC BY 4.0"');
     expect(paper).toContain("Unverified Paperbot assumptions");
     expect(paper).toContain(autoAssumption.assumption);
     expect(

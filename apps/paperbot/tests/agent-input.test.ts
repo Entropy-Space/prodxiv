@@ -82,6 +82,7 @@ test("validates completed owner, writer, and status metadata", () => {
           },
         ],
       },
+      license: "CC BY 4.0",
       repository_url: "https://github.com/example/product",
     }),
   ).toEqual(
@@ -101,6 +102,7 @@ test("validates completed owner, writer, and status metadata", () => {
         determination: "inferred",
         observed_at: "2026-08-05T00:00:00.000Z",
       }),
+      license: "CC BY 4.0",
     }),
   );
 

@@ -136,6 +136,10 @@ Retrying the same request with the same idempotency key returns that paper with
 `200 OK`, even though the mutable draft content has already been removed. A
 conflicting reuse of the key returns `409 Conflict`. Validation failures return
 `422 Unprocessable Entity` and leave the draft available for revision.
+The daily scheduler records those structured diagnostics. It rejects and
+retains an unpublishable pending bot-owned draft so it cannot block the active
+queue forever; an invalid author-approved draft remains approved and available
+for author correction.
 
 The Paperbot model and drafting process never receive an API credential. The
 host scheduler alone requests a short-lived GitHub Actions identity and

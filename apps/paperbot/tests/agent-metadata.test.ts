@@ -22,6 +22,7 @@ describe("completeAgentMetadata", () => {
       OBSERVED_AT,
       producer(),
       "00000000-0000-4000-8000-000000000001",
+      "interactive",
     );
 
     expect(metadata).toMatchObject({
@@ -48,6 +49,21 @@ describe("completeAgentMetadata", () => {
         evidence: [{ kind: "github_release", tag: "v1.0.0" }],
       },
     });
+    expect(metadata.license).toBeUndefined();
+  });
+
+  test("licenses unattended Paperbot prose for archive publication", () => {
+    const metadata = completeAgentMetadata(
+      { title: "Product paper", product_name: "Product" },
+      githubSource([]),
+      "model",
+      OBSERVED_AT,
+      producer(),
+      "00000000-0000-4000-8000-000000000001",
+      "auto",
+    );
+
+    expect(metadata.license).toBe("CC BY 4.0");
   });
 
   test("treats an explicit prerelease as public beta", () => {
@@ -60,6 +76,7 @@ describe("completeAgentMetadata", () => {
       OBSERVED_AT,
       producer(),
       "00000000-0000-4000-8000-000000000001",
+      "interactive",
     );
 
     expect(metadata.status).toMatchObject({
@@ -78,6 +95,7 @@ describe("completeAgentMetadata", () => {
       OBSERVED_AT,
       producer(),
       "00000000-0000-4000-8000-000000000001",
+      "interactive",
     );
 
     expect(metadata.status).toEqual({
@@ -100,6 +118,7 @@ describe("completeAgentMetadata", () => {
       OBSERVED_AT,
       producer(),
       "00000000-0000-4000-8000-000000000001",
+      "interactive",
     );
 
     expect(metadata.authors).toEqual([
@@ -128,6 +147,7 @@ describe("completeAgentMetadata", () => {
         OBSERVED_AT,
         producer(),
         "00000000-0000-4000-8000-000000000001",
+        "interactive",
       ),
     ).toThrow("provide --author explicitly");
   });
