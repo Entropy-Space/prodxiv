@@ -78,7 +78,10 @@ describe("runTrendSelection", () => {
         fetch: async (input, init) => {
           const url = String(input);
           archiveRequests.push(url);
-          expect(init).toBeUndefined();
+          expect(init?.credentials).toBe("omit");
+          expect(init?.redirect).toBe("error");
+          expect(new Headers(init?.headers).has("authorization")).toBe(false);
+          expect(init?.signal).toBeInstanceOf(AbortSignal);
           return archiveResponse(snapshot.scopes);
         },
         create_runtime: (model) => {

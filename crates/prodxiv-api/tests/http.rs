@@ -17,17 +17,20 @@ use prodxiv_api::{
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, DraftOwnerKind, DraftReviewStatus, PaperDocument, PaperDraft,
     PaperDraftReview, PaperDraftRevision, PaperDraftRevisionSummary, PaperDraftSummary,
-    PaperStatus, ProductStatus, PublicationIdentity, PublicationPreparationError, PublishedPaper,
-    PublishedPaperSummary, prepare_publication,
+    PaperStatus, ProductStatus, PublicPaperDraftResponse, PublicationIdentity,
+    PublicationPreparationError, PublishedPaper, PublishedPaperSummary, prepare_publication,
 };
 use prodxiv_storage::{
     DraftCreateOutcome, DraftUpdateOutcome, GitHubTrendingEntry, GitHubTrendingLanguageScope,
     GitHubTrendingLanguageSelector, GitHubTrendingSnapshot, GitHubTrendingView,
-    NewGitHubTrendingSnapshot, PublicationCursor, PublicationPage, PublishOutcome,
-    TrendingImportOutcome,
+    NewGitHubTrendingSnapshot, PublicDraftCursor, PublicDraftPage, PublicationCursor,
+    PublicationFilter, PublicationPage, PublishOutcome, TrendingImportOutcome,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
+
+#[path = "http/public_read.rs"]
+mod public_read;
 
 const TOKEN: &str = "test_token_with_at_least_32_characters";
 const BOT_TOKEN: &str = "bot_token_with_at_least_32_characters";
@@ -63,6 +66,7 @@ struct FakeStore {
     draft_owners: Mutex<HashMap<String, DraftOwnerKind>>,
     draft_reviews: Mutex<HashMap<String, PaperDraftReview>>,
     draft_requests: Mutex<HashMap<String, (String, String)>>,
+    draft_publications: Mutex<HashMap<String, (String, u32)>>,
     publications: Mutex<Vec<PublishedPaper>>,
     requests: Mutex<HashMap<String, (String, PublishedPaper)>>,
     trending_requests: Mutex<HashMap<String, String>>,
@@ -211,6 +215,38 @@ impl PublicationStore for FakeStore {
                 updated_at: revision.created_at.clone(),
             })
         }))
+    }
+
+    async fn list_public_drafts(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicDraftCursor>,
+    ) -> Result<PublicDraftPage, StoreError> {
+        self.public_draft_page(limit, cursor)
+    }
+
+    async fn find_public_draft(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<PublicPaperDraftResponse>, StoreError> {
+        if let Some(draft) = self.find_draft(paper_uuid).await? {
+            return Ok(
+                prodxiv_domain::PublicPaperDraft::from_pending(&draft).map(|draft| {
+                    PublicPaperDraftResponse::Draft {
+                        draft: Box::new(draft),
+                    }
+                }),
+            );
+        }
+        Ok(self
+            .draft_publications
+            .lock()
+            .expect("fake publication mappings should lock")
+            .get(paper_uuid)
+            .map(|(paper_id, revision)| PublicPaperDraftResponse::Published {
+                paper_id: paper_id.clone(),
+                revision: *revision,
+            }))
     }
 
     async fn update_draft(
@@ -549,6 +585,13 @@ impl PublicationStore for FakeStore {
             .lock()
             .expect("fake store should lock")
             .push(published.clone());
+        self.draft_publications
+            .lock()
+            .expect("fake publication mappings should lock")
+            .insert(
+                paper_uuid.to_owned(),
+                (published.paper_id.clone(), published.revision),
+            );
         self.requests
             .lock()
             .expect("fake requests should lock")
@@ -688,45 +731,43 @@ impl PublicationStore for FakeStore {
         limit: u32,
         cursor: Option<&PublicationCursor>,
     ) -> Result<PublicationPage, StoreError> {
-        let publications = self
+        self.publication_page(limit, cursor, &PublicationFilter::default())
+    }
+
+    async fn search_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+        filter: &PublicationFilter,
+    ) -> Result<PublicationPage, StoreError> {
+        self.publication_page(limit, cursor, filter)
+    }
+
+    async fn list_paper_topics(&self) -> Result<Vec<String>, StoreError> {
+        let mut topics = self
+            .latest_publications()
+            .into_iter()
+            .flat_map(|(paper, _)| paper.metadata.topics)
+            .collect::<Vec<_>>();
+        topics.sort();
+        topics.dedup();
+        Ok(topics)
+    }
+
+    async fn list_paper_revisions(
+        &self,
+        paper_id: &str,
+    ) -> Result<Vec<PublishedPaperSummary>, StoreError> {
+        let mut revisions = self
             .publications
             .lock()
             .expect("fake store should lock")
-            .clone();
-        let mut entries = publications
             .iter()
-            .enumerate()
-            .map(|(index, paper)| {
-                (
-                    PublishedPaperSummary::from(paper),
-                    PublicationCursor {
-                        created_at_micros: i64::try_from(index + 1)
-                            .expect("test publication count fits in i64"),
-                        paper_id: paper.paper_id.clone(),
-                    },
-                )
-            })
-            .filter(|(_, item_cursor)| {
-                cursor.is_none_or(|cursor| {
-                    (item_cursor.created_at_micros, &item_cursor.paper_id)
-                        < (cursor.created_at_micros, &cursor.paper_id)
-                })
-            })
+            .filter(|paper| paper.paper_id == paper_id)
+            .map(PublishedPaperSummary::from)
             .collect::<Vec<_>>();
-        entries.sort_by(|(_, left), (_, right)| {
-            (right.created_at_micros, &right.paper_id)
-                .cmp(&(left.created_at_micros, &left.paper_id))
-        });
-        let limit = usize::try_from(limit).expect("u32 fits in usize");
-        let has_more = entries.len() > limit;
-        entries.truncate(limit);
-        let next_cursor = has_more
-            .then(|| entries.last().map(|(_, cursor)| cursor.clone()))
-            .flatten();
-        Ok(PublicationPage {
-            papers: entries.into_iter().map(|(paper, _)| paper).collect(),
-            next_cursor,
-        })
+        revisions.sort_by_key(|paper| std::cmp::Reverse(paper.revision));
+        Ok(revisions)
     }
 
     async fn github_trending_view(

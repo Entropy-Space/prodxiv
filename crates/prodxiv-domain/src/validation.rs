@@ -44,6 +44,15 @@ pub enum DiagnosticSeverity {
 }
 
 pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> ValidationReport {
+    let mut diagnostics = validate_metadata(paper, profile);
+    validate_sections(&paper.markdown, &mut diagnostics);
+    report(diagnostics)
+}
+
+pub(crate) fn validate_metadata(
+    paper: &PaperDocument,
+    profile: ValidationProfile,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let metadata = &paper.metadata;
 
@@ -295,8 +304,7 @@ pub fn validate_paper(paper: &PaperDocument, profile: ValidationProfile) -> Vali
         }
     }
 
-    validate_sections(&paper.markdown, &mut diagnostics);
-    report(diagnostics)
+    diagnostics
 }
 
 fn validate_scope(paper: &PaperDocument, diagnostics: &mut Vec<Diagnostic>) {

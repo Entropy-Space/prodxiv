@@ -1566,6 +1566,27 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Literal case-insensitive search across latest title, summary, product, author names, repository URL, and paper identifier",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "description": "Exact topic in the latest published revision; historical internal repeated underscores are accepted",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[a-z0-9](?:[a-z0-9_]*[a-z0-9])?$"
+            }
           }
         ],
         "responses": {
@@ -1714,6 +1735,97 @@
         ]
       }
     },
+    "/v1/papers/topics": {
+      "get": {
+        "tags": [
+          "public_read"
+        ],
+        "operationId": "list_paper_topics",
+        "responses": {
+          "200": {
+            "description": "Sorted unique topics in current published revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperTopicsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/papers/{paper_id}/revisions": {
+      "get": {
+        "tags": [
+          "public_read"
+        ],
+        "operationId": "list_paper_revisions",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "description": "Canonical prodxiv paper identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actual immutable revision summaries, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperRevisionListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Paper identifier is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Paper does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/papers/{paper_id}/revisions/{revision}": {
       "get": {
         "tags": [],
@@ -1772,6 +1884,140 @@
           },
           "500": {
             "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/drafts": {
+      "get": {
+        "tags": [
+          "public_read"
+        ],
+        "operationId": "list_public_drafts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum current pending drafts; defaults to 20",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque edit-order cursor returned by the previous page",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public current pending drafts, most recently edited first; never cache",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicPaperDraftListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Pagination parameters are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Public draft reads require deployment opt-in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/drafts/{paper_uuid}": {
+      "get": {
+        "tags": [
+          "public_read"
+        ],
+        "operationId": "get_public_draft",
+        "parameters": [
+          {
+            "name": "paper_uuid",
+            "in": "path",
+            "description": "Unpublished paper UUID, or UUID of a draft promoted to a publication",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current pending draft or its exact promoted publication identity; never cache",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicPaperDraftResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No public pending draft or publication mapping exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reading failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Public draft reads require deployment opt-in",
             "content": {
               "application/json": {
                 "schema": {
@@ -2521,6 +2767,20 @@
         },
         "additionalProperties": false
       },
+      "PaperRevisionListResponse": {
+        "type": "object",
+        "required": [
+          "revisions"
+        ],
+        "properties": {
+          "revisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublishedPaperSummary"
+            }
+          }
+        }
+      },
       "PaperScope": {
         "type": "object",
         "required": [
@@ -2562,6 +2822,20 @@
             "$ref": "#/components/schemas/ProductStatusObservation"
           }
         ]
+      },
+      "PaperTopicsResponse": {
+        "type": "object",
+        "required": [
+          "topics"
+        ],
+        "properties": {
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "PaperWriter": {
         "type": "object",
@@ -2681,6 +2955,167 @@
           },
           "value": {
             "$ref": "#/components/schemas/ProductStatus"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicDraftReviewStatus": {
+        "type": "string",
+        "description": "The public read surface intentionally has no approved or rejected state.",
+        "enum": [
+          "pending_review"
+        ]
+      },
+      "PublicPaperDraft": {
+        "type": "object",
+        "description": "Only the current pending revision is eligible for this public projection.\nThe Markdown itself is public draft content when deployment opts in; private\nreview actors, rejection reasons, history, and run artifacts are not included.",
+        "required": [
+          "paper_uuid",
+          "revision",
+          "owner_kind",
+          "review_status",
+          "updated_at",
+          "source_markdown"
+        ],
+        "properties": {
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PaperMetadata"
+              }
+            ]
+          },
+          "owner_kind": {
+            "$ref": "#/components/schemas/DraftOwnerKind"
+          },
+          "paper_uuid": {
+            "type": "string"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/PublicDraftReviewStatus"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_markdown": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicPaperDraftListResponse": {
+        "type": "object",
+        "required": [
+          "drafts"
+        ],
+        "properties": {
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicPaperDraftSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PublicPaperDraftResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "draft",
+              "kind"
+            ],
+            "properties": {
+              "draft": {
+                "$ref": "#/components/schemas/PublicPaperDraft"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "draft"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "paper_id",
+              "version",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "published"
+                ]
+              },
+              "paper_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Resolves an unpublished UUID to its current public draft or the exact\nimmutable revision to which it was promoted. No UUID enters published URLs."
+      },
+      "PublicPaperDraftSummary": {
+        "type": "object",
+        "description": "A pending draft's public reading metadata, without management or audit data.",
+        "required": [
+          "paper_uuid",
+          "revision",
+          "owner_kind",
+          "review_status",
+          "updated_at"
+        ],
+        "properties": {
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PaperMetadata",
+                "description": "Absent when draft front matter cannot represent valid paper metadata."
+              }
+            ]
+          },
+          "owner_kind": {
+            "$ref": "#/components/schemas/DraftOwnerKind"
+          },
+          "paper_uuid": {
+            "type": "string"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/PublicDraftReviewStatus"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string"
           }
         },
         "additionalProperties": false

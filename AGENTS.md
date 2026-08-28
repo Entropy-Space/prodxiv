@@ -160,7 +160,9 @@ The API must:
 - Associate authors and source Markdown with the exact paper revision they
   belong to.
 - Reject unsupported schema versions with a useful diagnostic.
-- Require authorization for draft access, submission, and revision creation.
+- Require authorization for draft management, submission, and revision creation.
+  Anonymous draft reading must use the opt-in public projection of current
+  pending drafts, never the privileged management response or review history.
 - Keep publication and moderation operations auditable.
 - Avoid relying on writable container filesystems or in-process job state.
 

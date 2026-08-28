@@ -1,10 +1,12 @@
 # Publishing API
 
-The Axum service is the authoritative boundary for private drafts and
+The Axum service is the authoritative boundary for draft management and
 immutable publication. The MVP exposes draft, public paper, and
 external-observation routes:
 
 - `GET /health`
+- `GET /v1/public/drafts`
+- `GET /v1/public/drafts/{paper_uuid}`
 - `POST /v1/drafts`
 - `GET /v1/drafts`
 - `GET`, `PUT`, and `DELETE /v1/drafts/{paper_uuid}`
@@ -15,21 +17,32 @@ external-observation routes:
 - `GET /v1/drafts/{paper_uuid}/revisions`
 - `GET /v1/drafts/{paper_uuid}/revisions/{revision}`
 - `POST /v1/papers`
+- `GET /v1/papers`
+- `GET /v1/papers/topics`
+- `GET /v1/papers/{paper_id}/revisions`
 - `GET /v1/papers/{paper_id}/revisions/{revision}`
 - `GET /v1/github/trending`
 - `POST /v1/github/trending/snapshots`
 
 The generated contract is checked in at `openapi/prodxiv-api.json`. Draft
-routes are private and accept the author publishing token or the separately
+management routes under `/v1/drafts` are private and accept the author publishing token or the separately
 scoped bot identity described in `docs/DRAFTS.md`. Production GitHub Actions
 jobs use short-lived OIDC tokens; static bot and ingestion tokens remain
 available for local operation and rollback.
 
-The website exposes the private `/drafts` review queue. It accepts the same
+The website exposes the private `/review/drafts` review queue. It accepts the same
 token from browser HTTP Basic authentication and forwards it server-side; do
 not configure `PRODXIV_PUBLISH_TOKEN` on the web project or expose it in client
 JavaScript. Any non-empty Basic username is accepted in this MVP, so API audit
 events use `PRODXIV_PUBLISH_ACTOR` until real reviewer identity is introduced.
+
+The public `/drafts` reading pages use only `/v1/public/drafts` responses and
+never forward a publishing credential. Public draft reads are disabled unless
+the API has `PRODXIV_PUBLIC_DRAFTS_ENABLED=true`. This explicitly opts current
+pending draft source and metadata into public reading, including existing
+pending drafts. Review notes, non-pending draft content, retained draft history,
+audit records, and run archives remain private. See `docs/DRAFTS.md` for the
+read projection and rollout boundary.
 
 ## Local environment
 
@@ -223,7 +236,12 @@ canonicalized.
 
 Public readers can request the latest revision of each paper with
 `GET /v1/papers`. The endpoint accepts `limit` from 1 to 100 and an opaque
-`cursor` returned as `next_cursor`. Exact historical revisions remain
+`cursor` returned as `next_cursor`. Optional `q` (up to 200 characters) searches
+published metadata, and `topic` filters the latest revision's topic membership.
+Filters apply to the entire archive before pagination; preserve them when using
+`next_cursor`. `GET /v1/papers/topics` lists available topics, and
+`GET /v1/papers/{paper_id}/revisions` lists confirmed published revision metadata
+newest first. Exact historical revisions remain
 available through `GET /v1/papers/{paper_id}/revisions/{revision}`. The legacy
 `/versions/{revision}` route remains readable for existing clients.
 
@@ -269,6 +287,10 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
+- `PRODXIV_PUBLIC_DRAFTS_ENABLED=true` only after confirming current pending
+  draft contents may be public. Omit it or use `false` to keep public draft reads
+  unavailable. This setting belongs on the API, not the website, and introduces
+  no new credential. Existing draft-management authorization is unchanged.
 - `PRODXIV_GITHUB_OIDC_REPOSITORY_ID` to `1313713424` on stable API
   deployments that accept the scheduled GitHub workflows. This enables OIDC.
 - `PRODXIV_GITHUB_OIDC_REPOSITORY` only when the trusted repository differs

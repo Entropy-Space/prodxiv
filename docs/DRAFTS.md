@@ -1,7 +1,8 @@
 # Draft papers
 
-Drafts are private, mutable working copies of unpublished papers. A draft is
-identified by a UUID from its first save. Publication identifiers such as
+Drafts are mutable working copies of unpublished papers. Management is private;
+deployments may explicitly enable public reading of current pending drafts.
+A draft is identified by a UUID from its first save. Publication identifiers such as
 `2608.000001` are allocated only when a paper is published.
 
 Draft source may be incomplete Markdown, but it must be non-empty and at most
@@ -29,7 +30,7 @@ ownership.
 
 ## HTTP resources
 
-All draft routes require either the author publishing token or the dedicated
+All management routes below require either the author publishing token or the dedicated
 bot identity. The production scheduler presents a short-lived GitHub Actions
 OIDC token; a distinct static bot token remains available for local operation
 and rollback. There is deliberately no `/v1/drafts/latest` alias; clients
@@ -62,9 +63,44 @@ characters. The same actor may safely retry the same key and exact Markdown;
 the first request returns `201 Created` and a replay returns `200 OK`. Reusing
 the key for different Markdown returns `409 Conflict`.
 
+## Public reading
+
+The public website uses a separate read-only API, never the management responses:
+
+```text
+GET /v1/public/drafts
+GET /v1/public/drafts/{paper_uuid}
+```
+
+Set `PRODXIV_PUBLIC_DRAFTS_ENABLED=true` on the **API project** to opt in. It is
+off by default; disabled reads return `503` with `draft.public_reads_disabled`.
+Before enabling it, check that every current pending draft's source and metadata
+may be public. Enabling this setting includes existing pending drafts, including
+author-owned drafts, and subsequent pending revisions. It does not automatically
+approve or publish anything and does not grant write access.
+
+The collection returns current `pending_review` drafts ordered by most recently
+edited, with `limit` and a `next_cursor` for pagination. Public summaries contain
+the UUID, revision, ownership, pending status, update time, and optional parsed
+paper metadata. A malformed or incomplete draft can have no metadata and remains
+readable with a clear warning; saving or displaying it is not publication
+validation. Reviewer identity, rejection reasons, retained draft snapshots,
+private run archives, conversations, and audit logs are excluded.
+
+The concrete UUID route returns either `kind: "draft"` with the current pending
+draft and source, or `kind: "published"` with the exact `paper_id` and `version`
+from the publication mapping. The website redirects the latter to the immutable
+short-ID reader. Approved, rejected, deleted, and unknown drafts do not expose
+source through this endpoint and return the same `404` behavior. Public draft
+responses use `Cache-Control: no-store`; the website also excludes mutable draft
+pages from indexing. Rejection cannot retract copies a reader already saved.
+
+`/drafts` and `/drafts/{paper_uuid}` are now public reading routes. They do not
+accept review writes. Use the separate author workspace for all review actions.
+
 ## Author review
 
-The private website route `/drafts` lists drafts by review state. In the MVP it
+The private website route `/review/drafts` lists drafts by review state. In the MVP it
 uses browser HTTP Basic authentication: enter any non-empty username and use
 the publishing bearer token as the password. The website forwards that token
 from the server request and does not put it in client JavaScript or its runtime

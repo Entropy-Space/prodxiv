@@ -1,5 +1,9 @@
 //! PostgreSQL persistence for prodxiv drafts, publications, and observations.
 
+mod public_read;
+
+pub use public_read::{PublicDraftCursor, PublicDraftPage, PublicationFilter};
+
 use std::collections::HashMap;
 
 use prodxiv_domain::{
@@ -1381,6 +1385,23 @@ impl PostgresStorage {
         limit: u32,
         cursor: Option<&PublicationCursor>,
     ) -> Result<PublicationPage, StorageError> {
+        self.search_latest(limit, cursor, &PublicationFilter::default())
+            .await
+    }
+
+    /// Searches only the latest immutable revision of every published paper.
+    /// Filtering precedes keyset pagination so matches beyond the first page
+    /// are not lost and superseded metadata does not enter search results.
+    ///
+    /// # Errors
+    ///
+    /// Returns a database or decoding error when stored records cannot be read.
+    pub async fn search_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+        filter: &PublicationFilter,
+    ) -> Result<PublicationPage, StorageError> {
         let fetch_limit = i64::from(limit) + 1;
         let cursor_micros = cursor.map(|value| value.created_at_micros);
         let cursor_paper_id = cursor.map(|value| value.paper_id.as_str());
@@ -1407,13 +1428,25 @@ impl PostgresStorage {
               )::bigint AS created_at_micros
             FROM latest_revisions
             JOIN papers USING (paper_id)
-            WHERE $1::bigint IS NULL
-              OR (
+            WHERE ($1::bigint IS NULL OR (
                 (
                   extract(epoch FROM latest_revisions.created_at) * 1000000
                 )::bigint,
                 paper_id
-              ) < ($1, $2)
+              ) < ($1, $2))
+              AND ($4::text IS NULL OR strpos(
+                lower(concat_ws(' ',
+                  paper_id,
+                  metadata->>'title',
+                  metadata->>'summary',
+                  metadata->>'product_name',
+                  metadata->>'repository_url',
+                  (SELECT string_agg(author->>'name', ' ')
+                   FROM jsonb_array_elements(metadata->'authors') AS author)
+                )),
+                lower($4)
+              ) > 0)
+              AND ($5::text IS NULL OR (metadata->'topics') ? $5)
             ORDER BY latest_revisions.created_at DESC, paper_id DESC
             LIMIT $3
             "#,
@@ -1421,6 +1454,8 @@ impl PostgresStorage {
         .bind(cursor_micros)
         .bind(cursor_paper_id)
         .bind(fetch_limit)
+        .bind(filter.q.as_deref())
+        .bind(filter.topic.as_deref())
         .fetch_all(&self.pool)
         .await?;
 
