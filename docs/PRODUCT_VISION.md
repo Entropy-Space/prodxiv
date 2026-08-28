@@ -215,6 +215,10 @@ The first release should focus on five surfaces:
 
 ## Design direction
 
+The approved [public website design and interactive wireframes](design/public-website/README.md)
+describe the next archive, reader, and public pending-draft experience. They are
+a design proposal, not a change to the current authenticated draft API.
+
 The interface should feel scholarly, quiet, and text-first without copying
 arXiv's identity literally.
 
