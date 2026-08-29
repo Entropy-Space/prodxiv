@@ -1,8 +1,9 @@
 # Draft papers
 
-Drafts are private, mutable working copies of unpublished papers. A draft is
-identified by a UUID from its first save. Publication identifiers such as
-`2608.000001` are allocated only when a paper is published.
+Drafts are mutable working copies of unpublished papers. Management is private,
+while the current pending revision is publicly readable through a restricted
+projection. A draft is identified by a UUID from its first save. Publication
+identifiers such as `2608.000001` are allocated only when a paper is published.
 
 Draft source may be incomplete Markdown, but it must be non-empty and at most
 2 MiB. Saving a draft does not imply that it passes the publication schema,
@@ -13,7 +14,8 @@ Each current draft has one review state:
 
 - `pending_review` is the default for a new draft or edited revision;
 - `approved` authorizes one exact revision for publication by a later run;
-- `rejected` keeps the revision private and may include a reason.
+- `rejected` removes the revision from the public pending queue and may include
+  a private reason.
 
 Review decisions are revision-bound. Uploading an edit creates the next draft
 revision and returns the draft to `pending_review`; it never changes an older
@@ -29,7 +31,7 @@ ownership.
 
 ## HTTP resources
 
-All draft routes require either the author publishing token or the dedicated
+All management routes below require either the author publishing token or the dedicated
 bot identity. The production scheduler presents a short-lived GitHub Actions
 OIDC token; a distinct static bot token remains available for local operation
 and rollback. There is deliberately no `/v1/drafts/latest` alias; clients
@@ -62,9 +64,43 @@ characters. The same actor may safely retry the same key and exact Markdown;
 the first request returns `201 Created` and a replay returns `200 OK`. Reusing
 the key for different Markdown returns `409 Conflict`.
 
+## Public reading
+
+The public website uses a separate read-only API, never the management responses:
+
+```text
+GET /v1/public/drafts
+GET /v1/public/drafts/{paper_uuid}
+```
+
+Every current `pending_review` draft is publicly readable through these routes,
+including existing and future author-owned and bot-owned drafts. Saving a new
+draft or revision in this state makes its current source public. Public reading
+does not automatically approve or publish anything and does not grant write
+access.
+
+The collection returns current `pending_review` drafts ordered by most recently
+edited, with `limit` and a `next_cursor` for pagination. Public summaries contain
+the UUID, revision, ownership, pending status, update time, and optional parsed
+paper metadata. A malformed or incomplete draft can have no metadata and remains
+readable with a clear warning; saving or displaying it is not publication
+validation. Reviewer identity, rejection reasons, retained draft snapshots,
+private run archives, conversations, and audit logs are excluded.
+
+The concrete UUID route returns either `kind: "draft"` with the current pending
+draft and source, or `kind: "published"` with the exact `paper_id` and `version`
+from the publication mapping. The website redirects the latter to the immutable
+short-ID reader. Approved, rejected, deleted, and unknown drafts do not expose
+source through this endpoint and return the same `404` behavior. Public draft
+responses use `Cache-Control: no-store`; the website also excludes mutable draft
+pages from indexing. Rejection cannot retract copies a reader already saved.
+
+`/drafts` and `/drafts/{paper_uuid}` are now public reading routes. They do not
+accept review writes. Use the separate author workspace for all review actions.
+
 ## Author review
 
-The private website route `/drafts` lists drafts by review state. In the MVP it
+The private website route `/review/drafts` lists drafts by review state. In the MVP it
 uses browser HTTP Basic authentication: enter any non-empty username and use
 the publishing bearer token as the password. The website forwards that token
 from the server request and does not put it in client JavaScript or its runtime

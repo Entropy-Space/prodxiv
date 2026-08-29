@@ -6,11 +6,13 @@ import "../styles/global.css";
 interface Props {
   title?: string;
   description?: string;
+  noindex?: boolean;
 }
 
 const {
   title = "prodxiv — Product ideas, documented properly",
   description = "A versioned archive of product papers covering motivation, design decisions, benchmarks, and lessons.",
+  noindex = false,
 } = Astro.props;
 const siteOrigin = Astro.site ?? Astro.url.origin;
 const canonicalUrl = new URL(Astro.url.pathname, siteOrigin);
@@ -24,7 +26,9 @@ const socialImage = new URL("/og.png", siteOrigin);
     <meta name="viewport" content="width=device-width" />
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#f4efe5" />
+    <meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1d1b" media="(prefers-color-scheme: dark)" />
+    {noindex && <meta name="robots" content="noindex" />}
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />

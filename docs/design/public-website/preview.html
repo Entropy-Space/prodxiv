@@ -1,0 +1,1880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>prodxiv public website design</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="prodxiv public website design" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;prodxiv public website design&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress {
+  display: flex;
+  height: 6px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 6px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .form-control,
+  .form-select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control,
+  .form-select {
+    font-size: max(16px, var(--font-size-normal));
+  }
+
+  .form-control[type=&quot;file&quot;]::file-selector-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control-color[type=&quot;color&quot;] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .form-control:is(
+    [type=&quot;date&quot;],
+    [type=&quot;datetime-local&quot;],
+    [type=&quot;month&quot;],
+    [type=&quot;time&quot;],
+    [type=&quot;week&quot;]
+  ) {
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 8px;
+  }
+
+  .form-check {
+    min-height: 44px;
+    padding-inline: 15px;
+  }
+
+  .form-check-input {
+    position: relative;
+  }
+
+  .form-check-input::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    content: &quot;&quot;;
+    transform: translate(-50%, -50%);
+  }
+
+  .form-check-label {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .form-range {
+    height: 44px;
+    touch-action: pan-y;
+  }
+
+  .form-range::-webkit-slider-runnable-track {
+    height: 44px;
+  }
+
+  .form-range::-moz-range-track {
+    height: 44px;
+  }
+
+  .form-range::-webkit-slider-thumb {
+    margin-top: 12px;
+  }
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;prodxiv-public-wireframes&quot;&gt;
+  &lt;div class=&quot;px-preview-label&quot;&gt;
+    &lt;span&gt;Public experience / Design preview&lt;/span&gt;
+    &lt;span&gt;Illustrative papers, identifiers, and dates&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;px-site&quot;&gt;
+    &lt;header class=&quot;px-header&quot;&gt;
+      &lt;button class=&quot;px-wordmark&quot; type=&quot;button&quot; data-route=&quot;papers&quot; aria-label=&quot;prodxiv home&quot;&gt;prod&lt;span&gt;xiv&lt;/span&gt;&lt;/button&gt;
+      &lt;nav class=&quot;px-navigation&quot; aria-label=&quot;Main navigation&quot;&gt;
+        &lt;button type=&quot;button&quot; data-route=&quot;papers&quot; aria-current=&quot;page&quot;&gt;Papers&lt;/button&gt;
+        &lt;button type=&quot;button&quot; data-route=&quot;drafts&quot;&gt;Drafts &lt;span class=&quot;px-nav-count&quot;&gt;3&lt;/span&gt;&lt;/button&gt;
+        &lt;button type=&quot;button&quot; data-route=&quot;about&quot;&gt;About&lt;/button&gt;
+      &lt;/nav&gt;
+    &lt;/header&gt;
+
+    &lt;main class=&quot;px-main&quot;&gt;
+      &lt;section data-page=&quot;papers&quot;&gt;
+        &lt;header class=&quot;px-page-heading&quot;&gt;
+          &lt;p class=&quot;px-kicker&quot;&gt;The public archive&lt;/p&gt;
+          &lt;h1&gt;The reasoning behind the work.&lt;/h1&gt;
+          &lt;p&gt;Product papers on decisions, mechanisms, and lessons. Published with a history you can follow.&lt;/p&gt;
+        &lt;/header&gt;
+        &lt;form class=&quot;px-discovery&quot; role=&quot;search&quot; aria-label=&quot;Find published papers&quot;&gt;
+          &lt;label for=&quot;px-paper-search&quot;&gt;Search papers
+            &lt;input id=&quot;px-paper-search&quot; type=&quot;search&quot; placeholder=&quot;Title, product, or idea…&quot; autocomplete=&quot;off&quot;&gt;
+          &lt;/label&gt;
+          &lt;label for=&quot;px-paper-topic&quot;&gt;Topic
+            &lt;select id=&quot;px-paper-topic&quot;&gt;
+              &lt;option value=&quot;&quot;&gt;All topics&lt;/option&gt;
+              &lt;option value=&quot;Knowledge systems&quot;&gt;Knowledge systems&lt;/option&gt;
+              &lt;option value=&quot;Developer tools&quot;&gt;Developer tools&lt;/option&gt;
+            &lt;/select&gt;
+          &lt;/label&gt;
+        &lt;/form&gt;
+        &lt;div class=&quot;px-list-heading&quot;&gt;
+          &lt;h2&gt;Published papers&lt;/h2&gt;
+          &lt;span id=&quot;px-results&quot; aria-live=&quot;polite&quot;&gt;2 papers · Newest first&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div id=&quot;px-papers-list&quot; class=&quot;px-paper-list&quot;&gt;&lt;/div&gt;
+        &lt;div id=&quot;px-no-results&quot; class=&quot;px-empty&quot; hidden&gt;
+          &lt;h3&gt;No papers match.&lt;/h3&gt;
+          &lt;p&gt;Try a different phrase or topic.&lt;/p&gt;
+          &lt;button class=&quot;px-button&quot; type=&quot;button&quot; data-clear-search&gt;Clear filters&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;aside class=&quot;px-draft-invitation&quot;&gt;
+          &lt;div&gt;
+            &lt;p class=&quot;px-kicker&quot;&gt;Before publication&lt;/p&gt;
+            &lt;h2&gt;Read the working drafts.&lt;/h2&gt;
+            &lt;p&gt;Three pending drafts are open to read. They are unpublished and may change.&lt;/p&gt;
+          &lt;/div&gt;
+          &lt;button class=&quot;px-button&quot; type=&quot;button&quot; data-route=&quot;drafts&quot;&gt;Browse drafts &lt;span aria-hidden=&quot;true&quot;&gt;↗&lt;/span&gt;&lt;/button&gt;
+        &lt;/aside&gt;
+      &lt;/section&gt;
+
+      &lt;section data-page=&quot;drafts&quot; hidden&gt;
+        &lt;header class=&quot;px-page-heading&quot;&gt;
+          &lt;p class=&quot;px-kicker&quot;&gt;Open to read · Not yet published&lt;/p&gt;
+          &lt;h1&gt;Pending drafts.&lt;/h1&gt;
+          &lt;p&gt;A view of work before publication. Read the current revision, with its assumptions and limitations intact.&lt;/p&gt;
+        &lt;/header&gt;
+        &lt;div class=&quot;px-draft-explainer&quot;&gt;
+          &lt;strong&gt;Reading is public. Review actions are restricted.&lt;/strong&gt;
+          &lt;p&gt;Unchanged, bot-owned drafts may be published on the next run. Author-managed drafts need explicit approval.&lt;/p&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;px-list-heading&quot;&gt;
+          &lt;h2&gt;Awaiting review&lt;/h2&gt;
+          &lt;span&gt;3 drafts · Most recently edited&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div id=&quot;px-drafts-list&quot; class=&quot;px-paper-list&quot;&gt;&lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section data-page=&quot;reader&quot; hidden&gt;
+        &lt;button class=&quot;px-back&quot; type=&quot;button&quot; id=&quot;px-reader-back&quot;&gt;← Published papers&lt;/button&gt;
+        &lt;aside id=&quot;px-reader-draft-notice&quot; class=&quot;px-draft-explainer&quot; hidden&gt;
+          &lt;strong&gt;Public draft · Pending review&lt;/strong&gt;
+          &lt;p&gt;Not yet published. Author attribution does not imply endorsement. This working paper may change.&lt;/p&gt;
+        &lt;/aside&gt;
+        &lt;header class=&quot;px-reader-heading&quot;&gt;
+          &lt;p class=&quot;px-kicker&quot; id=&quot;px-reader-kind&quot;&gt;&lt;/p&gt;
+          &lt;h1 id=&quot;px-reader-title&quot;&gt;&lt;/h1&gt;
+          &lt;p class=&quot;px-reader-author&quot;&gt;Attributed to &lt;span id=&quot;px-reader-author&quot;&gt;&lt;/span&gt;&lt;/p&gt;
+          &lt;p class=&quot;px-writer-line&quot;&gt;Written by Paperbot &lt;span aria-hidden=&quot;true&quot;&gt;·&lt;/span&gt; Agent-written&lt;/p&gt;
+          &lt;div class=&quot;px-reader-meta&quot;&gt;
+            &lt;span id=&quot;px-reader-identifier&quot;&gt;&lt;/span&gt;
+            &lt;span id=&quot;px-reader-date&quot;&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/header&gt;
+        &lt;div class=&quot;px-reader-tools&quot;&gt;
+          &lt;div class=&quot;px-reader-actions&quot;&gt;
+            &lt;button class=&quot;px-button&quot; type=&quot;button&quot; id=&quot;px-citation-button&quot;&gt;Cite this revision&lt;/button&gt;
+            &lt;button class=&quot;px-button&quot; type=&quot;button&quot; id=&quot;px-source-button&quot;&gt;Source .md&lt;/button&gt;
+            &lt;button class=&quot;px-button&quot; type=&quot;button&quot; id=&quot;px-draft-link-button&quot; hidden&gt;Link to this draft&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;label class=&quot;px-revision-control&quot; id=&quot;px-revision-control&quot;&gt;Revision
+            &lt;select id=&quot;px-revision-select&quot; aria-label=&quot;Published paper revision&quot;&gt;&lt;/select&gt;
+          &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;px-reader-grid&quot;&gt;
+          &lt;aside class=&quot;px-reader-sidebar&quot;&gt;
+            &lt;details class=&quot;px-contents&quot; open&gt;
+              &lt;summary&gt;On this page&lt;/summary&gt;
+              &lt;nav aria-label=&quot;Paper contents&quot;&gt;
+                &lt;a href=&quot;#px-section-summary&quot;&gt;Summary&lt;/a&gt;
+                &lt;a href=&quot;#px-section-background&quot;&gt;Background&lt;/a&gt;
+                &lt;a href=&quot;#px-section-architecture&quot;&gt;Architecture&lt;/a&gt;
+                &lt;a href=&quot;#px-section-limitations&quot;&gt;Limitations&lt;/a&gt;
+              &lt;/nav&gt;
+            &lt;/details&gt;
+            &lt;details class=&quot;px-provenance&quot; open&gt;
+              &lt;summary&gt;Writer provenance&lt;/summary&gt;
+              &lt;dl&gt;
+                &lt;dt&gt;Writer&lt;/dt&gt;&lt;dd&gt;Paperbot&lt;/dd&gt;
+                &lt;dt&gt;Model&lt;/dt&gt;&lt;dd&gt;deepseek-v4-flash&lt;/dd&gt;
+                &lt;dt&gt;Tool version&lt;/dt&gt;&lt;dd&gt;0.1.0-preview &lt;span class=&quot;px-example-tag&quot;&gt;example&lt;/span&gt;&lt;/dd&gt;
+              &lt;/dl&gt;
+            &lt;/details&gt;
+          &lt;/aside&gt;
+          &lt;article class=&quot;px-prose&quot;&gt;
+            &lt;section id=&quot;px-section-summary&quot;&gt;&lt;h2&gt;Summary&lt;/h2&gt;&lt;p id=&quot;px-reader-summary&quot;&gt;&lt;/p&gt;&lt;/section&gt;
+            &lt;section id=&quot;px-section-background&quot;&gt;&lt;h2&gt;Background&lt;/h2&gt;&lt;p id=&quot;px-reader-background&quot;&gt;&lt;/p&gt;&lt;/section&gt;
+            &lt;section id=&quot;px-section-architecture&quot;&gt;&lt;h2&gt;Architecture&lt;/h2&gt;&lt;p id=&quot;px-reader-architecture&quot;&gt;&lt;/p&gt;&lt;/section&gt;
+            &lt;section id=&quot;px-section-limitations&quot;&gt;&lt;h2&gt;Limitations&lt;/h2&gt;&lt;p id=&quot;px-reader-limitations&quot;&gt;&lt;/p&gt;&lt;/section&gt;
+            &lt;p class=&quot;px-reader-disclosure&quot;&gt;Agent-written analysis. Attribution identifies the subject&#x27;s credited authors; it does not establish their endorsement.&lt;/p&gt;
+            &lt;p class=&quot;px-revision-note&quot; id=&quot;px-reader-revision-note&quot;&gt;&lt;/p&gt;
+          &lt;/article&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section data-page=&quot;about&quot; hidden&gt;
+        &lt;header class=&quot;px-page-heading&quot;&gt;
+          &lt;p class=&quot;px-kicker&quot;&gt;About prodxiv&lt;/p&gt;
+          &lt;h1&gt;Product ideas, documented properly.&lt;/h1&gt;
+          &lt;p&gt;A versioned archive of how products work, why decisions matter, and what remains uncertain.&lt;/p&gt;
+        &lt;/header&gt;
+        &lt;div class=&quot;px-about-copy&quot;&gt;
+          &lt;h2&gt;Published papers preserve a record.&lt;/h2&gt;
+          &lt;p&gt;Every published revision has its own stable identifier and source. A correction creates a new revision; it does not silently rewrite history.&lt;/p&gt;
+          &lt;h2&gt;Drafts make work in progress readable.&lt;/h2&gt;
+          &lt;p&gt;Pending drafts are public working copies. A draft is not a published paper, an author endorsement, or a promise of publication.&lt;/p&gt;
+          &lt;h2&gt;Authorship stays explicit.&lt;/h2&gt;
+          &lt;p&gt;Author attribution and the writer of the prose are shown separately. Paperbot&#x27;s model and tool version are visible; private research logs and run archives are not.&lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+    &lt;/main&gt;
+
+    &lt;footer class=&quot;px-footer&quot;&gt;
+      &lt;span&gt;prodxiv / Product knowledge, preserved.&lt;/span&gt;
+      &lt;span&gt;Public reading · Versioned publication&lt;/span&gt;
+    &lt;/footer&gt;
+  &lt;/div&gt;
+
+  &lt;template id=&quot;px-entry-template&quot;&gt;
+    &lt;article class=&quot;px-entry&quot;&gt;
+      &lt;div class=&quot;px-entry-topline&quot;&gt;
+        &lt;span class=&quot;px-entry-id&quot;&gt;&lt;/span&gt;
+        &lt;span class=&quot;px-entry-state&quot;&gt;&lt;/span&gt;
+      &lt;/div&gt;
+      &lt;h3&gt;&lt;button class=&quot;px-title-link&quot; type=&quot;button&quot; data-open-paper&gt;&lt;/button&gt;&lt;/h3&gt;
+      &lt;p class=&quot;px-entry-summary&quot;&gt;&lt;/p&gt;
+      &lt;p class=&quot;px-entry-byline&quot;&gt;&lt;/p&gt;
+      &lt;div class=&quot;px-entry-bottom&quot;&gt;
+        &lt;span class=&quot;px-entry-topic&quot;&gt;&lt;/span&gt;
+        &lt;span class=&quot;px-entry-date&quot;&gt;&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/article&gt;
+  &lt;/template&gt;
+
+  &lt;dialog id=&quot;px-source-dialog&quot; aria-labelledby=&quot;px-dialog-title&quot;&gt;
+    &lt;header class=&quot;px-dialog-heading&quot;&gt;
+      &lt;h2 id=&quot;px-dialog-title&quot;&gt;Paper source&lt;/h2&gt;
+      &lt;button class=&quot;px-button&quot; type=&quot;button&quot; id=&quot;px-dialog-close&quot;&gt;Close&lt;/button&gt;
+    &lt;/header&gt;
+    &lt;p id=&quot;px-dialog-caption&quot; class=&quot;px-dialog-caption&quot;&gt;&lt;/p&gt;
+    &lt;label class=&quot;px-source-label&quot; for=&quot;px-dialog-content&quot;&gt;Select and copy
+      &lt;textarea id=&quot;px-dialog-content&quot; readonly rows=&quot;8&quot; spellcheck=&quot;false&quot;&gt;&lt;/textarea&gt;
+    &lt;/label&gt;
+  &lt;/dialog&gt;
+  &lt;p id=&quot;px-screen-announcement&quot; class=&quot;px-sr-only&quot; aria-live=&quot;polite&quot;&gt;&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;style&gt;
+  #prodxiv-public-wireframes {
+    --px-paper: light-dark(#f7f4ee, #1c1d1b);
+    --px-ink: light-dark(#24251f, #eeeee3);
+    --px-muted: light-dark(#626257, #b7b8aa);
+    --px-line: light-dark(#dcd8cc, #42463b);
+    --px-accent: light-dark(#823f35, #e7aa97);
+    --px-tint: light-dark(#eeeade, #282b24);
+    --px-draft: light-dark(#f3e9d7, #30291c);
+    --px-draft-ink: light-dark(#735220, #e6c792);
+    --px-overlay: light-dark(#1c211e66, #00000088);
+    color: var(--px-ink);
+    font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.55;
+    container-type: inline-size;
+  }
+  #prodxiv-public-wireframes * { box-sizing: border-box; }
+  #prodxiv-public-wireframes [hidden] { display: none !important; }
+  #prodxiv-public-wireframes button,
+  #prodxiv-public-wireframes input,
+  #prodxiv-public-wireframes select,
+  #prodxiv-public-wireframes textarea { font: inherit; color: inherit; }
+  #prodxiv-public-wireframes button { cursor: pointer; }
+  #prodxiv-public-wireframes a { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-preview-label {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px;
+    padding: 0 0 12px; color: var(--px-muted); font-size: 11px;
+  }
+  #prodxiv-public-wireframes .px-site { background: var(--px-paper); border-top: 3px solid var(--px-accent); }
+  #prodxiv-public-wireframes .px-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 10px 24px; padding: 16px 32px; border-bottom: 1px solid var(--px-line);
+  }
+  #prodxiv-public-wireframes .px-wordmark {
+    background: transparent; border: 0; padding: 0; font-family: Georgia, &quot;Times New Roman&quot;, serif;
+    font-size: 30px; letter-spacing: -1.8px; line-height: 1.1; min-height: 44px;
+  }
+  #prodxiv-public-wireframes .px-wordmark span { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-navigation { display: flex; gap: 18px; align-items: center; }
+  #prodxiv-public-wireframes .px-navigation button {
+    min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--px-muted);
+    border-bottom: 2px solid transparent; font-size: 13px;
+  }
+  #prodxiv-public-wireframes .px-navigation button[aria-current=&quot;page&quot;] { color: var(--px-accent); border-bottom-color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-nav-count { margin-left: 3px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-main { padding: 32px; }
+  #prodxiv-public-wireframes .px-page-heading { margin-bottom: 26px; }
+  #prodxiv-public-wireframes .px-kicker {
+    margin: 0 0 10px; color: var(--px-accent); text-transform: uppercase; letter-spacing: 1.4px;
+    font-size: 11px; font-weight: 500;
+  }
+  #prodxiv-public-wireframes h1 {
+    margin: 0; font-family: Georgia, &quot;Times New Roman&quot;, serif; font-size: clamp(30px, 5cqw, 43px);
+    line-height: 1.1; font-weight: 400; letter-spacing: -1.2px; text-wrap: balance;
+  }
+  #prodxiv-public-wireframes .px-page-heading &gt; p:last-child { max-width: 57ch; margin: 14px 0 0; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-discovery { display: grid; grid-template-columns: minmax(0, 1fr) 174px; gap: 12px; margin-bottom: 26px; }
+  #prodxiv-public-wireframes .px-discovery label,
+  #prodxiv-public-wireframes .px-source-label { display: grid; gap: 6px; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes input,
+  #prodxiv-public-wireframes select,
+  #prodxiv-public-wireframes textarea {
+    min-width: 0; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--px-line);
+    border-radius: 3px; background: var(--px-paper); font-size: 16px;
+  }
+  #prodxiv-public-wireframes input::placeholder { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-list-heading { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: space-between; align-items: baseline; padding-bottom: 12px; }
+  #prodxiv-public-wireframes .px-list-heading h2 { margin: 0; font-size: 14px; font-weight: 500; }
+  #prodxiv-public-wireframes .px-list-heading &gt; span { color: var(--px-muted); font-size: 11px; }
+  #prodxiv-public-wireframes .px-entry { border-top: 1px solid var(--px-line); padding: 20px 0; }
+  #prodxiv-public-wireframes .px-entry-topline,
+  #prodxiv-public-wireframes .px-entry-bottom { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 5px 14px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-entry-id { font-family: &quot;SFMono-Regular&quot;, Consolas, monospace; }
+  #prodxiv-public-wireframes .px-entry-state { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-entry[data-stage=&quot;draft&quot;] .px-entry-state { color: var(--px-draft-ink); }
+  #prodxiv-public-wireframes .px-entry h3 { margin: 9px 0; font-weight: 400; }
+  #prodxiv-public-wireframes .px-title-link {
+    display: block; border: 0; background: transparent; padding: 0; text-align: left; max-width: 100%;
+    font-family: Georgia, &quot;Times New Roman&quot;, serif; font-size: 25px; font-weight: 400; line-height: 1.2;
+    letter-spacing: -0.4px; text-decoration-thickness: 1px; text-underline-offset: 4px;
+  }
+  #prodxiv-public-wireframes .px-title-link:hover { text-decoration: underline; color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-entry-summary { margin: 0; max-width: 66ch; font-size: 14px; }
+  #prodxiv-public-wireframes .px-entry-byline { margin: 10px 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-entry-topic { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-draft-invitation {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+    margin-top: 12px; padding: 22px; background: var(--px-tint);
+  }
+  #prodxiv-public-wireframes .px-draft-invitation &gt; div { flex: 1 1 240px; }
+  #prodxiv-public-wireframes .px-draft-invitation h2 { margin: 0; font-family: Georgia, serif; font-size: 23px; line-height: 1.2; font-weight: 400; }
+  #prodxiv-public-wireframes .px-draft-invitation p:last-child { margin: 8px 0 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-button {
+    display: inline-flex; justify-content: center; align-items: center; gap: 9px; min-height: 44px;
+    padding: 8px 12px; border: 1px solid var(--px-line); border-radius: 3px; background: var(--px-paper);
+    font-size: 12px; text-align: center;
+  }
+  #prodxiv-public-wireframes .px-button:hover { border-color: var(--px-accent); color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-empty { padding: 24px 0; border-top: 1px solid var(--px-line); }
+  #prodxiv-public-wireframes .px-empty h3 { margin: 0; font-weight: 500; }
+  #prodxiv-public-wireframes .px-empty p { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-draft-explainer { background: var(--px-draft); color: var(--px-draft-ink); padding: 16px 18px; margin-bottom: 26px; font-size: 12px; }
+  #prodxiv-public-wireframes .px-draft-explainer strong { font-weight: 500; }
+  #prodxiv-public-wireframes .px-draft-explainer p { margin: 5px 0 0; }
+  #prodxiv-public-wireframes .px-back { border: 0; background: transparent; padding: 0; margin-bottom: 18px; min-height: 44px; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-reader-author { margin: 18px 0 3px; font-family: Georgia, serif; font-size: 16px; }
+  #prodxiv-public-wireframes .px-writer-line { margin: 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-reader-meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 18px; font-family: &quot;SFMono-Regular&quot;, Consolas, monospace; font-size: 11px; color: var(--px-muted); overflow-wrap: anywhere; }
+  #prodxiv-public-wireframes .px-reader-tools { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 18px 0 22px; border-bottom: 1px solid var(--px-line); }
+  #prodxiv-public-wireframes .px-reader-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #prodxiv-public-wireframes .px-revision-control { display: grid; gap: 4px; font-size: 11px; color: var(--px-muted); min-width: 145px; }
+  #prodxiv-public-wireframes .px-revision-control select { font-size: 13px; }
+  #prodxiv-public-wireframes .px-reader-grid { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 28px; padding-top: 26px; }
+  #prodxiv-public-wireframes .px-contents summary { font-size: 12px; font-weight: 500; cursor: pointer; min-height: 32px; }
+  #prodxiv-public-wireframes .px-contents nav { display: grid; margin: 2px 0 24px; }
+  #prodxiv-public-wireframes .px-contents a { padding: 7px 0; font-size: 12px; color: var(--px-muted); text-decoration: none; }
+  #prodxiv-public-wireframes .px-contents a:hover { color: var(--px-accent); text-decoration: underline; }
+  #prodxiv-public-wireframes .px-provenance { border-top: 1px solid var(--px-line); padding-top: 15px; }
+  #prodxiv-public-wireframes .px-provenance summary { margin: 0; min-height: 32px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  #prodxiv-public-wireframes .px-provenance dl { margin: 12px 0 0; font-size: 11px; }
+  #prodxiv-public-wireframes .px-provenance dt { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-provenance dd { margin: 2px 0 11px; overflow-wrap: anywhere; }
+  #prodxiv-public-wireframes .px-example-tag { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-prose { min-width: 0; font-family: Georgia, &quot;Times New Roman&quot;, serif; font-size: 17px; line-height: 1.7; }
+  #prodxiv-public-wireframes .px-prose section { scroll-margin-top: 12px; }
+  #prodxiv-public-wireframes .px-prose h2 { font-size: 24px; font-weight: 400; line-height: 1.2; margin: 0 0 14px; }
+  #prodxiv-public-wireframes .px-prose p { margin: 0 0 28px; }
+  #prodxiv-public-wireframes .px-prose .px-reader-disclosure,
+  #prodxiv-public-wireframes .px-prose .px-revision-note { font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; font-size: 12px; line-height: 1.6; color: var(--px-muted); padding-top: 16px; border-top: 1px solid var(--px-line); margin-bottom: 16px; }
+  #prodxiv-public-wireframes .px-about-copy { max-width: 60ch; }
+  #prodxiv-public-wireframes .px-about-copy h2 { margin: 28px 0 8px; font-family: Georgia, serif; font-weight: 400; font-size: 25px; }
+  #prodxiv-public-wireframes .px-about-copy p { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; border-top: 1px solid var(--px-line); padding: 20px 32px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes dialog {
+    width: min(580px, calc(100% - 32px)); max-height: 80%; padding: 22px;
+    color: var(--px-ink); background: var(--px-paper); border: 1px solid var(--px-line);
+    border-radius: 4px;
+  }
+  #prodxiv-public-wireframes dialog::backdrop { background: var(--px-overlay); }
+  #prodxiv-public-wireframes .px-dialog-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+  #prodxiv-public-wireframes .px-dialog-heading h2 { margin: 0; font-family: Georgia, serif; font-size: 25px; font-weight: 400; }
+  #prodxiv-public-wireframes .px-dialog-caption { color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-source-label textarea { resize: vertical; font-size: 13px; font-family: &quot;SFMono-Regular&quot;, Consolas, monospace; }
+  #prodxiv-public-wireframes .px-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  @container (max-width: 520px) {
+    #prodxiv-public-wireframes .px-header { padding: 12px 20px; gap: 4px 16px; }
+    #prodxiv-public-wireframes .px-navigation { gap: 14px; }
+    #prodxiv-public-wireframes .px-main { padding: 26px 20px; }
+    #prodxiv-public-wireframes .px-discovery { grid-template-columns: 1fr; }
+    #prodxiv-public-wireframes .px-title-link { font-size: 23px; }
+    #prodxiv-public-wireframes .px-reader-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+    #prodxiv-public-wireframes .px-reader-sidebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+    #prodxiv-public-wireframes .px-reader-sidebar summary { min-height: 44px; padding: 11px 0; }
+    #prodxiv-public-wireframes .px-provenance { border: 0; padding: 0; }
+    #prodxiv-public-wireframes .px-contents a { min-height: 44px; padding: 11px 0; }
+    #prodxiv-public-wireframes .px-prose { font-size: 17px; }
+    #prodxiv-public-wireframes .px-footer { padding: 18px 20px; }
+  }
+  @container (max-width: 350px) {
+    #prodxiv-public-wireframes .px-header { align-items: flex-start; }
+    #prodxiv-public-wireframes .px-navigation { width: 100%; gap: 24px; }
+    #prodxiv-public-wireframes .px-main { padding: 22px 16px; }
+    #prodxiv-public-wireframes .px-draft-invitation { padding: 18px; }
+    #prodxiv-public-wireframes .px-reader-actions { width: 100%; }
+  }
+&lt;/style&gt;
+
+&lt;script&gt;
+(() =&gt; {
+  const root = document.getElementById(&quot;prodxiv-public-wireframes&quot;);
+  if (!root) return;
+  const find = (selector) =&gt; {
+    const element = root.querySelector(selector);
+    if (!element) throw new Error(&quot;Missing preview element: &quot; + selector);
+    return element;
+  };
+  const papers = [
+    {
+      key: &quot;archive-prodxiv&quot;, stage: &quot;published&quot;, product_name: &quot;prodxiv&quot;,
+      title: &quot;Product knowledge, with a history.&quot;,
+      summary: &quot;A versioned archive for the decisions, mechanisms, and lessons behind products.&quot;,
+      topic: &quot;Knowledge systems&quot;, author: &quot;Entropy-Space&quot;, date: &quot;27 Aug 2026&quot;,
+      paper_id: &quot;2608.000001&quot;, revision: 2, revisions: [2, 1], owner_kind: &quot;author&quot;,
+      background: &quot;Product knowledge is spread across repositories, documentation, launch posts, and individual memory. A durable paper brings the reasoning and its limitations into one readable record.&quot;,
+      architecture: &quot;Markdown is the authoring source. The publishing API validates each submission and creates an immutable revision. The website reads that exact revision, preserving its source and identifiers.&quot;,
+      limitations: &quot;Structural validation does not prove that a claim is true. Readers still need inspectable evidence, explicit uncertainty, and a clear distinction between author attribution and agent-written prose.&quot;
+    },
+    {
+      key: &quot;archive-paperbot&quot;, stage: &quot;published&quot;, product_name: &quot;Paperbot&quot;,
+      title: &quot;Repository evidence before fluent prose.&quot;,
+      summary: &quot;A local-first drafting workflow that separates repository observations from author intention.&quot;,
+      topic: &quot;Developer tools&quot;, author: &quot;Entropy-Space&quot;, date: &quot;24 Aug 2026&quot;,
+      paper_id: &quot;2608.000002&quot;, revision: 1, revisions: [1], owner_kind: &quot;bot&quot;,
+      background: &quot;A repository can describe implementation well while leaving motivation, rejected alternatives, and lessons unexplained. A first draft should preserve that distinction.&quot;,
+      architecture: &quot;Paperbot selects a bounded source bundle and builds an evidence ledger before drafting. Deterministic validation checks the resulting paper; a separate host performs authorized publication.&quot;,
+      limitations: &quot;Source evidence can establish implementation details without establishing intention. Unmeasured performance claims and missing author context remain limitations, not facts.&quot;
+    },
+    {
+      key: &quot;draft-recovery&quot;, stage: &quot;draft&quot;, product_name: &quot;Paperbot&quot;,
+      title: &quot;Making automatic publication recoverable.&quot;,
+      summary: &quot;Keeping successful drafts moving while failed projects remain inspectable and retryable.&quot;,
+      topic: &quot;Developer tools&quot;, author: &quot;Entropy-Space&quot;, date: &quot;28 Aug 2026, 08:20 UTC&quot;,
+      paper_uuid: &quot;8a24e5cc-8460-4eae-9bdf-94023f99d012&quot;, revision: 3, owner_kind: &quot;bot&quot;,
+      background: &quot;A daily batch can have a mixture of successful and failed repositories. A single failure should remain visible without obscuring the drafts that were produced successfully.&quot;,
+      architecture: &quot;The host records project outcomes separately, retains debugging artifacts privately, and submits successful papers for review. Publication is a distinct operation on one exact draft revision.&quot;,
+      limitations: &quot;This is an unreviewed working account. Recovery depends on the failure category, validation result, and whether the saved revision remains unchanged. It does not promise that every draft will be published.&quot;
+    },
+    {
+      key: &quot;draft-sources&quot;, stage: &quot;draft&quot;, product_name: &quot;Paperbot&quot;,
+      title: &quot;Source boundaries for repository research.&quot;,
+      summary: &quot;A closer look at which repository files enter analysis, and which must stay outside it.&quot;,
+      topic: &quot;Developer tools&quot;, author: &quot;Entropy-Space&quot;, date: &quot;28 Aug 2026, 07:45 UTC&quot;,
+      paper_uuid: &quot;17d7d938-3f94-42b2-8db1-d4bfa0a98271&quot;, revision: 1, owner_kind: &quot;bot&quot;,
+      background: &quot;Repository research needs enough implementation context to be useful, without treating every file as an appropriate input. Selection and exclusion are part of the evidence boundary.&quot;,
+      architecture: &quot;The scanner applies explicit exclusions and bounded selection. Public repository reads are pinned to a source revision. Run artifacts preserve provenance separately from the public paper.&quot;,
+      limitations: &quot;A bounded selection can miss important context. Excluding sensitive paths is a safety measure, not proof that every included document is suitable for public release.&quot;
+    },
+    {
+      key: &quot;draft-intention&quot;, stage: &quot;draft&quot;, product_name: &quot;prodxiv&quot;,
+      title: &quot;What the code cannot tell the reader.&quot;,
+      summary: &quot;An author-managed draft about making missing intention visible in a product paper.&quot;,
+      topic: &quot;Knowledge systems&quot;, author: &quot;Entropy-Space&quot;, date: &quot;27 Aug 2026, 16:10 UTC&quot;,
+      paper_uuid: &quot;cba50f57-2c76-4c82-a8a0-07812a7bef5d&quot;, revision: 2, owner_kind: &quot;author&quot;,
+      background: &quot;Implementation records the result of a decision, but often not the alternatives or constraints that shaped it. Those missing explanations matter to a reader trying to learn from the work.&quot;,
+      architecture: &quot;Repository observations and author statements remain distinct inputs. A human edit creates a new draft revision and moves the draft out of automatic bot approval.&quot;,
+      limitations: &quot;This draft still needs author review. Attribution, a public preview, or a recent edit does not by itself establish that its account of intention has been endorsed.&quot;
+    }
+  ];
+  const state = { page: &quot;papers&quot;, selected_key: undefined, selected_revision: undefined, query: &quot;&quot;, topic: &quot;&quot; };
+  const template = find(&quot;#px-entry-template&quot;);
+  const pages = Array.from(root.querySelectorAll(&quot;[data-page]&quot;));
+  const navigation = Array.from(root.querySelectorAll(&quot;.px-navigation [data-route]&quot;));
+  const dialog = find(&quot;#px-source-dialog&quot;);
+  const search = find(&quot;#px-paper-search&quot;);
+  const topic = find(&quot;#px-paper-topic&quot;);
+  const revisionSelect = find(&quot;#px-revision-select&quot;);
+  const contents = find(&quot;.px-contents&quot;);
+  const provenance = find(&quot;.px-provenance&quot;);
+  let compactReader;
+  const layoutObserver = new ResizeObserver((entries) =&gt; {
+    const compact = entries[0].contentRect.width &lt;= 520;
+    if (compact !== compactReader) {
+      compactReader = compact;
+      contents.open = !compact;
+      provenance.open = !compact;
+    }
+  });
+  layoutObserver.observe(root);
+
+  function renderList(target, records) {
+    target.replaceChildren();
+    records.forEach((paper) =&gt; {
+      const item = template.content.cloneNode(true);
+      item.querySelector(&quot;.px-entry&quot;).dataset.stage = paper.stage;
+      item.querySelector(&quot;.px-entry-id&quot;).textContent = paper.stage === &quot;published&quot;
+        ? paper.paper_id + &quot; · v&quot; + paper.revision
+        : &quot;Draft revision &quot; + paper.revision;
+      item.querySelector(&quot;.px-entry-state&quot;).textContent = paper.stage === &quot;published&quot; ? &quot;Published&quot; : &quot;Pending review&quot;;
+      const link = item.querySelector(&quot;[data-open-paper]&quot;);
+      link.dataset.openPaper = paper.key;
+      link.textContent = paper.title;
+      item.querySelector(&quot;.px-entry-summary&quot;).textContent = paper.summary;
+      item.querySelector(&quot;.px-entry-byline&quot;).textContent = paper.author + &quot; · Written by Paperbot&quot; + (paper.stage === &quot;draft&quot; ? &quot; · &quot; + (paper.owner_kind === &quot;bot&quot; ? &quot;Bot-owned&quot; : &quot;Author-managed&quot;) : &quot;&quot;);
+      item.querySelector(&quot;.px-entry-topic&quot;).textContent = paper.topic;
+      item.querySelector(&quot;.px-entry-date&quot;).textContent = (paper.stage === &quot;draft&quot; ? &quot;Edited &quot; : &quot;&quot;) + paper.date;
+      target.appendChild(item);
+    });
+  }
+
+  function filterPapers() {
+    const filtered = papers.filter((paper) =&gt; paper.stage === &quot;published&quot;
+      &amp;&amp; (!state.topic || paper.topic === state.topic)
+      &amp;&amp; [paper.title, paper.product_name, paper.summary, paper.author].join(&quot; &quot;).toLowerCase().includes(state.query.toLowerCase().trim()));
+    renderList(find(&quot;#px-papers-list&quot;), filtered);
+    find(&quot;#px-results&quot;).textContent = filtered.length + (filtered.length === 1 ? &quot; paper&quot; : &quot; papers&quot;) + &quot; · Newest first&quot;;
+    find(&quot;#px-no-results&quot;).hidden = filtered.length &gt; 0;
+  }
+
+  function showPage(page) {
+    state.page = page;
+    pages.forEach((element) =&gt; { element.hidden = element.dataset.page !== page; });
+    const selected = papers.find((paper) =&gt; paper.key === state.selected_key);
+    const activeRoute = page === &quot;reader&quot; ? (selected &amp;&amp; selected.stage === &quot;draft&quot; ? &quot;drafts&quot; : &quot;papers&quot;) : page;
+    navigation.forEach((element) =&gt; {
+      if (element.dataset.route === activeRoute) element.setAttribute(&quot;aria-current&quot;, &quot;page&quot;);
+      else element.removeAttribute(&quot;aria-current&quot;);
+    });
+    find(&quot;#px-screen-announcement&quot;).textContent = page === &quot;reader&quot; &amp;&amp; selected ? selected.title : (page === &quot;drafts&quot; ? &quot;Pending drafts&quot; : page === &quot;papers&quot; ? &quot;Published papers&quot; : &quot;About prodxiv&quot;);
+  }
+
+  function selectedPaper() {
+    return papers.find((paper) =&gt; paper.key === state.selected_key);
+  }
+
+  function paperDate(paper) {
+    return paper.key === &quot;archive-prodxiv&quot; &amp;&amp; state.selected_revision === 1 ? &quot;20 Aug 2026&quot; : paper.date;
+  }
+
+  function summaryText(paper) {
+    return paper.key === &quot;archive-prodxiv&quot; &amp;&amp; state.selected_revision === 1
+      ? &quot;A Markdown-first archive for product decisions and lessons, preserved as immutable paper revisions.&quot;
+      : paper.summary;
+  }
+
+  function paperPath(paper) {
+    return paper.stage === &quot;published&quot;
+      ? &quot;/papers/&quot; + paper.paper_id + &quot;/v&quot; + state.selected_revision
+      : &quot;/drafts/&quot; + paper.paper_uuid;
+  }
+
+  function renderReader() {
+    const paper = selectedPaper();
+    if (!paper) return;
+    const isDraft = paper.stage === &quot;draft&quot;;
+    find(&quot;#px-reader-back&quot;).textContent = isDraft ? &quot;← Pending drafts&quot; : &quot;← Published papers&quot;;
+    find(&quot;#px-reader-draft-notice&quot;).hidden = !isDraft;
+    find(&quot;#px-reader-kind&quot;).textContent = paper.product_name + &quot; / &quot; + (isDraft ? &quot;Working paper&quot; : &quot;Product paper&quot;);
+    find(&quot;#px-reader-title&quot;).textContent = paper.title;
+    find(&quot;#px-reader-author&quot;).textContent = paper.author;
+    find(&quot;#px-reader-identifier&quot;).textContent = isDraft
+      ? &quot;Draft &quot; + paper.paper_uuid + &quot; · Revision &quot; + paper.revision
+      : &quot;prodxiv:&quot; + paper.paper_id + &quot; · v&quot; + state.selected_revision;
+    find(&quot;#px-reader-date&quot;).textContent = (isDraft ? &quot;Edited &quot; : &quot;Published &quot;) + paperDate(paper);
+    find(&quot;#px-reader-summary&quot;).textContent = summaryText(paper);
+    [&quot;background&quot;, &quot;architecture&quot;, &quot;limitations&quot;].forEach((section) =&gt; {
+      find(&quot;#px-reader-&quot; + section).textContent = paper[section];
+    });
+    find(&quot;#px-citation-button&quot;).hidden = isDraft;
+    find(&quot;#px-source-button&quot;).hidden = isDraft;
+    find(&quot;#px-draft-link-button&quot;).hidden = !isDraft;
+    find(&quot;#px-revision-control&quot;).hidden = isDraft || paper.revisions.length &lt; 2;
+    revisionSelect.replaceChildren();
+    if (!isDraft) {
+      for (const revision of paper.revisions) {
+        const option = document.createElement(&quot;option&quot;);
+        option.value = String(revision);
+        option.textContent = &quot;v&quot; + revision + (revision === paper.revision ? &quot; · Latest&quot; : &quot; · Earlier&quot;);
+        revisionSelect.appendChild(option);
+      }
+      revisionSelect.value = String(state.selected_revision);
+    }
+    find(&quot;#px-reader-revision-note&quot;).textContent = isDraft
+      ? (paper.owner_kind === &quot;bot&quot; ? &quot;Bot-owned. This unchanged revision may be published on the next run.&quot; : &quot;Author-managed. This draft will not be automatically approved.&quot;) + &quot; Draft content is not an immutable publication.&quot;
+      : &quot;This exact published revision is immutable.&quot; + (state.selected_revision &lt; paper.revision ? &quot; A newer revision is available above.&quot; : &quot;&quot;);
+    showPage(&quot;reader&quot;);
+  }
+
+  function openDialog(title, caption, content) {
+    find(&quot;#px-dialog-title&quot;).textContent = title;
+    find(&quot;#px-dialog-caption&quot;).textContent = caption;
+    find(&quot;#px-dialog-content&quot;).value = content;
+    dialog.showModal();
+  }
+
+  root.addEventListener(&quot;click&quot;, (event) =&gt; {
+    if (!(event.target instanceof Element)) return;
+    const sectionLink = event.target.closest(&quot;.px-contents a&quot;);
+    if (sectionLink) {
+      event.preventDefault();
+      find(sectionLink.getAttribute(&quot;href&quot;)).scrollIntoView({ block: &quot;start&quot; });
+      return;
+    }
+    const route = event.target.closest(&quot;[data-route]&quot;);
+    if (route) {
+      showPage(route.dataset.route);
+      navigation.find((element) =&gt; element.dataset.route === route.dataset.route)?.focus();
+      return;
+    }
+    const paperButton = event.target.closest(&quot;[data-open-paper]&quot;);
+    if (paperButton) {
+      const paper = papers.find((candidate) =&gt; candidate.key === paperButton.dataset.openPaper);
+      if (paper) {
+        state.selected_key = paper.key;
+        state.selected_revision = paper.revision;
+        renderReader();
+        find(&quot;#px-reader-back&quot;).focus();
+      }
+      return;
+    }
+    if (event.target.closest(&quot;[data-clear-search]&quot;)) {
+      state.query = &quot;&quot;; state.topic = &quot;&quot;; search.value = &quot;&quot;; topic.value = &quot;&quot;; filterPapers(); search.focus();
+    }
+  });
+  find(&quot;.px-discovery&quot;).addEventListener(&quot;submit&quot;, (event) =&gt; { event.preventDefault(); filterPapers(); });
+  search.addEventListener(&quot;input&quot;, () =&gt; { state.query = search.value; filterPapers(); });
+  topic.addEventListener(&quot;change&quot;, () =&gt; { state.topic = topic.value; filterPapers(); });
+  find(&quot;#px-reader-back&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    const route = selectedPaper().stage === &quot;draft&quot; ? &quot;drafts&quot; : &quot;papers&quot;;
+    showPage(route);
+    navigation.find((element) =&gt; element.dataset.route === route)?.focus();
+  });
+  revisionSelect.addEventListener(&quot;change&quot;, () =&gt; { state.selected_revision = Number(revisionSelect.value); renderReader(); });
+  find(&quot;#px-dialog-close&quot;).addEventListener(&quot;click&quot;, () =&gt; { dialog.close(); });
+  find(&quot;#px-citation-button&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    const paper = selectedPaper();
+    openDialog(&quot;Cite this revision&quot;, &quot;Illustrative citation · Bound to the selected revision&quot;,
+      paper.author + &quot;. &quot; + paper.title + &quot; prodxiv:&quot; + paper.paper_id + &quot;v&quot; + state.selected_revision + &quot;. &quot; + paperDate(paper) + &quot;. Written by Paperbot.\nhttps://prodxiv.example&quot; + paperPath(paper));
+  });
+  find(&quot;#px-draft-link-button&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    const paper = selectedPaper();
+    openDialog(&quot;Link to this draft&quot;, &quot;Illustrative link · The draft URL identifies a mutable working paper.&quot;,
+      &quot;https://prodxiv.example&quot; + paperPath(paper));
+  });
+  find(&quot;#px-source-button&quot;).addEventListener(&quot;click&quot;, () =&gt; {
+    const paper = selectedPaper();
+    const source = [
+      &quot;---&quot;, &#x27;schema_version: &quot;2&quot;&#x27;, &#x27;title: &quot;&#x27; + paper.title + &#x27;&quot;&#x27;,
+      &#x27;product_name: &quot;&#x27; + paper.product_name + &#x27;&quot;&#x27;, &quot;version: &quot; + state.selected_revision,
+      &#x27;license: &quot;CC BY 4.0&quot;&#x27;, &quot;---&quot;, &quot;&quot;, &quot;# Summary&quot;, &quot;&quot;, summaryText(paper),
+      &quot;&quot;, &quot;# Background&quot;, &quot;&quot;, paper.background, &quot;&quot;, &quot;# Architecture&quot;, &quot;&quot;, paper.architecture,
+      &quot;&quot;, &quot;# Limitations&quot;, &quot;&quot;, paper.limitations
+    ].join(&quot;\n&quot;);
+    openDialog(&quot;Source Markdown&quot;, &quot;Abbreviated example source · The live site will return the exact archived Markdown.&quot;, source);
+  });
+  filterPapers();
+  renderList(find(&quot;#px-drafts-list&quot;), papers.filter((paper) =&gt; paper.stage === &quot;draft&quot;));
+  showPage(&quot;papers&quot;);
+})();
+&lt;/script&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+  let lastPointerWasTouch = false;
+  let pinnedByTouch = false;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    pinnedByTouch = false;
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handlePointer = (event) =&gt; {
+    lastPointerWasTouch =
+      event.type === &quot;pointerdown&quot; &amp;&amp; event.pointerType === &quot;touch&quot;;
+  };
+  const handleTouchClick = (event) =&gt; {
+    const isTouch = event.pointerType === &quot;touch&quot; || lastPointerWasTouch;
+    lastPointerWasTouch = false;
+    if (!isTouch || event.detail === 0) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (
+      trigger == null ||
+      !trigger.isConnected ||
+      getContent(trigger).length === 0 ||
+      (pinnedByTouch &amp;&amp; activeTrigger === trigger)
+    ) {
+      if (pinnedByTouch) {
+        closeTooltip();
+      }
+      return;
+    }
+    openTooltip(trigger);
+    pinnedByTouch = activeTrigger === trigger;
+    window.setTimeout(() =&gt; {
+      if (activeTrigger === trigger &amp;&amp; !trigger.isConnected) {
+        closeTooltip(false);
+      }
+    }, 0);
+  };
+  const handleLeave = (event) =&gt; {
+    if (pinnedByTouch) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    lastPointerWasTouch = false;
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    lastPointerWasTouch = false;
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerdown&quot;, handlePointer);
+    document.removeEventListener(&quot;pointercancel&quot;, handlePointer);
+    document.removeEventListener(&quot;click&quot;, handleTouchClick);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerdown&quot;, handlePointer);
+  document.addEventListener(&quot;pointercancel&quot;, handlePointer);
+  document.addEventListener(&quot;click&quot;, handleTouchClick);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

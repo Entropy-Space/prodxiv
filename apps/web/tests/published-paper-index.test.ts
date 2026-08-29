@@ -26,12 +26,15 @@ const summary = {
 
 describe("readPublishedPaperIndex", () => {
   test("maps API summaries to exact reader links", async () => {
-    let requestUrl = "";
+    const requestUrls: string[] = [];
     const result = await readPublishedPaperIndex({
       api_url: "https://api.prodxiv.example",
       limit: 20,
       fetch: async (input) => {
-        requestUrl = input.toString();
+        requestUrls.push(input.toString());
+        if (input.toString().endsWith("/topics")) {
+          return Response.json({ topics: ["developer_tools"] });
+        }
         return Response.json({
           papers: [summary],
           next_cursor: "next-page",
@@ -49,13 +52,43 @@ describe("readPublishedPaperIndex", () => {
           title: "Index fixture",
           summary: "A complete index fixture.",
           authors: ["Test Author"],
+          product_name: "Index product",
           topics: ["developer_tools"],
           href: "/papers/2607.000001/v1",
         },
       ],
       next_cursor: "next-page",
+      topics: ["developer_tools"],
+      topics_available: true,
     });
-    expect(requestUrl).toBe("https://api.prodxiv.example/v1/papers?limit=20");
+    expect(requestUrls).toContain(
+      "https://api.prodxiv.example/v1/papers?limit=20",
+    );
+  });
+
+  test("passes archive-wide filters and preserves papers when topics fail", async () => {
+    const requests: string[] = [];
+    const result = await readPublishedPaperIndex({
+      api_url: "https://api.prodxiv.example",
+      q: "Index fixture",
+      topic: "developer_tools",
+      cursor: "next/page",
+      fetch: async (input) => {
+        requests.push(input.toString());
+        if (input.toString().endsWith("/topics"))
+          throw new Error("internal failure");
+        return Response.json({ papers: [summary] });
+      },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      papers: [{ title: "Index fixture" }],
+      topics: [],
+      topics_available: false,
+    });
+    expect(requests).toContain(
+      "https://api.prodxiv.example/v1/papers?cursor=next%2Fpage&q=Index+fixture&topic=developer_tools",
+    );
   });
 
   test("returns a safe fallback when the API is unavailable", async () => {

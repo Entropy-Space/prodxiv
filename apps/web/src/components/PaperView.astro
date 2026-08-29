@@ -1,6 +1,10 @@
 ---
-import type { PublishedPaper } from "@prodxiv/api-client";
+import type { PublishedPaper, PublishedPaperSummary } from "@prodxiv/api-client";
+import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 import SiteLayout from "../layouts/SiteLayout.astro";
+import PaperActions from "./PaperActions.astro";
+import WriterDisclosure from "./WriterDisclosure.astro";
+import { formatPaperDate, publicationCitation, publicResourceUrl } from "./paper-presentation.ts";
 
 type PaperMetadata = PublishedPaper["metadata"];
 
@@ -9,426 +13,627 @@ export interface SectionHeading {
   text: string;
 }
 
-interface Props {
-  metadata: PaperMetadata;
-  paper_id: string;
-  revision: number;
-  published_at: string;
+interface CommonProps {
   section_headings: SectionHeading[];
 }
 
-const { metadata, paper_id, revision, published_at, section_headings } =
-  Astro.props;
-const publishedAt = new Intl.DateTimeFormat("en", {
-  dateStyle: "long",
-  timeZone: "UTC",
-}).format(new Date(`${published_at}T00:00:00Z`));
-const authorNames = metadata.authors.map((author) => author.name).join(", ");
-const status =
-  typeof metadata.status === "string" ? metadata.status : metadata.status.value;
-const statusLabel = status.replaceAll("_", " ");
-const statusObservation =
-  typeof metadata.status === "string" ? undefined : metadata.status;
-const writerNames = (metadata.writers ?? [])
-  .map((writer) =>
-    writer.kind === "agent" && writer.model
-      ? `${writer.name}${writer.tool_version ? ` ${writer.tool_version}` : ""} + ${writer.model}`
-      : writer.name,
-  )
-  .join(", ");
-const scopeLabel =
-  metadata.scope?.kind === "feature"
-    ? `Feature · ${metadata.scope.name}`
-    : metadata.scope?.kind === "release"
-      ? `Release · ${metadata.scope.product_version}`
-      : "Product overview";
+type Props = CommonProps & (
+  | {
+    kind: "published";
+    metadata: PaperMetadata;
+    paper_id: string;
+    revision: number;
+    published_at: string;
+    source_markdown: string;
+    canonical_url: string;
+    source_href: string;
+    revisions: PublishedPaperSummary[];
+    history_available: boolean;
+  }
+  | {
+    kind: "draft";
+    metadata?: PaperMetadata | null;
+    paper_uuid: string;
+    revision: number;
+    updated_at: string;
+    owner_kind: "author" | "bot";
+    canonical_url: string;
+    review_href: string;
+    incomplete?: boolean;
+  }
+  | {
+    kind: "reference";
+    metadata: PaperMetadata;
+    paper_id: string;
+    revision: number;
+    published_at: string;
+  }
+);
+
+const props = Astro.props;
+const metadata = props.metadata ?? undefined;
+const title = metadata?.title.trim() || "Untitled draft";
+const authorNames = metadata?.authors.map((author) => author.name).join(", ");
+const writers = metadata?.writers ?? [];
+const hasAgentWriter = writers.some((writer) => writer.kind === "agent");
+const paperId = props.kind === "draft" ? props.paper_uuid : props.paper_id;
+const date = props.kind === "draft" ? props.updated_at : props.published_at;
+const dateLabel = formatPaperDate(date, props.kind === "draft");
+const status = typeof metadata?.status === "string" ? metadata.status : metadata?.status.value;
+const statusObservation = typeof metadata?.status === "string" ? undefined : metadata?.status;
+const scopeLabel = metadata?.scope?.kind === "feature"
+  ? `Feature · ${metadata.scope.name}`
+  : metadata?.scope?.kind === "release"
+    ? `Release · ${metadata.scope.product_version}`
+    : "Product overview";
+const confirmedRevisions = props.kind === "published" && props.history_available
+  ? [...props.revisions].sort((left, right) => right.version - left.version)
+  : [];
+const newerRevision = confirmedRevisions.find((paper) => paper.version > props.revision);
+const citation = props.kind === "published"
+  ? publicationCitation({ metadata: props.metadata, paper_id: props.paper_id, version: props.revision, published_at: props.published_at }, props.canonical_url)
+  : undefined;
+const description = props.kind === "draft"
+  ? "An unpublished working paper on prodxiv. Reading a draft does not imply author endorsement or publication readiness."
+  : props.kind === "reference"
+    ? "A checked-in reference example of the prodxiv product-paper format, not an archive publication."
+    : `An immutable product paper revision attributed to ${authorNames}.`;
+
+const repositoryUrl = publicResourceUrl(metadata?.repository_url);
+const productUrl = publicResourceUrl(metadata?.product_url);
 ---
 
-<SiteLayout
-  title={`${metadata.title} — prodxiv`}
-  description={`A product paper by ${authorNames}, published on prodxiv.`}
->
-  <div class="paper-context">
-    <div class="shell paper-context__inner">
-      <a href="/">← Back to the archive</a>
-      <span>{paper_id}</span>
-    </div>
-  </div>
-
+<SiteLayout title={`${title} — prodxiv`} description={description} noindex={props.kind === "reference"}>
   <article class="paper shell">
+    <a class="paper-back" href={props.kind === "draft" ? "/drafts" : "/"}>
+      ← {props.kind === "draft" ? "Pending drafts" : "Published papers"}
+    </a>
+
+    {
+      props.kind === "draft" && (
+        <aside class="notice notice--draft" aria-label="Draft publication status">
+          <strong>Public draft · Pending review · Unpublished</strong>
+          <p>This working paper may change. Author attribution does not imply endorsement.</p>
+          <p>
+            {props.owner_kind === "bot"
+              ? "Bot-owned. If unchanged, it may be approved and published on the next bot run."
+              : "Author-managed. The bot will not automatically approve this draft; publication requires explicit approval."}
+          </p>
+        </aside>
+      )
+    }
+    {
+      props.kind === "reference" && (
+        <aside class="notice" aria-label="Reference example">
+          <strong>Reference example, not a published archive record.</strong>
+          <p>This checked-in paper demonstrates the format. Its identifier, date, and revision are example metadata.</p>
+        </aside>
+      )
+    }
+
     <header class="paper-header">
-      <div class="paper-kicker">
-        <span class="status">{statusLabel}</span>
-        <span>{scopeLabel}</span>
-        <span>Revision {revision}</span>
+      <p class="eyebrow">
+        {props.kind === "draft" ? "Working paper" : props.kind === "reference" ? "Format reference" : "Published paper"}
+        {metadata?.product_name && <> · {metadata.product_name}</>}
+      </p>
+      <h1>{title}</h1>
+      <p class="paper-attribution">
+        {authorNames ? <>Attributed to <strong>{authorNames}</strong></> : "Author attribution is not available."}
+      </p>
+      <p class="paper-writers"><WriterDisclosure writers={metadata?.writers} /></p>
+      {
+        hasAgentWriter && (
+          <p class="paper-endorsement">Agent-written prose. Attribution alone does not establish the authors’ endorsement.</p>
+        )
+      }
+      <div class="paper-identity">
+        <span>{props.kind === "draft" ? "Draft UUID" : props.kind === "reference" ? "Example ID" : "Identifier"}: {paperId}</span>
+        <span>{props.kind === "draft" ? "Draft revision" : "Revision"} {props.kind === "draft" ? "" : "v"}{props.revision}</span>
+        <span>
+          {props.kind === "draft" ? "Edited" : props.kind === "reference" ? "Example date" : "Published"}{" "}
+          <time datetime={date}>{dateLabel}</time>{props.kind === "draft" ? " UTC" : ""}
+        </span>
       </div>
-
-      <h1>{metadata.title}</h1>
-
-      <div class="paper-byline">
-        <p>
-          <span>Authors</span>
-          <strong>{authorNames}</strong>
-        </p>
-        <p>
-          <span>Published</span>
-          <strong>{publishedAt}</strong>
-        </p>
-        {
-          writerNames.length > 0 && (
-            <p>
-              <span>Written by</span>
-              <strong>{writerNames}</strong>
-            </p>
-          )
-        }
-      </div>
-
-      <ul class="topic-list" aria-label="Paper topics">
-        {metadata.topics.map((topic) => (
-          <li>{topic.replaceAll("_", " ")}</li>
-        ))}
-      </ul>
+      {
+        metadata && metadata.topics.length > 0 && (
+          <ul class="topic-list" aria-label="Paper topics">
+            {metadata.topics.map((topic) => (
+              <li><a href={`/?topic=${encodeURIComponent(topic)}`}>{topic.replaceAll("_", " ")}</a></li>
+            ))}
+          </ul>
+        )
+      }
     </header>
+
+    {
+      props.kind === "draft" && (props.incomplete || metadata === undefined) && (
+        <aside class="notice" aria-label="Incomplete draft">
+          <strong>Incomplete draft.</strong>
+          <p>Some metadata or body content is missing or could not be read. This page is not a publication-validation result.</p>
+        </aside>
+      )
+    }
+
+    <div class="paper-tools">
+      {
+        props.kind === "published" && (
+          <PaperActions
+            identifier={`${props.paper_id}v${props.revision}`}
+            citation={citation}
+            source_markdown={props.source_markdown}
+            source_href={props.source_href}
+          />
+        )
+      }
+      {
+        props.kind === "draft" && (
+          <>
+            <PaperActions identifier={`Draft ${props.paper_uuid} · revision ${props.revision}`} draft_url={props.canonical_url} />
+            <a class="paper-review-link" href={props.review_href}>Author review <span>(restricted)</span> ↗</a>
+          </>
+        )
+      }
+      {
+        props.kind === "published" && confirmedRevisions.length > 1 && (
+          <details class="revision-picker">
+            <summary>Revision v{props.revision}</summary>
+            <nav aria-label="Published paper revisions">
+              {confirmedRevisions.map((paper) => (
+                <a href={publicPaperPath(paper.paper_id, paper.version)} aria-current={paper.version === props.revision ? "page" : undefined}>
+                  v{paper.version} <span>{paper.published_at}</span>
+                </a>
+              ))}
+            </nav>
+          </details>
+        )
+      }
+      {props.kind === "reference" && <p class="reference-tools-note">Publication citations and archived downloads are available on published paper pages.</p>}
+    </div>
+    {
+      props.kind === "published" && !props.history_available && (
+        <p class="history-note" role="status">Revision history is temporarily unavailable. You are reading the archived revision v{props.revision}.</p>
+      )
+    }
+    {
+      newerRevision && (
+        <p class="history-note">
+          A newer revision is available: <a href={publicPaperPath(newerRevision.paper_id, newerRevision.version)}>read v{newerRevision.version}</a>.
+          This page preserves v{props.revision}.
+        </p>
+      )
+    }
 
     <div class="paper-grid">
       <aside class="paper-sidebar" aria-label="Paper information">
-        <div class="sidebar-block">
-          <p class="sidebar-label">Paper details</p>
-          <dl>
-            <div>
-              <dt>Identifier</dt>
-              <dd>{paper_id}</dd>
-            </div>
-            <div>
-              <dt>Revision</dt>
-              <dd>v{revision}</dd>
-            </div>
-            {
-              metadata.product_name && (
-                <div>
-                  <dt>Product</dt>
-                  <dd>{metadata.product_name}</dd>
-                </div>
-              )
-            }
-            <div>
-              <dt>Scope</dt>
-              <dd>{scopeLabel}</dd>
-            </div>
-            <div>
-              <dt>Status</dt>
-              <dd>{statusLabel}</dd>
-            </div>
-            {
-              statusObservation && (
-                <div>
-                  <dt>Status basis</dt>
-                  <dd>
-                    {statusObservation.determination.replaceAll("_", " ")} · {statusObservation.confidence}
-                  </dd>
-                </div>
-              )
-            }
-            <div>
-              <dt>License</dt>
-              <dd>{metadata.license}</dd>
-            </div>
-          </dl>
-        </div>
-
         {
-          metadata.communication_email && (
-            <a
-              class="source-link"
-              href={`mailto:${metadata.communication_email}`}
-            >
-              Contact the writer ↗
-            </a>
+          props.section_headings.length > 0 && (
+            <details class="sidebar-section" data-reader-disclosure open>
+              <summary>On this page</summary>
+              <nav aria-label="Paper contents">
+                <ol>
+                  {props.section_headings.map((heading) => (
+                    <li><a href={`#${heading.slug}`}>{heading.text}</a></li>
+                  ))}
+                </ol>
+              </nav>
+            </details>
           )
         }
-
+        <details class="sidebar-section" data-reader-disclosure open>
+          <summary>Writer provenance</summary>
+          {
+            writers.length > 0 ? writers.map((writer) => (
+              <dl class="writer-provenance">
+                <div><dt>Writer</dt><dd>{writer.name} · {writer.kind}</dd></div>
+                {writer.kind === "agent" && writer.model && <div><dt>Model</dt><dd>{writer.model}</dd></div>}
+                {writer.tool_version && <div><dt>Tool version</dt><dd>{writer.tool_version}</dd></div>}
+                {writer.generation_id && <div><dt>Generation</dt><dd>{writer.generation_id}</dd></div>}
+              </dl>
+            )) : <p class="sidebar-note">Writer provenance was not recorded in this paper’s metadata.</p>
+          }
+        </details>
         {
-          statusObservation?.evidence?.map((evidence) => (
-            <a class="source-link" href={evidence.url}>
-              Status evidence{evidence.tag ? ` · ${evidence.tag}` : ""} ↗
-            </a>
-          ))
-        }
-
-        <nav class="sidebar-block" aria-label="Table of contents">
-          <p class="sidebar-label">Contents</p>
-          <ol>
-            {section_headings.map((heading) => (
-              <li><a href={`#${heading.slug}`}>{heading.text}</a></li>
-            ))}
-          </ol>
-        </nav>
-
-        {
-          metadata.repository_url && (
-            <a class="source-link" href={metadata.repository_url}>
-              View source repository ↗
-            </a>
+          metadata && (
+            <details class="sidebar-section" data-reader-disclosure open>
+              <summary>Paper details</summary>
+              <dl>
+                {metadata.product_name && <div><dt>Product</dt><dd>{metadata.product_name}</dd></div>}
+                <div><dt>Scope</dt><dd>{scopeLabel}</dd></div>
+                {status && <div><dt>Product status</dt><dd>{status.replaceAll("_", " ")}</dd></div>}
+                {statusObservation && (
+                  <div><dt>Status basis</dt><dd>{statusObservation.determination.replaceAll("_", " ")} · {statusObservation.confidence}</dd></div>
+                )}
+                {statusObservation?.observed_at && <div><dt>Observed</dt><dd>{statusObservation.observed_at}</dd></div>}
+                <div><dt>Paper license</dt><dd>{metadata.license}</dd></div>
+                <div><dt>Schema</dt><dd>{metadata.schema_version}</dd></div>
+              </dl>
+              <div class="paper-resources">
+                {productUrl && <a href={productUrl} rel="noreferrer">Product website ↗</a>}
+                {repositoryUrl && <a href={repositoryUrl} rel="noreferrer">Source repository ↗</a>}
+                {metadata.communication_email && <a href={`mailto:${metadata.communication_email}`}>Contact the writer ↗</a>}
+                {statusObservation?.evidence?.map((evidence) => {
+                  const evidenceUrl = publicResourceUrl(evidence.url);
+                  return evidenceUrl && <a href={evidenceUrl} rel="noreferrer">Status evidence{evidence.tag ? ` · ${evidence.tag}` : ""} ↗</a>;
+                })}
+              </div>
+            </details>
           )
         }
       </aside>
-
       <div class="paper-body">
         <slot />
+        <footer class="paper-endnote">
+          {
+            props.kind === "published"
+              ? <>End of {props.paper_id}v{props.revision}. This published revision is immutable.</>
+              : props.kind === "draft"
+                ? <>End of draft revision {props.revision}. This paper is unpublished and may change.</>
+                : <>End of reference example. This is not an archive publication.</>
+          }
+        </footer>
       </div>
     </div>
   </article>
 </SiteLayout>
 
+<script>
+  const compactReader = window.matchMedia("(max-width: 680px)");
+  function updateReaderDisclosures() {
+    document.querySelectorAll<HTMLDetailsElement>("[data-reader-disclosure]").forEach((details) => {
+      details.open = !compactReader.matches;
+    });
+  }
+  updateReaderDisclosures();
+  compactReader.addEventListener("change", updateReaderDisclosures);
+</script>
+
 <style>
-  .paper-context {
-    border-bottom: 1px solid var(--line);
-    background: rgb(251 249 244 / 55%);
+  .paper {
+    padding-top: 1.1rem;
   }
 
-  .paper-context__inner {
-    display: flex;
-    justify-content: space-between;
-    padding-block: 0.8rem;
+  .paper-back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-bottom: 1rem;
     color: var(--ink-soft);
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-
-  .paper-context a {
+    font-size: 0.85rem;
     text-decoration: none;
   }
 
-  .paper {
-    padding-top: clamp(3.5rem, 8vw, 6.8rem);
+  .paper-back:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .paper-header {
-    max-width: 61rem;
-    padding-bottom: clamp(3rem, 6vw, 5rem);
-  }
-
-  .paper-kicker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.7rem 1.2rem;
-    align-items: center;
-    margin-bottom: 1.4rem;
-    color: var(--ink-soft);
-    font-family: var(--mono);
-    font-size: 0.7rem;
-    font-weight: 650;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .status {
-    padding: 0.25rem 0.48rem;
-    color: var(--accent-dark);
-    background: var(--accent-pale);
-    border-radius: 0.15rem;
+    max-width: 58rem;
   }
 
   .paper-header h1 {
-    max-width: 17ch;
+    max-width: 29ch;
     margin: 0;
     font-family: var(--serif);
-    font-size: clamp(2.8rem, 7vw, 5.8rem);
-    font-weight: 500;
-    line-height: 0.98;
-    letter-spacing: -0.05em;
+    font-size: clamp(2rem, 4.4vw, 3.3rem);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.025em;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
   }
 
-  .paper-byline {
+  .paper-attribution {
+    margin: 1.1rem 0 0.15rem;
+    font-family: var(--serif);
+    font-size: 1.12rem;
+    overflow-wrap: anywhere;
+  }
+
+  .paper-attribution strong {
+    font-weight: 500;
+  }
+
+  .paper-writers,
+  .paper-endorsement {
+    margin: 0.25rem 0;
+    color: var(--ink-soft);
+    font-size: 0.8rem;
+  }
+
+  .paper-identity {
     display: flex;
     flex-wrap: wrap;
-    gap: 1.5rem 3.5rem;
-    margin-top: 2.5rem;
-  }
-
-  .paper-byline p {
-    display: grid;
-    gap: 0.15rem;
-    margin: 0;
-  }
-
-  .paper-byline span {
+    gap: 0.45rem 1.4rem;
+    margin-top: 1.3rem;
     color: var(--ink-soft);
     font-family: var(--mono);
-    font-size: 0.64rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .paper-byline strong {
-    font-family: var(--serif);
-    font-size: 1.08rem;
-    font-weight: 600;
+    font-size: 0.73rem;
+    overflow-wrap: anywhere;
   }
 
   .topic-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin: 2rem 0 0;
+    gap: 0.5rem 1rem;
+    margin: 0.8rem 0 1.2rem;
     padding: 0;
     list-style: none;
+    font-size: 0.75rem;
   }
 
-  .topic-list li {
-    padding: 0.32rem 0.55rem;
+  .paper-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.8rem 1.5rem;
+    margin-top: 1.2rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .paper-review-link {
+    align-self: center;
+    padding-block: 0.65rem;
+    font-size: 0.8rem;
+  }
+
+  .paper-review-link span {
     color: var(--ink-soft);
+  }
+
+  .revision-picker {
+    min-width: 10.5rem;
+    font-size: 0.8rem;
+  }
+
+  .revision-picker > summary {
+    min-height: 44px;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.2rem;
+  }
+
+  .revision-picker nav {
+    display: grid;
+    margin-top: 0.5rem;
     border: 1px solid var(--line);
-    border-radius: 10rem;
-    font-size: 0.7rem;
-    text-transform: capitalize;
+  }
+
+  .revision-picker a {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.2rem;
+    min-height: 44px;
+    padding: 0.65rem 0.8rem;
+    text-decoration: none;
+  }
+
+  .revision-picker a[aria-current="page"] {
+    background: var(--paper-deep);
+  }
+
+  .revision-picker a span {
+    color: var(--ink-soft);
+  }
+
+  .history-note,
+  .reference-tools-note {
+    margin: 0.8rem 0 0;
+    color: var(--ink-soft);
+    font-size: 0.8rem;
+  }
+
+  .reference-tools-note {
+    margin: 0;
   }
 
   .paper-grid {
     display: grid;
-    grid-template-columns: minmax(12rem, 15rem) minmax(0, 47rem);
-    gap: clamp(3rem, 8vw, 8rem);
+    grid-template-columns: minmax(10rem, 12.5rem) minmax(0, 43rem);
+    gap: clamp(1.6rem, 4vw, 3.5rem);
     align-items: start;
-    padding-top: clamp(3rem, 6vw, 5rem);
-    border-top: 1px solid var(--line-strong);
+    padding-top: 1.8rem;
   }
 
   .paper-sidebar {
     position: sticky;
-    top: 1.5rem;
-    display: grid;
-    gap: 2rem;
+    top: 1rem;
+    min-width: 0;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: 0.5rem;
   }
 
-  .sidebar-block {
-    padding-bottom: 1.5rem;
+  .sidebar-section {
+    padding-block: 0.85rem;
     border-bottom: 1px solid var(--line);
   }
 
-  .sidebar-label {
-    margin: 0 0 0.9rem;
+  .sidebar-section:first-child {
+    padding-top: 0;
+  }
+
+  .sidebar-section > summary {
+    min-height: 32px;
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .sidebar-section ol {
+    display: grid;
+    margin: 0.3rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sidebar-section a {
+    display: block;
+    padding-block: 0.35rem;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .sidebar-section a:hover {
     color: var(--accent);
-    font-family: var(--mono);
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    text-decoration: underline;
   }
 
-  .paper-sidebar dl,
-  .paper-sidebar dd {
-    margin: 0;
-  }
-
-  .paper-sidebar dl {
+  .sidebar-section dl {
     display: grid;
     gap: 0.7rem;
+    margin: 0.65rem 0 0;
+    font-size: 0.73rem;
   }
 
-  .paper-sidebar dl div {
-    display: grid;
-    grid-template-columns: 5.2rem 1fr;
-    gap: 0.65rem;
-  }
-
-  .paper-sidebar dt {
+  .sidebar-section dt {
     color: var(--ink-soft);
-    font-size: 0.72rem;
   }
 
-  .paper-sidebar dd {
+  .sidebar-section dd {
+    margin: 0.1rem 0 0;
     overflow-wrap: anywhere;
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    text-transform: capitalize;
   }
 
-  .paper-sidebar ol {
-    display: grid;
-    gap: 0.48rem;
-    margin: 0;
-    padding-left: 1.2rem;
+  .writer-provenance + .writer-provenance {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .sidebar-note {
+    margin-bottom: 0;
     color: var(--ink-soft);
-    font-size: 0.74rem;
+    font-size: 0.75rem;
   }
 
-  .paper-sidebar a {
-    text-decoration: none;
-  }
-
-  .source-link {
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-decoration: none;
-    text-transform: uppercase;
+  .paper-resources {
+    margin-top: 0.9rem;
   }
 
   .paper-body {
     min-width: 0;
     font-family: var(--serif);
-    font-size: clamp(1.08rem, 2vw, 1.2rem);
-    line-height: 1.78;
+    font-size: clamp(1.08rem, 1.65vw, 1.18rem);
+    line-height: 1.75;
+    overflow-wrap: anywhere;
   }
 
   .paper-body :global(h1) {
-    margin: 4.5rem 0 1.2rem;
-    padding-bottom: 0.65rem;
+    margin: 2.6rem 0 1rem;
+    padding-bottom: 0.35rem;
     border-bottom: 1px solid var(--line);
-    font-size: clamp(1.8rem, 4vw, 2.55rem);
-    font-weight: 600;
-    line-height: 1.15;
-    letter-spacing: -0.03em;
+    font-size: clamp(1.6rem, 3vw, 2rem);
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    scroll-margin-top: 1.25rem;
   }
 
   .paper-body :global(h1:first-child) {
     margin-top: 0;
   }
 
-  .paper-body :global(h2) {
-    margin: 2.5rem 0 0.8rem;
-    font-size: 1.35rem;
-    font-weight: 650;
-    line-height: 1.25;
+  .paper-body :global(h2),
+  .paper-body :global(h3),
+  .paper-body :global(h4) {
+    margin: 1.8rem 0 0.7rem;
+    font-size: 1.3rem;
+    font-weight: 600;
+    line-height: 1.3;
+    scroll-margin-top: 1.25rem;
+  }
+
+  .paper-body :global(h3),
+  .paper-body :global(h4) {
+    font-size: 1.15rem;
   }
 
   .paper-body :global(p) {
-    margin: 0 0 1.3rem;
+    margin: 0 0 1.25rem;
   }
 
   .paper-body :global(ul),
   .paper-body :global(ol) {
-    margin-block: 1rem 1.5rem;
+    margin-block: 0.9rem 1.4rem;
     padding-left: 1.4rem;
   }
 
   .paper-body :global(li) {
     margin-bottom: 0.45rem;
-    padding-left: 0.3rem;
+  }
+
+  .paper-body :global(blockquote) {
+    margin: 1.5rem 0;
+    padding: 0.15rem 0 0.15rem 1rem;
+    color: var(--ink-soft);
+    border-left: 3px solid var(--line-strong);
+  }
+
+  .paper-body :global(blockquote p:last-child) {
+    margin-bottom: 0;
   }
 
   .paper-body :global(code) {
-    padding: 0.1rem 0.3rem;
+    padding: 0.1rem 0.25rem;
     background: var(--paper-deep);
     border-radius: 0.12rem;
     font-family: var(--mono);
-    font-size: 0.82em;
+    font-size: 0.8em;
+  }
+
+  .paper-body :global(pre) {
+    max-width: 100%;
+    padding: 1rem;
+    overflow-x: auto;
+    color: var(--ink);
+    background: var(--paper-deep);
+    border: 1px solid var(--line);
+    font-size: 0.86rem;
+    line-height: 1.6;
+  }
+
+  .paper-body :global(pre code) {
+    padding: 0;
+    background: transparent;
+    font-size: inherit;
+  }
+
+  .paper-body :global(table) {
+    display: block;
+    max-width: 100%;
+    margin-block: 1.5rem;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+
+  .paper-body :global(th),
+  .paper-body :global(td) {
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--line);
+    text-align: left;
+  }
+
+  .paper-body :global(th) {
+    background: var(--paper-deep);
+  }
+
+  .paper-body :global(img),
+  .paper-body :global(svg) {
+    max-width: 100%;
+    height: auto;
   }
 
   .paper-body :global(figure) {
-    margin: 2rem 0;
+    margin: 1.8rem 0;
   }
 
   .paper-body :global(figure svg) {
     display: block;
     width: 100%;
-    max-width: 100%;
-    height: auto;
     padding: clamp(0.75rem, 2vw, 1.25rem);
     overflow: visible;
     background: var(--paper-deep);
@@ -444,28 +649,45 @@ const scopeLabel =
     line-height: 1.5;
   }
 
-  @media (max-width: 840px) {
+  .paper-endnote {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    color: var(--ink-soft);
+    border-top: 1px solid var(--line);
+    font-family: var(--sans);
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 680px) {
     .paper-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1.5rem;
     }
 
     .paper-sidebar {
       position: static;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-height: none;
+      overflow: visible;
+      padding: 0;
     }
 
-    .source-link {
-      align-self: start;
-    }
-  }
-
-  @media (max-width: 560px) {
-    .paper-context__inner span {
-      display: none;
+    .sidebar-section {
+      padding-block: 0;
     }
 
-    .paper-sidebar {
-      grid-template-columns: 1fr;
+    .sidebar-section > summary,
+    .sidebar-section a {
+      min-height: 44px;
+      padding-block: 0.65rem;
+    }
+
+    .sidebar-section dl,
+    .sidebar-note {
+      margin-bottom: 1rem;
+    }
+
+    .paper-body :global(pre) {
+      padding: 0.75rem;
     }
   }
 </style>

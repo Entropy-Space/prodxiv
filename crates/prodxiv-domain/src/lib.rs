@@ -3,6 +3,7 @@
 mod draft;
 mod paper;
 mod policy;
+mod public_draft;
 mod publication;
 mod validation;
 
@@ -21,6 +22,10 @@ pub use paper::{
 };
 pub use policy::{
     PUBLICATION_REQUIRED_METADATA, PaperValidationPolicy, ValidationPolicy, validation_policy,
+};
+pub use public_draft::{
+    PublicDraftReviewStatus, PublicPaperDraft, PublicPaperDraftResponse, PublicPaperDraftSummary,
+    public_draft_metadata,
 };
 pub use publication::{
     PublicationIdentity, PublicationPreparationError, PublishedPaper, PublishedPaperSummary,

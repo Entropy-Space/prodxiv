@@ -2,6 +2,7 @@
 import {
   canonicalPaperIdFromSlug,
   paperVersionFromSlug,
+  publicPaperPath,
 } from "@prodxiv/api-client/public-paper-url";
 import PaperView from "../../../components/PaperView.astro";
 import SiteLayout from "../../../layouts/SiteLayout.astro";
@@ -30,11 +31,17 @@ if (!result.ok) {
 {
   result.ok ? (
     <PaperView
+      kind="published"
       metadata={result.paper.metadata}
       paper_id={result.paper.paper_id}
       revision={result.paper.version}
       published_at={result.paper.published_at}
       section_headings={result.rendered.section_headings}
+      source_markdown={result.paper.source_markdown}
+      source_href={`${publicPaperPath(result.paper.paper_id, result.paper.version)}/source.md`}
+      canonical_url={new URL(publicPaperPath(result.paper.paper_id, result.paper.version), Astro.site ?? Astro.url.origin).href}
+      revisions={result.revisions}
+      history_available={result.history_available}
     >
       <Fragment set:html={result.rendered.html} />
     </PaperView>
@@ -42,21 +49,22 @@ if (!result.ok) {
     <SiteLayout
       title={`${result.error.title} — prodxiv`}
       description="The requested prodxiv paper revision could not be displayed."
+      noindex
     >
-      <main class="error-page shell">
+      <section class="error-page page-shell">
         <p class="error-code">{result.error.status}</p>
         <h1>{result.error.title}</h1>
         <p>{result.error.message}</p>
         <a href="/">← Back to the archive</a>
-      </main>
+      </section>
     </SiteLayout>
   )
 }
 
 <style>
   .error-page {
-    min-height: 65vh;
-    padding-block: clamp(5rem, 12vw, 10rem);
+    min-height: 50vh;
+    padding-block: clamp(2.5rem, 6vw, 5rem);
   }
 
   .error-code {
@@ -69,13 +77,13 @@ if (!result.ok) {
   }
 
   .error-page h1 {
-    max-width: 14ch;
+    max-width: 24ch;
     margin: 0;
     font-family: var(--serif);
-    font-size: clamp(2.5rem, 7vw, 5rem);
-    font-weight: 500;
-    line-height: 1;
-    letter-spacing: -0.045em;
+    font-size: clamp(2rem, 4.5vw, 3.1rem);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
   }
 
   .error-page > p:not(.error-code) {

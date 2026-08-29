@@ -1,5 +1,7 @@
 import type { components } from "./generated/api.ts";
+import { paperSlugFromCanonicalId } from "./public-paper-url.ts";
 
+export type PaperMetadata = components["schemas"]["PaperMetadata"];
 export type PublishedPaper = components["schemas"]["PublishedPaper"];
 export type PublishedPaperSummary =
   components["schemas"]["PublishedPaperSummary"];
@@ -10,6 +12,11 @@ export type DraftOwnerKind = components["schemas"]["DraftOwnerKind"];
 export type PaperDraftRevision = components["schemas"]["PaperDraftRevision"];
 export type PaperDraftRevisionSummary =
   components["schemas"]["PaperDraftRevisionSummary"];
+export type PublicPaperDraft = components["schemas"]["PublicPaperDraft"];
+export type PublicPaperDraftSummary =
+  components["schemas"]["PublicPaperDraftSummary"];
+export type PublicPaperDraftResponse =
+  components["schemas"]["PublicPaperDraftResponse"];
 export type GitHubTrendingEntry =
   components["schemas"]["GitHubTrendingEntryResponse"];
 export type GitHubTrendingSnapshot =
@@ -32,10 +39,30 @@ export interface PublishPaperResult {
 export interface ListPapersInput {
   limit?: number;
   cursor?: string;
+  q?: string;
+  topic?: string;
 }
 
 export interface PaperList {
   papers: PublishedPaperSummary[];
+  next_cursor?: string;
+}
+
+export interface PaperRevisionList {
+  revisions: PublishedPaperSummary[];
+}
+
+export interface PaperTopicList {
+  topics: string[];
+}
+
+export interface ListPublicDraftsInput {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface PublicPaperDraftList {
+  drafts: PublicPaperDraftSummary[];
   next_cursor?: string;
 }
 
@@ -132,6 +159,24 @@ export class ProdxivApiClient {
     this.#apiUrl = options.api_url.replace(/\/+$/, "");
     this.#token = options.token;
     this.#fetch = options.fetch ?? globalThis.fetch;
+  }
+
+  async listPublicDrafts(
+    input: ListPublicDraftsInput = {},
+  ): Promise<PublicPaperDraftList> {
+    const query = paginationQuery(input, "draft");
+    const suffix = query.size === 0 ? "" : `?${query.toString()}`;
+    const { response, body } = await this.#publicRequest(
+      `/v1/public/drafts${suffix}`,
+    );
+    return publicPaperDraftList(response, body);
+  }
+
+  async getPublicDraft(paperUuid: string): Promise<PublicPaperDraftResponse> {
+    validateDraftUuid(paperUuid);
+    const path = `/v1/public/drafts/${paperUuid}`;
+    const { response, body } = await this.#publicRequest(path);
+    return publicPaperDraftResponse(response, body, paperUuid);
   }
 
   async createDraft(input: CreateDraftInput): Promise<PaperDraft> {
@@ -384,16 +429,68 @@ export class ProdxivApiClient {
     paperId: string,
     revision: number,
   ): Promise<PublishedPaper> {
-    if (!Number.isSafeInteger(revision) || revision < 1) {
+    validatePaperId(paperId);
+    if (!isPaperRevision(revision)) {
       throw new ProdxivApiError(
         0,
         "request.invalid_revision",
-        "paper revision must be a positive safe integer",
+        "paper revision must be an integer between 1 and 4294967295",
       );
     }
     const path = `/v1/papers/${encodeURIComponent(paperId)}/revisions/${revision}`;
-    const { response, body } = await this.#request(path);
-    return publishedPaper(response, body);
+    const { response, body } = await this.#publicRequest(path);
+    const paper = publishedPaper(response, body);
+    if (paper.paper_id !== paperId || paper.version !== revision) {
+      throw invalidResponse(
+        response,
+        "prodxiv API returned a different paper identifier or revision",
+      );
+    }
+    return paper;
+  }
+
+  async listPaperRevisions(paperId: string): Promise<PaperRevisionList> {
+    validatePaperId(paperId);
+    const { response, body } = await this.#publicRequest(
+      `/v1/papers/${encodeURIComponent(paperId)}/revisions`,
+    );
+    assertSuccessfulResponse(response, body);
+    if (
+      !isRecord(body) ||
+      !Array.isArray(body.revisions) ||
+      body.revisions.length === 0 ||
+      !body.revisions.every(isPublishedPaperSummary) ||
+      body.revisions.some((paper) => paper.paper_id !== paperId) ||
+      new Set(body.revisions.map((paper) => paper.version)).size !==
+        body.revisions.length
+    ) {
+      throw invalidResponse(
+        response,
+        "prodxiv API returned an invalid paper revision history",
+      );
+    }
+    return {
+      revisions: body.revisions.toSorted(
+        (left, right) => right.version - left.version,
+      ),
+    };
+  }
+
+  async listPaperTopics(): Promise<PaperTopicList> {
+    const { response, body } = await this.#publicRequest("/v1/papers/topics");
+    assertSuccessfulResponse(response, body);
+    if (
+      !isRecord(body) ||
+      !Array.isArray(body.topics) ||
+      !body.topics.every(isStoredTopic) ||
+      new Set(body.topics).size !== body.topics.length
+    ) {
+      throw invalidResponse(
+        response,
+        "prodxiv API returned an invalid topic list",
+      );
+    }
+    return { topics: body.topics };
   }
 
   /** @deprecated Use getPaperRevision. */
@@ -405,32 +502,22 @@ export class ProdxivApiClient {
   }
 
   async listPapers(input: ListPapersInput = {}): Promise<PaperList> {
-    if (
-      input.limit !== undefined &&
-      (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
-    ) {
-      throw new ProdxivApiError(
-        0,
-        "request.invalid_limit",
-        "paper list limit must be an integer between 1 and 100",
-      );
-    }
-    if (input.cursor !== undefined && input.cursor.length === 0) {
-      throw new ProdxivApiError(
-        0,
-        "request.invalid_cursor",
-        "paper list cursor must not be empty",
-      );
-    }
-    const query = new URLSearchParams();
-    if (input.limit !== undefined) {
-      query.set("limit", String(input.limit));
-    }
-    if (input.cursor !== undefined) {
-      query.set("cursor", input.cursor);
+    const query = paginationQuery(input, "paper");
+    const search = normalizeFilter(input.q, 200, "query");
+    const topic = normalizeFilter(input.topic, 100, "topic");
+    if (search !== undefined) query.set("q", search);
+    if (topic !== undefined) {
+      if (!isStoredTopic(topic)) {
+        throw new ProdxivApiError(
+          0,
+          "request.invalid_topic",
+          "paper topic must use lowercase snake_case",
+        );
+      }
+      query.set("topic", topic);
     }
     const suffix = query.size === 0 ? "" : `?${query.toString()}`;
-    const { response, body } = await this.#request(`/v1/papers${suffix}`);
+    const { response, body } = await this.#publicRequest(`/v1/papers${suffix}`);
     return paperList(response, body);
   }
 
@@ -451,7 +538,7 @@ export class ProdxivApiClient {
       query.set("spoken_language", input.spoken_language);
     }
     const suffix = query.size === 0 ? "" : `?${query.toString()}`;
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#publicRequest(
       `/v1/github/trending${suffix}`,
     );
     const view = githubTrending(response, body);
@@ -464,6 +551,39 @@ export class ProdxivApiClient {
       );
     }
     return view;
+  }
+
+  async #publicRequest(
+    path: string,
+  ): Promise<{ response: Response; body: unknown }> {
+    let url: URL;
+    try {
+      url = new URL(this.#apiUrl);
+    } catch {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_api_url",
+        "API URL is invalid",
+      );
+    }
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      throw new ProdxivApiError(
+        0,
+        "request.invalid_api_url",
+        "public API reads require an anonymous HTTP(S) base URL",
+      );
+    }
+    return this.#request(path, {
+      credentials: "omit",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
   }
 
   async #request(
@@ -520,6 +640,128 @@ function paperDraft(response: Response, body: unknown): PaperDraft {
     );
   }
   return body;
+}
+
+function publicPaperDraftList(
+  response: Response,
+  body: unknown,
+): PublicPaperDraftList {
+  assertSuccessfulResponse(response, body);
+  if (
+    !isRecord(body) ||
+    !Array.isArray(body.drafts) ||
+    !body.drafts.every(isPublicPaperDraftSummary) ||
+    new Set(body.drafts.map((draft) => draft.paper_uuid)).size !==
+      body.drafts.length ||
+    !(isAbsent(body.next_cursor) || isCursor(body.next_cursor))
+  ) {
+    throw invalidResponse(
+      response,
+      "prodxiv API returned an invalid public draft list",
+    );
+  }
+  return {
+    drafts: body.drafts.map(publicDraftSummary),
+    ...(isAbsent(body.next_cursor)
+      ? {}
+      : { next_cursor: body.next_cursor as string }),
+  };
+}
+
+function publicPaperDraftResponse(
+  response: Response,
+  body: unknown,
+  paperUuid: string,
+): PublicPaperDraftResponse {
+  assertSuccessfulResponse(response, body);
+  if (isRecord(body) && body.kind === "published") {
+    if (isCanonicalPaperId(body.paper_id) && isPaperRevision(body.version)) {
+      return {
+        kind: "published",
+        paper_id: body.paper_id,
+        version: body.version,
+      };
+    }
+  }
+  if (
+    isRecord(body) &&
+    body.kind === "draft" &&
+    isPublicPaperDraft(body.draft) &&
+    body.draft.paper_uuid === paperUuid
+  ) {
+    return {
+      kind: "draft",
+      draft: {
+        ...publicDraftSummary(body.draft),
+        source_markdown: body.draft.source_markdown,
+      },
+    };
+  }
+  throw invalidResponse(
+    response,
+    "prodxiv API returned an invalid public draft",
+  );
+}
+
+function isPublicPaperDraft(value: unknown): value is PublicPaperDraft {
+  return (
+    isRecord(value) &&
+    typeof value.source_markdown === "string" &&
+    value.source_markdown.trim().length > 0 &&
+    new TextEncoder().encode(value.source_markdown).byteLength <=
+      2 * 1024 * 1024 &&
+    isPublicPaperDraftSummary(value)
+  );
+}
+
+function isPublicPaperDraftSummary(
+  value: unknown,
+): value is PublicPaperDraftSummary {
+  return (
+    isRecord(value) &&
+    isCanonicalUuid(value.paper_uuid) &&
+    isPositiveSafeInteger(value.revision) &&
+    isDraftOwnerKind(value.owner_kind) &&
+    value.review_status === "pending_review" &&
+    isTimestamp(value.updated_at) &&
+    (isAbsent(value.metadata) ||
+      (isPaperMetadata(value.metadata) &&
+        value.metadata.topics.every(isTopic) &&
+        hasAnonymousMetadataLinks(value.metadata)))
+  );
+}
+
+function publicDraftSummary(
+  draft: PublicPaperDraftSummary,
+): PublicPaperDraftSummary {
+  // Whitelist the public DTO: a management response must never leak review
+  // actors, rejection notes, retained snapshots, or other unexpected fields.
+  return {
+    paper_uuid: draft.paper_uuid,
+    revision: draft.revision,
+    owner_kind: draft.owner_kind,
+    review_status: draft.review_status,
+    updated_at: draft.updated_at,
+    ...(draft.metadata == null ? {} : { metadata: draft.metadata }),
+  };
+}
+
+function hasAnonymousMetadataLinks(metadata: PaperMetadata): boolean {
+  const evidence =
+    typeof metadata.status === "string" ? [] : (metadata.status.evidence ?? []);
+  const links = [
+    metadata.product_url,
+    metadata.repository_url,
+    ...metadata.authors.map((author) => author.url),
+    ...evidence.map((item) => item.url),
+  ];
+  return links.every((value) => {
+    if (value == null) return true;
+    // Structural URL validation has already succeeded. Only the mutable
+    // public-draft projection imposes this additional anonymous-link rule.
+    const url = new URL(value);
+    return url.username === "" && url.password === "";
+  });
 }
 
 function paperDraftList(response: Response, body: unknown): PaperDraftList {
@@ -691,6 +933,11 @@ function isPaperDraftRevisionSummary(
 }
 
 function draftPath(paperUuid: string): string {
+  validateDraftUuid(paperUuid);
+  return `/v1/drafts/${paperUuid}`;
+}
+
+function validateDraftUuid(paperUuid: string): void {
   if (!isCanonicalUuid(paperUuid)) {
     throw new ProdxivApiError(
       0,
@@ -698,7 +945,109 @@ function draftPath(paperUuid: string): string {
       "paper UUID must use canonical lowercase hyphenated notation",
     );
   }
-  return `/v1/drafts/${paperUuid}`;
+}
+
+function paginationQuery(
+  input: ListPublicDraftsInput,
+  kind: "draft" | "paper",
+): URLSearchParams {
+  if (
+    input.limit !== undefined &&
+    (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
+  ) {
+    throw new ProdxivApiError(
+      0,
+      "request.invalid_limit",
+      `${kind} list limit must be an integer between 1 and 100`,
+    );
+  }
+  if (input.cursor !== undefined && !isCursor(input.cursor)) {
+    throw new ProdxivApiError(
+      0,
+      "request.invalid_cursor",
+      `${kind} list cursor must be a nonempty opaque value of at most 4096 characters`,
+    );
+  }
+  const query = new URLSearchParams();
+  if (input.limit !== undefined) query.set("limit", String(input.limit));
+  if (input.cursor !== undefined) query.set("cursor", input.cursor);
+  return query;
+}
+
+function normalizeFilter(
+  value: string | undefined,
+  maximumLength: number,
+  name: "query" | "topic",
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    Array.from(value).length > maximumLength ||
+    /[\p{Cc}]/u.test(value)
+  ) {
+    throw new ProdxivApiError(
+      0,
+      `request.invalid_${name}`,
+      `paper ${name} must not contain control characters or exceed ${maximumLength} characters`,
+    );
+  }
+  return value.trim() || undefined;
+}
+
+function isCursor(value: unknown): value is string {
+  return (
+    isNonEmptyString(value) && value.length <= 4096 && !/[\p{Cc}]/u.test(value)
+  );
+}
+
+function isTopic(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(value);
+}
+
+function isStoredTopic(value: unknown): value is string {
+  // Older authoritative validation accepted repeated internal underscores.
+  // Preserve immutable topics in reads and literal filters; new draft
+  // projections use the current stricter schema above.
+  return typeof value === "string" && /^[a-z0-9]+(?:_+[a-z0-9]+)*$/.test(value);
+}
+
+function validatePaperId(paperId: string): void {
+  if (!isCanonicalPaperId(paperId)) {
+    throw new ProdxivApiError(
+      0,
+      "request.invalid_paper_id",
+      "paper identifier must use canonical prodxiv notation",
+    );
+  }
+}
+
+function isCanonicalPaperId(value: unknown): value is string {
+  return (
+    typeof value === "string" && paperSlugFromCanonicalId(value) !== undefined
+  );
+}
+
+function isMetadataPaperId(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !/^prodxiv:[0-9]{4}\.[a-zA-Z0-9]{6}$/.test(value)
+  ) {
+    return false;
+  }
+  // Draft metadata and relationships may use lowercase Crockford suffixes.
+  // Keep the original metadata intact, while root publication identity and
+  // all generated reader URLs continue to require canonical uppercase.
+  return isCanonicalPaperId(
+    "prodxiv:" + value.slice("prodxiv:".length).toUpperCase(),
+  );
+}
+
+function isPaperRevision(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) > 0 &&
+    (value as number) <= 4_294_967_295
+  );
 }
 
 function validateDraftRevision(revision: number): void {
@@ -936,30 +1285,41 @@ function isPublishedPaper(value: unknown): value is PublishedPaper {
 function isPublishedPaperSummary(
   value: unknown,
 ): value is PublishedPaperSummary {
-  if (!isRecord(value) || !isRecord(value.metadata)) {
+  if (!isRecord(value) || !isPaperMetadata(value.metadata)) {
     return false;
   }
   const metadata = value.metadata;
   return (
-    isNonEmptyString(value.schema_version) &&
-    isNonEmptyString(value.paper_id) &&
+    isCanonicalPaperId(value.paper_id) &&
     isNonEmptyString(value.product_id) &&
-    Number.isInteger(value.version) &&
-    (value.version as number) > 0 &&
+    isPaperRevision(value.version) &&
     isDateString(value.published_at) &&
     metadata.schema_version === value.schema_version &&
     metadata.paper_id === value.paper_id &&
     metadata.version === value.version &&
     metadata.published_at === value.published_at &&
+    isNonEmptyString(metadata.license)
+  );
+}
+
+function isPaperMetadata(value: unknown): value is PaperMetadata {
+  if (!isRecord(value)) return false;
+  const metadata = value;
+  return (
+    (metadata.schema_version === "1" || metadata.schema_version === "2") &&
+    (isAbsent(metadata.paper_id) || isMetadataPaperId(metadata.paper_id)) &&
+    (isAbsent(metadata.version) || isPaperRevision(metadata.version)) &&
+    isOptionalDateString(metadata.published_at) &&
     isNonEmptyString(metadata.title) &&
-    isOptionalString(metadata.product_name) &&
-    (metadata.scope === undefined || isPaperScope(metadata.scope)) &&
+    (isAbsent(metadata.product_name) ||
+      isNonEmptyString(metadata.product_name)) &&
+    (isAbsent(metadata.scope) || isPaperScope(metadata.scope)) &&
     isNonEmptyString(metadata.summary) &&
     isProductStatus(metadata.status, metadata.schema_version) &&
-    isNonEmptyString(metadata.license) &&
+    (isAbsent(metadata.license) || isNonEmptyString(metadata.license)) &&
     isOptionalString(metadata.organization) &&
-    isOptionalString(metadata.product_url) &&
-    isOptionalString(metadata.repository_url) &&
+    (isAbsent(metadata.product_url) || isHttpUrl(metadata.product_url)) &&
+    (isAbsent(metadata.repository_url) || isHttpUrl(metadata.repository_url)) &&
     Array.isArray(metadata.authors) &&
     metadata.authors.length > 0 &&
     metadata.authors.every((author) =>
@@ -968,7 +1328,8 @@ function isPublishedPaperSummary(
     isWritersAndContact(metadata, metadata.schema_version) &&
     Array.isArray(metadata.topics) &&
     metadata.topics.length > 0 &&
-    metadata.topics.every(isNonEmptyString) &&
+    metadata.topics.every(isStoredTopic) &&
+    new Set(metadata.topics).size === metadata.topics.length &&
     (metadata.relationships === undefined ||
       (Array.isArray(metadata.relationships) &&
         metadata.relationships.every(isRelationship)))
@@ -980,7 +1341,7 @@ function isPaperScope(value: unknown): boolean {
     return false;
   }
   if (value.kind === "product") {
-    return value.name === undefined && value.product_version === undefined;
+    return isAbsent(value.name) && isAbsent(value.product_version);
   }
   if (value.kind === "feature") {
     return (
@@ -1006,7 +1367,7 @@ function isAuthor(value: unknown, schemaVersion: unknown): boolean {
       value.kind === "person" ||
       value.kind === "organization") &&
     isOptionalString(value.affiliation) &&
-    isOptionalString(value.url)
+    (isAbsent(value.url) || isHttpUrl(value.url))
   );
 }
 
@@ -1043,15 +1404,24 @@ function isWriter(value: unknown): boolean {
     return false;
   }
   if (value.kind === "human") {
-    return value.model == null;
+    return (
+      value.model == null &&
+      value.tool_version == null &&
+      value.generation_id == null
+    );
   }
-  return value.kind === "agent" && isNonEmptyString(value.model);
+  return (
+    value.kind === "agent" &&
+    isNonEmptyString(value.model) &&
+    (isAbsent(value.tool_version) || isNonEmptyString(value.tool_version)) &&
+    (isAbsent(value.generation_id) || isNonEmptyString(value.generation_id))
+  );
 }
 
 function isRelationship(value: unknown): boolean {
   return (
     isRecord(value) &&
-    isNonEmptyString(value.paper_id) &&
+    isMetadataPaperId(value.paper_id) &&
     (value.kind === "inspired_by" ||
       value.kind === "built_on" ||
       value.kind === "alternative_to" ||
@@ -1135,6 +1505,9 @@ function isHttpUrl(value: unknown): boolean {
   }
   try {
     const url = new URL(value);
+    // HTTP(S) URLs with userinfo were historically publication-valid. Reading
+    // an immutable record must not retroactively apply a new authoring policy;
+    // the public UI separately suppresses credential-bearing resource links.
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;

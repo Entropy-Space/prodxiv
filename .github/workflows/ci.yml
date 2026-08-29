@@ -112,5 +112,11 @@ jobs:
       - name: Check website
         run: bun run check
 
+      - name: Test API client
+        run: bun run test:api-client
+
+      - name: Test website
+        run: bun run test:web
+
       - name: Build website
         run: bun run build:web

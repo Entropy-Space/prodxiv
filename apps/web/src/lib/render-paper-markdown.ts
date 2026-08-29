@@ -51,6 +51,10 @@ export interface RenderedPaperMarkdown {
   }>;
 }
 
+export interface RenderedDraftMarkdown extends RenderedPaperMarkdown {
+  front_matter_complete: boolean;
+}
+
 export class PublishedPaperFormatError extends Error {
   constructor(message: string) {
     super(message);
@@ -61,7 +65,31 @@ export class PublishedPaperFormatError extends Error {
 export function renderPaperMarkdown(
   sourceMarkdown: string,
 ): RenderedPaperMarkdown {
-  const markdown = extractMarkdownBody(sourceMarkdown);
+  return renderMarkdownBody(extractMarkdownBody(sourceMarkdown));
+}
+
+export function renderDraftMarkdown(
+  sourceMarkdown: string,
+): RenderedDraftMarkdown {
+  const source = sourceMarkdown.replace(/^\uFEFF/, "");
+  const opening = /^---[\t ]*\r?\n/.exec(source);
+  if (opening === null) {
+    return { ...renderMarkdownBody(source), front_matter_complete: false };
+  }
+  const remainder = source.slice(opening[0].length);
+  const closing = /^---[\t ]*(?:\r?\n|$)/m.exec(remainder);
+  // An unterminated YAML block has no reliable body boundary. Do not turn its
+  // metadata into prose; the reader will explain the incomplete source.
+  if (closing === null) {
+    return { ...renderMarkdownBody(""), front_matter_complete: false };
+  }
+  return {
+    ...renderMarkdownBody(remainder.slice(closing.index + closing[0].length)),
+    front_matter_complete: true,
+  };
+}
+
+function renderMarkdownBody(markdown: string): RenderedPaperMarkdown {
   const section_headings: RenderedPaperMarkdown["section_headings"] = [];
   const usedSlugs = new Map<string, number>();
   const renderer = new Renderer();

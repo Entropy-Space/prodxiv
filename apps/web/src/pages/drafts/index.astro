@@ -1,48 +1,27 @@
 ---
-import type { DraftReviewStatus, PaperDraftSummary } from "@prodxiv/api-client";
 import SiteLayout from "../../layouts/SiteLayout.astro";
-import {
-  draftReviewChallenge,
-  draftReviewClient,
-  isUnauthorizedReviewError,
-  reviewErrorMessage,
-} from "../../lib/draft-review-auth.ts";
+import WriterDisclosure from "../../components/WriterDisclosure.astro";
+import { readPublicDraftIndex } from "../../lib/public-draft-index.ts";
 
 export const prerender = false;
 
 Astro.response.headers.set("cache-control", "no-store");
 Astro.response.headers.set("x-robots-tag", "noindex, nofollow");
-
-const requestedStatus = Astro.url.searchParams.get("status") ?? "pending_review";
-const reviewStatus: DraftReviewStatus = isReviewStatus(requestedStatus)
-  ? requestedStatus
-  : "pending_review";
-const client = draftReviewClient(Astro.request, import.meta.env.PRODXIV_API_URL);
-if (client === undefined) {
-  return draftReviewChallenge();
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
+  return new Response("This is a read-only page.\n", {
+    status: 405,
+    headers: { allow: "GET, HEAD", "cache-control": "no-store" },
+  });
 }
 
-let drafts: PaperDraftSummary[] = [];
-let errorMessage: string | undefined;
-try {
-  drafts = (
-    await client.listDrafts({ limit: 100, review_status: reviewStatus })
-  ).drafts;
-} catch (error) {
-  if (isUnauthorizedReviewError(error)) {
-    return draftReviewChallenge();
-  }
-  errorMessage = reviewErrorMessage(error);
-}
-
-const labels: Record<DraftReviewStatus, string> = {
-  pending_review: "Pending review",
-  approved: "Approved",
-  rejected: "Rejected",
-};
-
-function isReviewStatus(value: string): value is DraftReviewStatus {
-  return value === "pending_review" || value === "approved" || value === "rejected";
+const cursor = Astro.url.searchParams.get("cursor") ?? undefined;
+const result = await readPublicDraftIndex({
+  api_url: import.meta.env.PRODXIV_API_URL,
+  limit: 20,
+  ...(cursor === undefined ? {} : { cursor }),
+});
+if (!result.ok) {
+  Astro.response.status = result.status;
 }
 
 function formatTimestamp(value: string): string {
@@ -55,197 +34,139 @@ function formatTimestamp(value: string): string {
 ---
 
 <SiteLayout
-  title="Draft review — prodxiv"
-  description="Private review queue for unpublished product-paper drafts."
+  title="Pending drafts — prodxiv"
+  description="Read current product-paper drafts before publication, with their assumptions and limitations visible."
 >
-  <section class="review-shell shell">
-    <header class="review-header">
-      <div>
-        <p class="eyebrow">Private author workspace</p>
-        <h1>Draft review</h1>
-        <p>
-          Approve a revision for the next run or publish it immediately.
-          Rejected drafts remain private and retained.
-        </p>
-      </div>
-      <span class="private-badge">Authenticated</span>
+  <section class="page-shell shell">
+    <header class="page-heading">
+      <p class="eyebrow">Open to read · Not yet published</p>
+      <h1>Pending drafts.</h1>
+      <p>Work before publication. Read the current revision, with its assumptions and limitations intact.</p>
     </header>
 
-    <nav class="review-tabs" aria-label="Draft review status">
-      {Object.entries(labels).map(([status, label]) => (
-        <a
-          href={`/drafts?status=${status}`}
-          aria-current={status === reviewStatus ? "page" : undefined}
-        >
-          {label}
-        </a>
-      ))}
-    </nav>
+    <aside class="notice notice--draft">
+      <strong>Reading is public. Review actions are restricted.</strong>
+      <p>Drafts may change and do not imply author endorsement. Unchanged, bot-owned drafts may publish on a later run; author-owned drafts need explicit approval.</p>
+      <a href="/review/drafts">Author review workspace →</a>
+    </aside>
 
-    {errorMessage !== undefined ? (
-      <p class="review-notice review-notice--error">{errorMessage}</p>
-    ) : drafts.length === 0 ? (
-      <div class="empty-review">
-        <h2>No {labels[reviewStatus].toLowerCase()} drafts</h2>
-        <p>The daily Paperbot run will place new drafts here.</p>
-      </div>
+    {!result.ok ? (
+      <section class="empty-state" role="status">
+        <h2>Pending drafts unavailable</h2>
+        <p>{result.message}</p>
+        <a class="button" href="/drafts">Try again</a>
+      </section>
     ) : (
-      <ol class="draft-list">
-        {drafts.map((draft) => (
-          <li>
-            <a href={`/drafts/${draft.paper_uuid}`}>
-              <span class="draft-list__id">{draft.paper_uuid}</span>
-              <span class="draft-list__meta">
-                Revision {draft.revision} · {draft.owner_kind === "bot" ? "Paperbot-owned" : "Author-owned"} · {labels[draft.review.status]} · Edited{" "}
-                <time datetime={draft.updated_at}>{formatTimestamp(draft.updated_at)}</time>
-              </span>
-              {draft.review.rejection_reason !== undefined ? (
-                <span class="draft-list__reason">
-                  {draft.review.rejection_reason}
-                </span>
-              ) : null}
-            </a>
-          </li>
-        ))}
-      </ol>
+      <>
+        <div class="list-heading">
+          <h2>Awaiting review</h2>
+          <p>{result.drafts.length} {result.drafts.length === 1 ? "draft" : "drafts"} on this page · Most recently edited</p>
+        </div>
+        {result.drafts.length === 0 ? (
+          <section class="empty-state">
+            <h2>{cursor === undefined ? "No pending drafts right now." : "No more pending drafts."}</h2>
+            <p>{cursor === undefined ? "New suggestions will appear here when they are available for public reading." : "The queue may have changed since this page was requested."}</p>
+            <a href={cursor === undefined ? "/" : "/drafts"}>{cursor === undefined ? "Browse published papers →" : "See the latest drafts →"}</a>
+          </section>
+        ) : (
+          <div class="draft-entries">
+            {result.drafts.map((draft) => (
+              <article class="draft-entry">
+                <div class="draft-entry__topline">
+                  <span>Draft revision {draft.revision}</span>
+                  <span>Pending review</span>
+                </div>
+                <h3><a href={draft.href}>{draft.title}</a></h3>
+                <p class="draft-entry__summary">{draft.summary}</p>
+                {!draft.metadata_available ? (
+                  <p class="muted">Metadata is incomplete or could not be read. This is not a validated publication.</p>
+                ) : null}
+                <div class="draft-entry__attribution">
+                  {draft.authors.length > 0 ? <p>Attributed to {draft.authors.join(", ")}</p> : <p>Author attribution unavailable</p>}
+                  <WriterDisclosure writers={draft.writers} />
+                  <p>{draft.owner_kind === "bot" ? "Bot-owned" : "Author-managed"}</p>
+                </div>
+                <div class="draft-entry__bottomline">
+                  <span>{draft.topics.map((topic) => topic.replaceAll("_", " ")).join(" · ")}</span>
+                  <span>Edited <time datetime={draft.updated_at}>{formatTimestamp(draft.updated_at)} UTC</time></span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {cursor !== undefined || result.next_cursor !== undefined ? (
+          <nav class="archive-pagination" aria-label="Pending draft pages">
+            {cursor !== undefined ? <a href="/drafts">← Most recent drafts</a> : null}
+            {result.next_cursor !== undefined ? (
+              <a href={`/drafts?${new URLSearchParams({ cursor: result.next_cursor })}`}>Older drafts →</a>
+            ) : null}
+          </nav>
+        ) : null}
+      </>
     )}
   </section>
 </SiteLayout>
 
 <style>
-  .review-shell {
-    padding-block: clamp(3rem, 7vw, 6rem);
+  .notice p {
+    margin-block: 0.45rem 0.7rem;
   }
 
-  .review-header {
+  .draft-entry {
+    padding-block: 1.5rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .draft-entry__topline,
+  .draft-entry__bottomline {
     display: flex;
-    gap: 2rem;
-    align-items: start;
+    align-items: baseline;
     justify-content: space-between;
-    padding-bottom: 2rem;
-    border-bottom: 1px solid var(--line-strong);
-  }
-
-  .eyebrow {
-    margin: 0 0 0.5rem;
-    color: var(--accent);
-    font-size: 0.72rem;
-    font-weight: 750;
-    letter-spacing: 0.13em;
-    text-transform: uppercase;
-  }
-
-  h1 {
-    margin: 0;
-    font-family: var(--serif);
-    font-size: clamp(2.7rem, 7vw, 5rem);
-    font-weight: 500;
-    line-height: 0.95;
-    letter-spacing: -0.045em;
-  }
-
-  .review-header p:last-child {
-    max-width: 47rem;
-    margin: 1.2rem 0 0;
-    color: var(--ink-soft);
-  }
-
-  .private-badge {
-    padding: 0.35rem 0.55rem;
-    border: 1px solid var(--line-strong);
-    font-family: var(--mono);
-    font-size: 0.66rem;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-  }
-
-  .review-tabs {
-    display: flex;
-    gap: 1.5rem;
-    margin-block: 2rem;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .review-tabs a {
-    padding: 0 0 0.65rem;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
     color: var(--ink-soft);
     font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    text-decoration: none;
-    text-transform: uppercase;
   }
 
-  .review-tabs a[aria-current="page"] {
-    color: var(--accent);
-    border-bottom: 0.18rem solid var(--accent);
-  }
-
-  .draft-list {
-    display: grid;
-    gap: 0;
-    margin: 0;
-    padding: 0;
-    border-top: 1px solid var(--line);
-    list-style: none;
-  }
-
-  .draft-list li {
-    border-bottom: 1px solid var(--line);
-  }
-
-  .draft-list a {
-    display: grid;
-    gap: 0.35rem;
-    padding: 1.25rem 0.2rem;
-    text-decoration: none;
-  }
-
-  .draft-list__id {
+  .draft-entry__topline {
     font-family: var(--mono);
-    font-size: 0.9rem;
   }
 
-  .draft-list__meta,
-  .draft-list__reason {
+  .draft-entry h3 {
+    margin-block: 0.6rem;
+    font-family: var(--serif);
+    font-size: clamp(1.5rem, 3vw, 1.9rem);
+    font-weight: 400;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .draft-entry h3 a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .draft-entry h3 a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .draft-entry__summary {
+    max-width: 70ch;
+    margin: 0;
+  }
+
+  .draft-entry__attribution {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1rem;
+    margin-block: 0.7rem;
     color: var(--ink-soft);
     font-size: 0.82rem;
   }
 
-  .draft-list__reason {
-    font-family: var(--serif);
-    font-style: italic;
-  }
-
-  .empty-review,
-  .review-notice {
-    padding: 2rem;
-    background: var(--surface);
-    border: 1px solid var(--line);
-  }
-
-  .empty-review h2,
-  .empty-review p {
+  .draft-entry__attribution p {
     margin: 0;
-  }
-
-  .empty-review p {
-    margin-top: 0.5rem;
-    color: var(--ink-soft);
-  }
-
-  .review-notice--error {
-    color: var(--accent-dark);
-    border-color: var(--accent);
-  }
-
-  @media (max-width: 600px) {
-    .review-header {
-      display: grid;
-    }
-
-    .private-badge {
-      width: fit-content;
-    }
   }
 </style>

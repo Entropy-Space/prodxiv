@@ -1,6 +1,11 @@
 //! Authoritative HTTP API for drafting, publishing, and reading prodxiv papers.
 
 mod github_oidc;
+mod public_read;
+
+pub use public_read::{
+    PaperRevisionListResponse, PaperTopicsResponse, PublicPaperDraftListResponse,
+};
 
 pub use github_oidc::{
     GitHubActionsWorkload, GitHubOidcAuthenticationError, GitHubOidcAuthenticator, GitHubOidcTrust,
@@ -25,15 +30,16 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, Diagnostic, DraftOwnerKind, DraftReviewStatus,
     MAX_DRAFT_REJECTION_REASON_BYTES, PaperDocument, PaperDraft, PaperDraftRevision,
-    PaperDraftRevisionSummary, PaperDraftSummary, PublishedPaper, PublishedPaperSummary,
-    ValidationProfile, ValidationReport, canonicalize_paper_id, validate_paper,
+    PaperDraftRevisionSummary, PaperDraftSummary, PublicPaperDraft, PublicPaperDraftResponse,
+    PublicPaperDraftSummary, PublishedPaper, PublishedPaperSummary, ValidationProfile,
+    ValidationReport, canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
     DraftCreateOutcome, DraftUpdateOutcome, GITHUB_TRENDING_ANY_LANGUAGE, GitHubTrendingEntry,
     GitHubTrendingLanguageScope, GitHubTrendingLanguageSelector, GitHubTrendingSnapshot,
     GitHubTrendingView, NewGitHubTrendingEntry, NewGitHubTrendingSnapshot, PostgresStorage,
-    PublicationCursor, PublicationPage, PublishOutcome, StorageError, TrendingImportOutcome,
-    is_valid_idempotency_key,
+    PublicDraftCursor, PublicDraftPage, PublicationCursor, PublicationFilter, PublicationPage,
+    PublishOutcome, StorageError, TrendingImportOutcome, is_valid_idempotency_key,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -326,6 +332,17 @@ pub trait PublicationStore: Send + Sync {
 
     async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StoreError>;
 
+    async fn list_public_drafts(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicDraftCursor>,
+    ) -> Result<PublicDraftPage, StoreError>;
+
+    async fn find_public_draft(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<PublicPaperDraftResponse>, StoreError>;
+
     async fn update_draft(
         &self,
         paper_uuid: &str,
@@ -411,6 +428,20 @@ pub trait PublicationStore: Send + Sync {
         cursor: Option<&PublicationCursor>,
     ) -> Result<PublicationPage, StoreError>;
 
+    async fn search_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+        filter: &PublicationFilter,
+    ) -> Result<PublicationPage, StoreError>;
+
+    async fn list_paper_topics(&self) -> Result<Vec<String>, StoreError>;
+
+    async fn list_paper_revisions(
+        &self,
+        paper_id: &str,
+    ) -> Result<Vec<PublishedPaperSummary>, StoreError>;
+
     async fn github_trending_view(
         &self,
         period: &str,
@@ -460,6 +491,25 @@ impl PublicationStore for PostgresStorage {
 
     async fn find_draft(&self, paper_uuid: &str) -> Result<Option<PaperDraft>, StoreError> {
         PostgresStorage::find_draft(self, paper_uuid)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_public_drafts(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicDraftCursor>,
+    ) -> Result<PublicDraftPage, StoreError> {
+        PostgresStorage::list_public_drafts(self, limit, cursor)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_public_draft(
+        &self,
+        paper_uuid: &str,
+    ) -> Result<Option<PublicPaperDraftResponse>, StoreError> {
+        PostgresStorage::find_public_draft(self, paper_uuid)
             .await
             .map_err(StoreError::from)
     }
@@ -625,6 +675,32 @@ impl PublicationStore for PostgresStorage {
         cursor: Option<&PublicationCursor>,
     ) -> Result<PublicationPage, StoreError> {
         PostgresStorage::list_latest(self, limit, cursor)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn search_latest(
+        &self,
+        limit: u32,
+        cursor: Option<&PublicationCursor>,
+        filter: &PublicationFilter,
+    ) -> Result<PublicationPage, StoreError> {
+        PostgresStorage::search_latest(self, limit, cursor, filter)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_paper_topics(&self) -> Result<Vec<String>, StoreError> {
+        PostgresStorage::list_paper_topics(self)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_paper_revisions(
+        &self,
+        paper_id: &str,
+    ) -> Result<Vec<PublishedPaperSummary>, StoreError> {
+        PostgresStorage::list_paper_revisions(self, paper_id)
             .await
             .map_err(StoreError::from)
     }
@@ -912,6 +988,8 @@ struct DraftRevisionPath {
 struct ListPapersQuery {
     limit: Option<u32>,
     cursor: Option<String>,
+    q: Option<String>,
+    topic: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1018,6 +1096,16 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/papers", get(list_papers).post(publish_paper))
+        .route("/v1/papers/topics", get(public_read::list_paper_topics))
+        .route(
+            "/v1/papers/{paper_id}/revisions",
+            get(public_read::list_paper_revisions),
+        )
+        .route("/v1/public/drafts", get(public_read::list_public_drafts))
+        .route(
+            "/v1/public/drafts/{paper_uuid}",
+            get(public_read::get_public_draft),
+        )
         .route(
             "/v1/drafts",
             get(list_drafts)
@@ -1850,7 +1938,9 @@ fn draft_not_found() -> ApiError {
     path = "/v1/papers",
     params(
       ("limit" = Option<u32>, Query, minimum = 1, maximum = 100, description = "Maximum papers to return; defaults to 20"),
-      ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page")
+      ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
+      ("q" = Option<String>, Query, max_length = 200, description = "Literal case-insensitive search across latest title, summary, product, author names, repository URL, and paper identifier"),
+      ("topic" = Option<String>, Query, max_length = 100, pattern = "^[a-z0-9](?:[a-z0-9_]*[a-z0-9])?$", description = "Exact topic in the latest published revision; historical internal repeated underscores are accepted")
     ),
     responses(
       (status = 200, description = "Latest published paper revisions", body = PaperListResponse),
@@ -1877,7 +1967,11 @@ async fn list_papers(
         .transpose()?;
     let page = state
         .store
-        .list_latest(limit, cursor.as_ref())
+        .search_latest(
+            limit,
+            cursor.as_ref(),
+            &public_read::publication_filter(query.q, query.topic)?,
+        )
         .await
         .map_err(store_error)?;
     Ok(Json(PaperListResponse {
@@ -2420,6 +2514,10 @@ fn trending_store_error(error: StoreError) -> ApiError {
         publish_draft,
         approve_and_publish_draft,
         list_papers,
+        public_read::list_public_drafts,
+        public_read::get_public_draft,
+        public_read::list_paper_topics,
+        public_read::list_paper_revisions,
         publish_paper,
         get_paper_revision,
         get_github_trending,
@@ -2437,6 +2535,12 @@ fn trending_store_error(error: StoreError) -> ApiError {
         PaperDraftRevision,
         PaperDraftRevisionSummary,
         PaperDraftRevisionListResponse,
+        PublicPaperDraft,
+        PublicPaperDraftSummary,
+        PublicPaperDraftResponse,
+        PublicPaperDraftListResponse,
+        PaperTopicsResponse,
+        PaperRevisionListResponse,
         PublishPaperRequest,
         IngestGitHubTrendingRequest,
         IngestGitHubTrendingEntry,

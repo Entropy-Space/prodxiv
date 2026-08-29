@@ -1,13 +1,15 @@
 ---
 import type { PaperIndexEntry } from "../lib/published-paper-index.ts";
+import WriterDisclosure from "./WriterDisclosure.astro";
 
 interface Props {
   paper: PaperIndexEntry;
+  kind?: "published" | "reference";
 }
 
-const { paper } = Astro.props;
+const { paper, kind = "published" } = Astro.props;
 const publishedAt = new Intl.DateTimeFormat("en", {
-  day: "2-digit",
+  day: "numeric",
   month: "short",
   timeZone: "UTC",
   year: "numeric",
@@ -16,39 +18,26 @@ const publishedAt = new Intl.DateTimeFormat("en", {
 
 <article class="paper-row">
   <div class="paper-row__meta">
-    <span>{paper.paper_id}</span>
-    <span>v{paper.version}</span>
-    <span>{publishedAt}</span>
+    <span>{kind === "reference" ? "Example · " : ""}{paper.paper_id} · v{paper.version}</span>
+    <span class="paper-row__state">{kind === "reference" ? "Reference example" : "Published"}</span>
   </div>
-
-  <div class="paper-row__content">
-    <p class="paper-row__topics">
-      {paper.topics.map((topic) => topic.replaceAll("_", " ")).join(" · ")}
-    </p>
-    <h3>
-      <a href={paper.href}>{paper.title}</a>
-    </h3>
-    <p class="paper-row__authors">
-      {paper.authors.join(", ")}
-    </p>
-    <p class="paper-row__summary">{paper.summary}</p>
+  <h3><a href={paper.href}>{paper.title}</a></h3>
+  <p class="paper-row__summary">{paper.summary}</p>
+  <p class="paper-row__authors">Attributed to {paper.authors.join(", ")}</p>
+  <p class="paper-row__writers"><WriterDisclosure writers={paper.writers} /></p>
+  <div class="paper-row__bottom">
+    <ul aria-label="Paper topics">
+      {paper.topics.map((topic) => (
+        <li><a href={`/?topic=${encodeURIComponent(topic)}`}>{topic.replaceAll("_", " ")}</a></li>
+      ))}
+    </ul>
+    <span>{kind === "reference" ? "Example date · " : ""}<time datetime={paper.published_at}>{publishedAt}</time></span>
   </div>
-
-  <a
-    class="paper-row__open"
-    href={paper.href}
-    aria-label={`Read ${paper.title}`}
-  >
-    Read paper <span aria-hidden="true">→</span>
-  </a>
 </article>
 
 <style>
   .paper-row {
-    display: grid;
-    grid-template-columns: 10.5rem minmax(0, 1fr) auto;
-    gap: clamp(1.5rem, 4vw, 4rem);
-    padding-block: clamp(2rem, 4vw, 3rem);
+    padding-block: 1.5rem;
     border-top: 1px solid var(--line);
   }
 
@@ -56,109 +45,85 @@ const publishedAt = new Intl.DateTimeFormat("en", {
     border-bottom: 1px solid var(--line);
   }
 
-  .paper-row__meta {
-    display: grid;
-    gap: 0.2rem;
-    align-content: start;
+  .paper-row__meta,
+  .paper-row__bottom {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.4rem 1.2rem;
     color: var(--ink-soft);
+    font-size: 0.73rem;
+    overflow-wrap: anywhere;
+  }
+
+  .paper-row__meta > span:first-child {
     font-family: var(--mono);
-    font-size: 0.66rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
   }
 
-  .paper-row__content {
-    max-width: 48rem;
-  }
-
-  .paper-row__topics {
-    margin: 0 0 0.6rem;
+  .paper-row__state {
     color: var(--accent);
-    font-family: var(--mono);
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
 
   .paper-row h3 {
-    max-width: 24ch;
-    margin: 0;
+    max-width: 45ch;
+    margin: 0.65rem 0 0.7rem;
     font-family: var(--serif);
-    font-size: clamp(1.65rem, 3.6vw, 2.55rem);
-    font-weight: 600;
-    line-height: 1.08;
-    letter-spacing: -0.035em;
+    font-size: clamp(1.55rem, 3vw, 1.9rem);
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    overflow-wrap: anywhere;
   }
 
   .paper-row h3 a {
+    color: var(--ink);
     text-decoration: none;
   }
 
-  .paper-row__authors {
-    margin: 0.75rem 0 0;
-    color: var(--ink-soft);
-    font-family: var(--serif);
-    font-size: 0.95rem;
-    font-style: italic;
+  .paper-row h3 a:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .paper-row__summary {
-    max-width: 65ch;
-    margin: 1rem 0 0;
-    color: var(--ink-soft);
-    font-family: var(--serif);
+    max-width: 76ch;
+    margin: 0;
+    font-size: 0.93rem;
     line-height: 1.65;
+    overflow-wrap: anywhere;
   }
 
-  .paper-row__open {
-    align-self: center;
-    white-space: nowrap;
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+  .paper-row__authors,
+  .paper-row__writers {
+    margin: 0.65rem 0 0;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+  }
+
+  .paper-row__writers {
+    margin-top: 0.1rem;
+  }
+
+  .paper-row__bottom {
+    margin-top: 0.75rem;
+  }
+
+  .paper-row__bottom ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.85rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .paper-row__bottom a {
     text-decoration: none;
-    text-transform: uppercase;
   }
 
-  .paper-row__open span {
-    display: inline-block;
-    margin-left: 0.25rem;
-    transition: transform 160ms ease;
-  }
-
-  .paper-row__open:hover span {
-    transform: translateX(0.2rem);
-  }
-
-  @media (max-width: 760px) {
-    .paper-row {
-      grid-template-columns: 1fr auto;
-    }
-
-    .paper-row__meta {
-      grid-column: 1 / -1;
-      grid-template-columns: repeat(3, auto);
-      justify-content: start;
-      gap: 1rem;
-    }
-
-    .paper-row__open {
-      align-self: end;
-    }
-  }
-
-  @media (max-width: 520px) {
-    .paper-row {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .paper-row__open span {
-      transition: none;
-    }
+  .paper-row__bottom a:hover {
+    text-decoration: underline;
   }
 </style>

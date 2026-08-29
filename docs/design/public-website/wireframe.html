@@ -1,0 +1,601 @@
+<div id="prodxiv-public-wireframes">
+  <div class="px-preview-label">
+    <span>Public experience / Design preview</span>
+    <span>Illustrative papers, identifiers, and dates</span>
+  </div>
+  <div class="px-site">
+    <header class="px-header">
+      <button class="px-wordmark" type="button" data-route="papers" aria-label="prodxiv home">prod<span>xiv</span></button>
+      <nav class="px-navigation" aria-label="Main navigation">
+        <button type="button" data-route="papers" aria-current="page">Papers</button>
+        <button type="button" data-route="drafts">Drafts <span class="px-nav-count">3</span></button>
+        <button type="button" data-route="about">About</button>
+      </nav>
+    </header>
+
+    <main class="px-main">
+      <section data-page="papers">
+        <header class="px-page-heading">
+          <p class="px-kicker">The public archive</p>
+          <h1>The reasoning behind the work.</h1>
+          <p>Product papers on decisions, mechanisms, and lessons. Published with a history you can follow.</p>
+        </header>
+        <form class="px-discovery" role="search" aria-label="Find published papers">
+          <label for="px-paper-search">Search papers
+            <input id="px-paper-search" type="search" placeholder="Title, product, or idea…" autocomplete="off">
+          </label>
+          <label for="px-paper-topic">Topic
+            <select id="px-paper-topic">
+              <option value="">All topics</option>
+              <option value="Knowledge systems">Knowledge systems</option>
+              <option value="Developer tools">Developer tools</option>
+            </select>
+          </label>
+        </form>
+        <div class="px-list-heading">
+          <h2>Published papers</h2>
+          <span id="px-results" aria-live="polite">2 papers · Newest first</span>
+        </div>
+        <div id="px-papers-list" class="px-paper-list"></div>
+        <div id="px-no-results" class="px-empty" hidden>
+          <h3>No papers match.</h3>
+          <p>Try a different phrase or topic.</p>
+          <button class="px-button" type="button" data-clear-search>Clear filters</button>
+        </div>
+        <aside class="px-draft-invitation">
+          <div>
+            <p class="px-kicker">Before publication</p>
+            <h2>Read the working drafts.</h2>
+            <p>Three pending drafts are open to read. They are unpublished and may change.</p>
+          </div>
+          <button class="px-button" type="button" data-route="drafts">Browse drafts <span aria-hidden="true">↗</span></button>
+        </aside>
+      </section>
+
+      <section data-page="drafts" hidden>
+        <header class="px-page-heading">
+          <p class="px-kicker">Open to read · Not yet published</p>
+          <h1>Pending drafts.</h1>
+          <p>A view of work before publication. Read the current revision, with its assumptions and limitations intact.</p>
+        </header>
+        <div class="px-draft-explainer">
+          <strong>Reading is public. Review actions are restricted.</strong>
+          <p>Unchanged, bot-owned drafts may be published on the next run. Author-managed drafts need explicit approval.</p>
+        </div>
+        <div class="px-list-heading">
+          <h2>Awaiting review</h2>
+          <span>3 drafts · Most recently edited</span>
+        </div>
+        <div id="px-drafts-list" class="px-paper-list"></div>
+      </section>
+
+      <section data-page="reader" hidden>
+        <button class="px-back" type="button" id="px-reader-back">← Published papers</button>
+        <aside id="px-reader-draft-notice" class="px-draft-explainer" hidden>
+          <strong>Public draft · Pending review</strong>
+          <p>Not yet published. Author attribution does not imply endorsement. This working paper may change.</p>
+        </aside>
+        <header class="px-reader-heading">
+          <p class="px-kicker" id="px-reader-kind"></p>
+          <h1 id="px-reader-title"></h1>
+          <p class="px-reader-author">Attributed to <span id="px-reader-author"></span></p>
+          <p class="px-writer-line">Written by Paperbot <span aria-hidden="true">·</span> Agent-written</p>
+          <div class="px-reader-meta">
+            <span id="px-reader-identifier"></span>
+            <span id="px-reader-date"></span>
+          </div>
+        </header>
+        <div class="px-reader-tools">
+          <div class="px-reader-actions">
+            <button class="px-button" type="button" id="px-citation-button">Cite this revision</button>
+            <button class="px-button" type="button" id="px-source-button">Source .md</button>
+            <button class="px-button" type="button" id="px-draft-link-button" hidden>Link to this draft</button>
+          </div>
+          <label class="px-revision-control" id="px-revision-control">Revision
+            <select id="px-revision-select" aria-label="Published paper revision"></select>
+          </label>
+        </div>
+        <div class="px-reader-grid">
+          <aside class="px-reader-sidebar">
+            <details class="px-contents" open>
+              <summary>On this page</summary>
+              <nav aria-label="Paper contents">
+                <a href="#px-section-summary">Summary</a>
+                <a href="#px-section-background">Background</a>
+                <a href="#px-section-architecture">Architecture</a>
+                <a href="#px-section-limitations">Limitations</a>
+              </nav>
+            </details>
+            <details class="px-provenance" open>
+              <summary>Writer provenance</summary>
+              <dl>
+                <dt>Writer</dt><dd>Paperbot</dd>
+                <dt>Model</dt><dd>deepseek-v4-flash</dd>
+                <dt>Tool version</dt><dd>0.1.0-preview <span class="px-example-tag">example</span></dd>
+              </dl>
+            </details>
+          </aside>
+          <article class="px-prose">
+            <section id="px-section-summary"><h2>Summary</h2><p id="px-reader-summary"></p></section>
+            <section id="px-section-background"><h2>Background</h2><p id="px-reader-background"></p></section>
+            <section id="px-section-architecture"><h2>Architecture</h2><p id="px-reader-architecture"></p></section>
+            <section id="px-section-limitations"><h2>Limitations</h2><p id="px-reader-limitations"></p></section>
+            <p class="px-reader-disclosure">Agent-written analysis. Attribution identifies the subject's credited authors; it does not establish their endorsement.</p>
+            <p class="px-revision-note" id="px-reader-revision-note"></p>
+          </article>
+        </div>
+      </section>
+
+      <section data-page="about" hidden>
+        <header class="px-page-heading">
+          <p class="px-kicker">About prodxiv</p>
+          <h1>Product ideas, documented properly.</h1>
+          <p>A versioned archive of how products work, why decisions matter, and what remains uncertain.</p>
+        </header>
+        <div class="px-about-copy">
+          <h2>Published papers preserve a record.</h2>
+          <p>Every published revision has its own stable identifier and source. A correction creates a new revision; it does not silently rewrite history.</p>
+          <h2>Drafts make work in progress readable.</h2>
+          <p>Pending drafts are public working copies. A draft is not a published paper, an author endorsement, or a promise of publication.</p>
+          <h2>Authorship stays explicit.</h2>
+          <p>Author attribution and the writer of the prose are shown separately. Paperbot's model and tool version are visible; private research logs and run archives are not.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="px-footer">
+      <span>prodxiv / Product knowledge, preserved.</span>
+      <span>Public reading · Versioned publication</span>
+    </footer>
+  </div>
+
+  <template id="px-entry-template">
+    <article class="px-entry">
+      <div class="px-entry-topline">
+        <span class="px-entry-id"></span>
+        <span class="px-entry-state"></span>
+      </div>
+      <h3><button class="px-title-link" type="button" data-open-paper></button></h3>
+      <p class="px-entry-summary"></p>
+      <p class="px-entry-byline"></p>
+      <div class="px-entry-bottom">
+        <span class="px-entry-topic"></span>
+        <span class="px-entry-date"></span>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="px-source-dialog" aria-labelledby="px-dialog-title">
+    <header class="px-dialog-heading">
+      <h2 id="px-dialog-title">Paper source</h2>
+      <button class="px-button" type="button" id="px-dialog-close">Close</button>
+    </header>
+    <p id="px-dialog-caption" class="px-dialog-caption"></p>
+    <label class="px-source-label" for="px-dialog-content">Select and copy
+      <textarea id="px-dialog-content" readonly rows="8" spellcheck="false"></textarea>
+    </label>
+  </dialog>
+  <p id="px-screen-announcement" class="px-sr-only" aria-live="polite"></p>
+</div>
+
+<style>
+  #prodxiv-public-wireframes {
+    --px-paper: light-dark(#f7f4ee, #1c1d1b);
+    --px-ink: light-dark(#24251f, #eeeee3);
+    --px-muted: light-dark(#626257, #b7b8aa);
+    --px-line: light-dark(#dcd8cc, #42463b);
+    --px-accent: light-dark(#823f35, #e7aa97);
+    --px-tint: light-dark(#eeeade, #282b24);
+    --px-draft: light-dark(#f3e9d7, #30291c);
+    --px-draft-ink: light-dark(#735220, #e6c792);
+    --px-overlay: light-dark(#1c211e66, #00000088);
+    color: var(--px-ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.55;
+    container-type: inline-size;
+  }
+  #prodxiv-public-wireframes * { box-sizing: border-box; }
+  #prodxiv-public-wireframes [hidden] { display: none !important; }
+  #prodxiv-public-wireframes button,
+  #prodxiv-public-wireframes input,
+  #prodxiv-public-wireframes select,
+  #prodxiv-public-wireframes textarea { font: inherit; color: inherit; }
+  #prodxiv-public-wireframes button { cursor: pointer; }
+  #prodxiv-public-wireframes a { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-preview-label {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px;
+    padding: 0 0 12px; color: var(--px-muted); font-size: 11px;
+  }
+  #prodxiv-public-wireframes .px-site { background: var(--px-paper); border-top: 3px solid var(--px-accent); }
+  #prodxiv-public-wireframes .px-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 10px 24px; padding: 16px 32px; border-bottom: 1px solid var(--px-line);
+  }
+  #prodxiv-public-wireframes .px-wordmark {
+    background: transparent; border: 0; padding: 0; font-family: Georgia, "Times New Roman", serif;
+    font-size: 30px; letter-spacing: -1.8px; line-height: 1.1; min-height: 44px;
+  }
+  #prodxiv-public-wireframes .px-wordmark span { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-navigation { display: flex; gap: 18px; align-items: center; }
+  #prodxiv-public-wireframes .px-navigation button {
+    min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--px-muted);
+    border-bottom: 2px solid transparent; font-size: 13px;
+  }
+  #prodxiv-public-wireframes .px-navigation button[aria-current="page"] { color: var(--px-accent); border-bottom-color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-nav-count { margin-left: 3px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-main { padding: 32px; }
+  #prodxiv-public-wireframes .px-page-heading { margin-bottom: 26px; }
+  #prodxiv-public-wireframes .px-kicker {
+    margin: 0 0 10px; color: var(--px-accent); text-transform: uppercase; letter-spacing: 1.4px;
+    font-size: 11px; font-weight: 500;
+  }
+  #prodxiv-public-wireframes h1 {
+    margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(30px, 5cqw, 43px);
+    line-height: 1.1; font-weight: 400; letter-spacing: -1.2px; text-wrap: balance;
+  }
+  #prodxiv-public-wireframes .px-page-heading > p:last-child { max-width: 57ch; margin: 14px 0 0; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-discovery { display: grid; grid-template-columns: minmax(0, 1fr) 174px; gap: 12px; margin-bottom: 26px; }
+  #prodxiv-public-wireframes .px-discovery label,
+  #prodxiv-public-wireframes .px-source-label { display: grid; gap: 6px; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes input,
+  #prodxiv-public-wireframes select,
+  #prodxiv-public-wireframes textarea {
+    min-width: 0; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--px-line);
+    border-radius: 3px; background: var(--px-paper); font-size: 16px;
+  }
+  #prodxiv-public-wireframes input::placeholder { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-list-heading { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: space-between; align-items: baseline; padding-bottom: 12px; }
+  #prodxiv-public-wireframes .px-list-heading h2 { margin: 0; font-size: 14px; font-weight: 500; }
+  #prodxiv-public-wireframes .px-list-heading > span { color: var(--px-muted); font-size: 11px; }
+  #prodxiv-public-wireframes .px-entry { border-top: 1px solid var(--px-line); padding: 20px 0; }
+  #prodxiv-public-wireframes .px-entry-topline,
+  #prodxiv-public-wireframes .px-entry-bottom { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 5px 14px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-entry-id { font-family: "SFMono-Regular", Consolas, monospace; }
+  #prodxiv-public-wireframes .px-entry-state { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-entry[data-stage="draft"] .px-entry-state { color: var(--px-draft-ink); }
+  #prodxiv-public-wireframes .px-entry h3 { margin: 9px 0; font-weight: 400; }
+  #prodxiv-public-wireframes .px-title-link {
+    display: block; border: 0; background: transparent; padding: 0; text-align: left; max-width: 100%;
+    font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 400; line-height: 1.2;
+    letter-spacing: -0.4px; text-decoration-thickness: 1px; text-underline-offset: 4px;
+  }
+  #prodxiv-public-wireframes .px-title-link:hover { text-decoration: underline; color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-entry-summary { margin: 0; max-width: 66ch; font-size: 14px; }
+  #prodxiv-public-wireframes .px-entry-byline { margin: 10px 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-entry-topic { color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-draft-invitation {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+    margin-top: 12px; padding: 22px; background: var(--px-tint);
+  }
+  #prodxiv-public-wireframes .px-draft-invitation > div { flex: 1 1 240px; }
+  #prodxiv-public-wireframes .px-draft-invitation h2 { margin: 0; font-family: Georgia, serif; font-size: 23px; line-height: 1.2; font-weight: 400; }
+  #prodxiv-public-wireframes .px-draft-invitation p:last-child { margin: 8px 0 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-button {
+    display: inline-flex; justify-content: center; align-items: center; gap: 9px; min-height: 44px;
+    padding: 8px 12px; border: 1px solid var(--px-line); border-radius: 3px; background: var(--px-paper);
+    font-size: 12px; text-align: center;
+  }
+  #prodxiv-public-wireframes .px-button:hover { border-color: var(--px-accent); color: var(--px-accent); }
+  #prodxiv-public-wireframes .px-empty { padding: 24px 0; border-top: 1px solid var(--px-line); }
+  #prodxiv-public-wireframes .px-empty h3 { margin: 0; font-weight: 500; }
+  #prodxiv-public-wireframes .px-empty p { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-draft-explainer { background: var(--px-draft); color: var(--px-draft-ink); padding: 16px 18px; margin-bottom: 26px; font-size: 12px; }
+  #prodxiv-public-wireframes .px-draft-explainer strong { font-weight: 500; }
+  #prodxiv-public-wireframes .px-draft-explainer p { margin: 5px 0 0; }
+  #prodxiv-public-wireframes .px-back { border: 0; background: transparent; padding: 0; margin-bottom: 18px; min-height: 44px; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-reader-author { margin: 18px 0 3px; font-family: Georgia, serif; font-size: 16px; }
+  #prodxiv-public-wireframes .px-writer-line { margin: 0; color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-reader-meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 18px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; color: var(--px-muted); overflow-wrap: anywhere; }
+  #prodxiv-public-wireframes .px-reader-tools { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 18px 0 22px; border-bottom: 1px solid var(--px-line); }
+  #prodxiv-public-wireframes .px-reader-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #prodxiv-public-wireframes .px-revision-control { display: grid; gap: 4px; font-size: 11px; color: var(--px-muted); min-width: 145px; }
+  #prodxiv-public-wireframes .px-revision-control select { font-size: 13px; }
+  #prodxiv-public-wireframes .px-reader-grid { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 28px; padding-top: 26px; }
+  #prodxiv-public-wireframes .px-contents summary { font-size: 12px; font-weight: 500; cursor: pointer; min-height: 32px; }
+  #prodxiv-public-wireframes .px-contents nav { display: grid; margin: 2px 0 24px; }
+  #prodxiv-public-wireframes .px-contents a { padding: 7px 0; font-size: 12px; color: var(--px-muted); text-decoration: none; }
+  #prodxiv-public-wireframes .px-contents a:hover { color: var(--px-accent); text-decoration: underline; }
+  #prodxiv-public-wireframes .px-provenance { border-top: 1px solid var(--px-line); padding-top: 15px; }
+  #prodxiv-public-wireframes .px-provenance summary { margin: 0; min-height: 32px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  #prodxiv-public-wireframes .px-provenance dl { margin: 12px 0 0; font-size: 11px; }
+  #prodxiv-public-wireframes .px-provenance dt { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-provenance dd { margin: 2px 0 11px; overflow-wrap: anywhere; }
+  #prodxiv-public-wireframes .px-example-tag { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-prose { min-width: 0; font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1.7; }
+  #prodxiv-public-wireframes .px-prose section { scroll-margin-top: 12px; }
+  #prodxiv-public-wireframes .px-prose h2 { font-size: 24px; font-weight: 400; line-height: 1.2; margin: 0 0 14px; }
+  #prodxiv-public-wireframes .px-prose p { margin: 0 0 28px; }
+  #prodxiv-public-wireframes .px-prose .px-reader-disclosure,
+  #prodxiv-public-wireframes .px-prose .px-revision-note { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 12px; line-height: 1.6; color: var(--px-muted); padding-top: 16px; border-top: 1px solid var(--px-line); margin-bottom: 16px; }
+  #prodxiv-public-wireframes .px-about-copy { max-width: 60ch; }
+  #prodxiv-public-wireframes .px-about-copy h2 { margin: 28px 0 8px; font-family: Georgia, serif; font-weight: 400; font-size: 25px; }
+  #prodxiv-public-wireframes .px-about-copy p { color: var(--px-muted); }
+  #prodxiv-public-wireframes .px-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; border-top: 1px solid var(--px-line); padding: 20px 32px; font-size: 11px; color: var(--px-muted); }
+  #prodxiv-public-wireframes dialog {
+    width: min(580px, calc(100% - 32px)); max-height: 80%; padding: 22px;
+    color: var(--px-ink); background: var(--px-paper); border: 1px solid var(--px-line);
+    border-radius: 4px;
+  }
+  #prodxiv-public-wireframes dialog::backdrop { background: var(--px-overlay); }
+  #prodxiv-public-wireframes .px-dialog-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+  #prodxiv-public-wireframes .px-dialog-heading h2 { margin: 0; font-family: Georgia, serif; font-size: 25px; font-weight: 400; }
+  #prodxiv-public-wireframes .px-dialog-caption { color: var(--px-muted); font-size: 12px; }
+  #prodxiv-public-wireframes .px-source-label textarea { resize: vertical; font-size: 13px; font-family: "SFMono-Regular", Consolas, monospace; }
+  #prodxiv-public-wireframes .px-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  @container (max-width: 520px) {
+    #prodxiv-public-wireframes .px-header { padding: 12px 20px; gap: 4px 16px; }
+    #prodxiv-public-wireframes .px-navigation { gap: 14px; }
+    #prodxiv-public-wireframes .px-main { padding: 26px 20px; }
+    #prodxiv-public-wireframes .px-discovery { grid-template-columns: 1fr; }
+    #prodxiv-public-wireframes .px-title-link { font-size: 23px; }
+    #prodxiv-public-wireframes .px-reader-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+    #prodxiv-public-wireframes .px-reader-sidebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+    #prodxiv-public-wireframes .px-reader-sidebar summary { min-height: 44px; padding: 11px 0; }
+    #prodxiv-public-wireframes .px-provenance { border: 0; padding: 0; }
+    #prodxiv-public-wireframes .px-contents a { min-height: 44px; padding: 11px 0; }
+    #prodxiv-public-wireframes .px-prose { font-size: 17px; }
+    #prodxiv-public-wireframes .px-footer { padding: 18px 20px; }
+  }
+  @container (max-width: 350px) {
+    #prodxiv-public-wireframes .px-header { align-items: flex-start; }
+    #prodxiv-public-wireframes .px-navigation { width: 100%; gap: 24px; }
+    #prodxiv-public-wireframes .px-main { padding: 22px 16px; }
+    #prodxiv-public-wireframes .px-draft-invitation { padding: 18px; }
+    #prodxiv-public-wireframes .px-reader-actions { width: 100%; }
+  }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById("prodxiv-public-wireframes");
+  if (!root) return;
+  const find = (selector) => {
+    const element = root.querySelector(selector);
+    if (!element) throw new Error("Missing preview element: " + selector);
+    return element;
+  };
+  const papers = [
+    {
+      key: "archive-prodxiv", stage: "published", product_name: "prodxiv",
+      title: "Product knowledge, with a history.",
+      summary: "A versioned archive for the decisions, mechanisms, and lessons behind products.",
+      topic: "Knowledge systems", author: "Entropy-Space", date: "27 Aug 2026",
+      paper_id: "2608.000001", revision: 2, revisions: [2, 1], owner_kind: "author",
+      background: "Product knowledge is spread across repositories, documentation, launch posts, and individual memory. A durable paper brings the reasoning and its limitations into one readable record.",
+      architecture: "Markdown is the authoring source. The publishing API validates each submission and creates an immutable revision. The website reads that exact revision, preserving its source and identifiers.",
+      limitations: "Structural validation does not prove that a claim is true. Readers still need inspectable evidence, explicit uncertainty, and a clear distinction between author attribution and agent-written prose."
+    },
+    {
+      key: "archive-paperbot", stage: "published", product_name: "Paperbot",
+      title: "Repository evidence before fluent prose.",
+      summary: "A local-first drafting workflow that separates repository observations from author intention.",
+      topic: "Developer tools", author: "Entropy-Space", date: "24 Aug 2026",
+      paper_id: "2608.000002", revision: 1, revisions: [1], owner_kind: "bot",
+      background: "A repository can describe implementation well while leaving motivation, rejected alternatives, and lessons unexplained. A first draft should preserve that distinction.",
+      architecture: "Paperbot selects a bounded source bundle and builds an evidence ledger before drafting. Deterministic validation checks the resulting paper; a separate host performs authorized publication.",
+      limitations: "Source evidence can establish implementation details without establishing intention. Unmeasured performance claims and missing author context remain limitations, not facts."
+    },
+    {
+      key: "draft-recovery", stage: "draft", product_name: "Paperbot",
+      title: "Making automatic publication recoverable.",
+      summary: "Keeping successful drafts moving while failed projects remain inspectable and retryable.",
+      topic: "Developer tools", author: "Entropy-Space", date: "28 Aug 2026, 08:20 UTC",
+      paper_uuid: "8a24e5cc-8460-4eae-9bdf-94023f99d012", revision: 3, owner_kind: "bot",
+      background: "A daily batch can have a mixture of successful and failed repositories. A single failure should remain visible without obscuring the drafts that were produced successfully.",
+      architecture: "The host records project outcomes separately, retains debugging artifacts privately, and submits successful papers for review. Publication is a distinct operation on one exact draft revision.",
+      limitations: "This is an unreviewed working account. Recovery depends on the failure category, validation result, and whether the saved revision remains unchanged. It does not promise that every draft will be published."
+    },
+    {
+      key: "draft-sources", stage: "draft", product_name: "Paperbot",
+      title: "Source boundaries for repository research.",
+      summary: "A closer look at which repository files enter analysis, and which must stay outside it.",
+      topic: "Developer tools", author: "Entropy-Space", date: "28 Aug 2026, 07:45 UTC",
+      paper_uuid: "17d7d938-3f94-42b2-8db1-d4bfa0a98271", revision: 1, owner_kind: "bot",
+      background: "Repository research needs enough implementation context to be useful, without treating every file as an appropriate input. Selection and exclusion are part of the evidence boundary.",
+      architecture: "The scanner applies explicit exclusions and bounded selection. Public repository reads are pinned to a source revision. Run artifacts preserve provenance separately from the public paper.",
+      limitations: "A bounded selection can miss important context. Excluding sensitive paths is a safety measure, not proof that every included document is suitable for public release."
+    },
+    {
+      key: "draft-intention", stage: "draft", product_name: "prodxiv",
+      title: "What the code cannot tell the reader.",
+      summary: "An author-managed draft about making missing intention visible in a product paper.",
+      topic: "Knowledge systems", author: "Entropy-Space", date: "27 Aug 2026, 16:10 UTC",
+      paper_uuid: "cba50f57-2c76-4c82-a8a0-07812a7bef5d", revision: 2, owner_kind: "author",
+      background: "Implementation records the result of a decision, but often not the alternatives or constraints that shaped it. Those missing explanations matter to a reader trying to learn from the work.",
+      architecture: "Repository observations and author statements remain distinct inputs. A human edit creates a new draft revision and moves the draft out of automatic bot approval.",
+      limitations: "This draft still needs author review. Attribution, a public preview, or a recent edit does not by itself establish that its account of intention has been endorsed."
+    }
+  ];
+  const state = { page: "papers", selected_key: undefined, selected_revision: undefined, query: "", topic: "" };
+  const template = find("#px-entry-template");
+  const pages = Array.from(root.querySelectorAll("[data-page]"));
+  const navigation = Array.from(root.querySelectorAll(".px-navigation [data-route]"));
+  const dialog = find("#px-source-dialog");
+  const search = find("#px-paper-search");
+  const topic = find("#px-paper-topic");
+  const revisionSelect = find("#px-revision-select");
+  const contents = find(".px-contents");
+  const provenance = find(".px-provenance");
+  let compactReader;
+  const layoutObserver = new ResizeObserver((entries) => {
+    const compact = entries[0].contentRect.width <= 520;
+    if (compact !== compactReader) {
+      compactReader = compact;
+      contents.open = !compact;
+      provenance.open = !compact;
+    }
+  });
+  layoutObserver.observe(root);
+
+  function renderList(target, records) {
+    target.replaceChildren();
+    records.forEach((paper) => {
+      const item = template.content.cloneNode(true);
+      item.querySelector(".px-entry").dataset.stage = paper.stage;
+      item.querySelector(".px-entry-id").textContent = paper.stage === "published"
+        ? paper.paper_id + " · v" + paper.revision
+        : "Draft revision " + paper.revision;
+      item.querySelector(".px-entry-state").textContent = paper.stage === "published" ? "Published" : "Pending review";
+      const link = item.querySelector("[data-open-paper]");
+      link.dataset.openPaper = paper.key;
+      link.textContent = paper.title;
+      item.querySelector(".px-entry-summary").textContent = paper.summary;
+      item.querySelector(".px-entry-byline").textContent = paper.author + " · Written by Paperbot" + (paper.stage === "draft" ? " · " + (paper.owner_kind === "bot" ? "Bot-owned" : "Author-managed") : "");
+      item.querySelector(".px-entry-topic").textContent = paper.topic;
+      item.querySelector(".px-entry-date").textContent = (paper.stage === "draft" ? "Edited " : "") + paper.date;
+      target.appendChild(item);
+    });
+  }
+
+  function filterPapers() {
+    const filtered = papers.filter((paper) => paper.stage === "published"
+      && (!state.topic || paper.topic === state.topic)
+      && [paper.title, paper.product_name, paper.summary, paper.author].join(" ").toLowerCase().includes(state.query.toLowerCase().trim()));
+    renderList(find("#px-papers-list"), filtered);
+    find("#px-results").textContent = filtered.length + (filtered.length === 1 ? " paper" : " papers") + " · Newest first";
+    find("#px-no-results").hidden = filtered.length > 0;
+  }
+
+  function showPage(page) {
+    state.page = page;
+    pages.forEach((element) => { element.hidden = element.dataset.page !== page; });
+    const selected = papers.find((paper) => paper.key === state.selected_key);
+    const activeRoute = page === "reader" ? (selected && selected.stage === "draft" ? "drafts" : "papers") : page;
+    navigation.forEach((element) => {
+      if (element.dataset.route === activeRoute) element.setAttribute("aria-current", "page");
+      else element.removeAttribute("aria-current");
+    });
+    find("#px-screen-announcement").textContent = page === "reader" && selected ? selected.title : (page === "drafts" ? "Pending drafts" : page === "papers" ? "Published papers" : "About prodxiv");
+  }
+
+  function selectedPaper() {
+    return papers.find((paper) => paper.key === state.selected_key);
+  }
+
+  function paperDate(paper) {
+    return paper.key === "archive-prodxiv" && state.selected_revision === 1 ? "20 Aug 2026" : paper.date;
+  }
+
+  function summaryText(paper) {
+    return paper.key === "archive-prodxiv" && state.selected_revision === 1
+      ? "A Markdown-first archive for product decisions and lessons, preserved as immutable paper revisions."
+      : paper.summary;
+  }
+
+  function paperPath(paper) {
+    return paper.stage === "published"
+      ? "/papers/" + paper.paper_id + "/v" + state.selected_revision
+      : "/drafts/" + paper.paper_uuid;
+  }
+
+  function renderReader() {
+    const paper = selectedPaper();
+    if (!paper) return;
+    const isDraft = paper.stage === "draft";
+    find("#px-reader-back").textContent = isDraft ? "← Pending drafts" : "← Published papers";
+    find("#px-reader-draft-notice").hidden = !isDraft;
+    find("#px-reader-kind").textContent = paper.product_name + " / " + (isDraft ? "Working paper" : "Product paper");
+    find("#px-reader-title").textContent = paper.title;
+    find("#px-reader-author").textContent = paper.author;
+    find("#px-reader-identifier").textContent = isDraft
+      ? "Draft " + paper.paper_uuid + " · Revision " + paper.revision
+      : "prodxiv:" + paper.paper_id + " · v" + state.selected_revision;
+    find("#px-reader-date").textContent = (isDraft ? "Edited " : "Published ") + paperDate(paper);
+    find("#px-reader-summary").textContent = summaryText(paper);
+    ["background", "architecture", "limitations"].forEach((section) => {
+      find("#px-reader-" + section).textContent = paper[section];
+    });
+    find("#px-citation-button").hidden = isDraft;
+    find("#px-source-button").hidden = isDraft;
+    find("#px-draft-link-button").hidden = !isDraft;
+    find("#px-revision-control").hidden = isDraft || paper.revisions.length < 2;
+    revisionSelect.replaceChildren();
+    if (!isDraft) {
+      for (const revision of paper.revisions) {
+        const option = document.createElement("option");
+        option.value = String(revision);
+        option.textContent = "v" + revision + (revision === paper.revision ? " · Latest" : " · Earlier");
+        revisionSelect.appendChild(option);
+      }
+      revisionSelect.value = String(state.selected_revision);
+    }
+    find("#px-reader-revision-note").textContent = isDraft
+      ? (paper.owner_kind === "bot" ? "Bot-owned. This unchanged revision may be published on the next run." : "Author-managed. This draft will not be automatically approved.") + " Draft content is not an immutable publication."
+      : "This exact published revision is immutable." + (state.selected_revision < paper.revision ? " A newer revision is available above." : "");
+    showPage("reader");
+  }
+
+  function openDialog(title, caption, content) {
+    find("#px-dialog-title").textContent = title;
+    find("#px-dialog-caption").textContent = caption;
+    find("#px-dialog-content").value = content;
+    dialog.showModal();
+  }
+
+  root.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const sectionLink = event.target.closest(".px-contents a");
+    if (sectionLink) {
+      event.preventDefault();
+      find(sectionLink.getAttribute("href")).scrollIntoView({ block: "start" });
+      return;
+    }
+    const route = event.target.closest("[data-route]");
+    if (route) {
+      showPage(route.dataset.route);
+      navigation.find((element) => element.dataset.route === route.dataset.route)?.focus();
+      return;
+    }
+    const paperButton = event.target.closest("[data-open-paper]");
+    if (paperButton) {
+      const paper = papers.find((candidate) => candidate.key === paperButton.dataset.openPaper);
+      if (paper) {
+        state.selected_key = paper.key;
+        state.selected_revision = paper.revision;
+        renderReader();
+        find("#px-reader-back").focus();
+      }
+      return;
+    }
+    if (event.target.closest("[data-clear-search]")) {
+      state.query = ""; state.topic = ""; search.value = ""; topic.value = ""; filterPapers(); search.focus();
+    }
+  });
+  find(".px-discovery").addEventListener("submit", (event) => { event.preventDefault(); filterPapers(); });
+  search.addEventListener("input", () => { state.query = search.value; filterPapers(); });
+  topic.addEventListener("change", () => { state.topic = topic.value; filterPapers(); });
+  find("#px-reader-back").addEventListener("click", () => {
+    const route = selectedPaper().stage === "draft" ? "drafts" : "papers";
+    showPage(route);
+    navigation.find((element) => element.dataset.route === route)?.focus();
+  });
+  revisionSelect.addEventListener("change", () => { state.selected_revision = Number(revisionSelect.value); renderReader(); });
+  find("#px-dialog-close").addEventListener("click", () => { dialog.close(); });
+  find("#px-citation-button").addEventListener("click", () => {
+    const paper = selectedPaper();
+    openDialog("Cite this revision", "Illustrative citation · Bound to the selected revision",
+      paper.author + ". " + paper.title + " prodxiv:" + paper.paper_id + "v" + state.selected_revision + ". " + paperDate(paper) + ". Written by Paperbot.\nhttps://prodxiv.example" + paperPath(paper));
+  });
+  find("#px-draft-link-button").addEventListener("click", () => {
+    const paper = selectedPaper();
+    openDialog("Link to this draft", "Illustrative link · The draft URL identifies a mutable working paper.",
+      "https://prodxiv.example" + paperPath(paper));
+  });
+  find("#px-source-button").addEventListener("click", () => {
+    const paper = selectedPaper();
+    const source = [
+      "---", 'schema_version: "2"', 'title: "' + paper.title + '"',
+      'product_name: "' + paper.product_name + '"', "version: " + state.selected_revision,
+      'license: "CC BY 4.0"', "---", "", "# Summary", "", summaryText(paper),
+      "", "# Background", "", paper.background, "", "# Architecture", "", paper.architecture,
+      "", "# Limitations", "", paper.limitations
+    ].join("\n");
+    openDialog("Source Markdown", "Abbreviated example source · The live site will return the exact archived Markdown.", source);
+  });
+  filterPapers();
+  renderList(find("#px-drafts-list"), papers.filter((paper) => paper.stage === "draft"));
+  showPage("papers");
+})();
+</script>

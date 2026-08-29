@@ -168,11 +168,13 @@ Individuals and teams should be able to publish papers for both working
 products and pre-build concepts. Submissions should be open, subject to format
 validation and community moderation rather than mandatory editorial approval.
 
-Before publication, a paper has a private UUID and a mutable draft with a
-bounded revision history. Draft API behavior and retention are documented in
-`docs/DRAFTS.md`. The public short identifier is allocated only at publication;
-the UUID remains internal provenance rather than becoming part of published
-URLs.
+Before publication, a paper has a UUID and a mutable draft with a bounded
+revision history. Draft management is authenticated. Current pending drafts are
+publicly readable through a separate read-only projection, while review details
+and retained snapshots remain private. Draft API behavior and retention are
+documented in `docs/DRAFTS.md`. The public short
+identifier is allocated only at publication; the UUID remains draft identity
+and internal provenance rather than becoming part of published paper URLs.
 
 Published revisions are immutable. Authors update a paper by publishing a new
 revision instead of silently changing its historical record.
@@ -214,6 +216,11 @@ The first release should focus on five surfaces:
    product.
 
 ## Design direction
+
+The approved [public website design and interactive wireframes](design/public-website/README.md)
+describe the archive, reader, and public pending-draft experience. The wireframes
+use illustrative content; the Astro website uses the authoritative API and
+retains a separate authenticated author-review workspace.
 
 The interface should feel scholarly, quiet, and text-first without copying
 arXiv's identity literally.

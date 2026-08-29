@@ -1,0 +1,37 @@
+---
+import type { PublishedPaper } from "@prodxiv/api-client";
+
+interface Props {
+  writers?: PublishedPaper["metadata"]["writers"];
+}
+
+const { writers } = Astro.props;
+const names = writers?.map((writer) => writer.name).join(", ");
+const hasAgent = writers?.some((writer) => writer.kind === "agent") ?? false;
+const hasHuman = writers?.some((writer) => writer.kind === "human") ?? false;
+---
+
+<span class="writer-disclosure">
+  {
+    names ? (
+      <>
+        Written by {names}
+        <span class="writer-kind">
+          · {hasAgent ? (hasHuman ? "Human + agent-written" : "Agent-written") : "Human-written"}
+        </span>
+      </>
+    ) : (
+      <>Writer information not recorded</>
+    )
+  }
+</span>
+
+<style>
+  .writer-disclosure {
+    overflow-wrap: anywhere;
+  }
+
+  .writer-kind {
+    color: var(--ink-soft);
+  }
+</style>

@@ -3,6 +3,7 @@ import {
   ProdxivApiError,
   type ApiFetch,
   type PublishedPaper,
+  type PublishedPaperSummary,
 } from "@prodxiv/api-client";
 import { paperSlugFromCanonicalId } from "@prodxiv/api-client/public-paper-url";
 
@@ -24,6 +25,9 @@ export type PaperReaderResult =
       ok: true;
       paper: PublishedPaper;
       rendered: RenderedPaperMarkdown;
+      revisions: PublishedPaperSummary[];
+      history_available: boolean;
+      history_message?: string;
     }
   | {
       ok: false;
@@ -67,11 +71,25 @@ export async function readPublishedPaper(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const paper = await client.getPaperRevision(options.paper_id, revision);
+    const [paper, history] = await Promise.all([
+      client.getPaperRevision(options.paper_id, revision),
+      client.listPaperRevisions(options.paper_id).catch(() => undefined),
+    ]);
+    // Rendering the immutable source does not depend on the separate history
+    // endpoint. A rolling API upgrade or history failure must not hide it.
+    const rendered = renderPaperMarkdown(paper.source_markdown);
+    const historyAvailable =
+      history?.revisions.some((entry) => entry.version === paper.version) ===
+      true;
     return {
       ok: true,
       paper,
-      rendered: renderPaperMarkdown(paper.source_markdown),
+      rendered,
+      revisions: historyAvailable ? (history?.revisions ?? []) : [],
+      history_available: historyAvailable,
+      ...(historyAvailable
+        ? {}
+        : { history_message: "Revision history is temporarily unavailable." }),
     };
   } catch (error) {
     return {
