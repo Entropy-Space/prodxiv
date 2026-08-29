@@ -34,12 +34,12 @@ citations, and exact archived Markdown downloads at
 separately from author attribution; attribution does not imply endorsement.
 
 Draft reading never forwards a publishing credential or renders review notes.
-Only current pending drafts are public, and only after the API is explicitly
-configured to enable them. Approved/rejected drafts and retained history stay in
-the authenticated workspace. A published draft link resolves to the immutable
-paper through its recorded UUID mapping. Mutable draft pages are not cached or
-indexed. Malformed draft metadata produces a visible incomplete state rather
-than a publication claim.
+Only current pending drafts are public through the restricted read projection.
+Approved/rejected drafts and retained history stay in the authenticated
+workspace. A published draft link resolves to the immutable paper through its
+recorded UUID mapping. Mutable draft pages are not cached or indexed. Malformed
+draft metadata produces a visible incomplete state rather than a publication
+claim.
 
 ## Configuration
 
@@ -53,11 +53,9 @@ Production must use HTTPS. Localhost HTTP is accepted for development.
 `PRODXIV_API_URL` is server-only and must be configured on the `prodxiv-web`
 Vercel project. The public reader does not use `PRODXIV_PUBLISH_TOKEN`.
 
-On the **API** project, set `PRODXIV_PUBLIC_DRAFTS_ENABLED=true` only after
-checking that current pending draft contents may be public. It defaults to
-`false`, so merely deploying this website does not expose previously private
-drafts. No new website secret is needed. Review still uses the author token as
-the HTTP Basic password and keeps it server-side; accounts are a later step.
+No feature flag or website secret is required for public draft reading. Review
+still uses the author token as the HTTP Basic password and keeps it server-side;
+accounts are a later step.
 
 Stop the background dev server with `bun --filter @prodxiv/web astro dev stop`.
 

@@ -161,7 +161,7 @@ The API must:
   belong to.
 - Reject unsupported schema versions with a useful diagnostic.
 - Require authorization for draft management, submission, and revision creation.
-  Anonymous draft reading must use the opt-in public projection of current
+  Anonymous draft reading must use the restricted public projection of current
   pending drafts, never the privileged management response or review history.
 - Keep publication and moderation operations auditable.
 - Avoid relying on writable container filesystems or in-process job state.

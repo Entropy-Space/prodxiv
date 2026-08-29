@@ -67,14 +67,6 @@ export async function readPublicDraftIndex(
     };
   } catch (error) {
     if (error instanceof ProdxivApiError) {
-      if (error.code === "draft.public_reads_disabled") {
-        return {
-          ok: false,
-          status: 503,
-          message:
-            "Public draft reading has not been enabled for this archive.",
-        };
-      }
       if (error.status === 400 || error.code.startsWith("request.invalid_")) {
         return {
           ok: false,

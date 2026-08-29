@@ -52,7 +52,7 @@ local prototype state; it does not exercise real routes or authentication.
 ### Pending drafts
 
 - Public readers can browse the pending queue and read a current draft without
-  signing in when the API's public-draft read feature is explicitly enabled.
+  signing in through the API's restricted public-draft projection.
 - Order the queue by most recently edited. Show useful titles and summaries,
   revision, last edit time, writer disclosure, ownership, and `pending_review`
   status instead of UUID-only rows.
@@ -144,15 +144,13 @@ manifests, evidence bundles, source snapshots, model conversations, audit logs,
 and `final.zip` are not part of the public read projection. Safe writer/model/
 tool-version metadata is distinct from private run data.
 
-Public draft reading is disabled by default. Setting
-`PRODXIV_PUBLIC_DRAFTS_ENABLED=true` on the API opts existing and future current
-pending draft content into public reading, regardless of bot/author ownership.
-Confirm those contents may be public before enabling it. Approved/rejected,
-deleted, and unknown draft UUIDs expose no draft source through public reads;
-retained draft history remains private. Published UUID mappings resolve to the
-exact immutable paper. Public draft responses are not cached or indexed, but
-rejection cannot retract content a reader already saved. Account redesign and
-finer-grained availability policies remain deferred.
+Every existing and future current pending draft is publicly readable through
+the restricted projection, regardless of bot/author ownership. Approved,
+rejected, deleted, and unknown draft UUIDs expose no draft source through public
+reads; retained draft history remains private. Published UUID mappings resolve
+to the exact immutable paper. Public draft responses are not cached or indexed,
+but rejection cannot retract content a reader already saved. Account redesign
+and finer-grained availability policies remain deferred.
 
 ### Archive and revision discovery
 
@@ -167,14 +165,11 @@ parallel hand-written paper models or a separate search service for this work.
 
 ### Deployment sequence
 
-1. Deploy the API with public draft reads disabled; existing writers and
-   authenticated review contracts remain compatible.
-2. Point the Astro website's `PRODXIV_API_URL` at that compatible API. The public
-   pending page explains when reading is disabled; it does not show a false
-   successful empty queue. Author review remains available separately.
-3. After reviewing existing pending contents, explicitly enable public draft
-   reads on the API. Verify anonymous reading and authenticated review writes
-   separately before relying on the public queue.
+1. Deploy the API that exposes the restricted public pending-draft projection;
+   existing writers and authenticated review contracts remain compatible.
+2. Point the Astro website's `PRODXIV_API_URL` at that API. Verify anonymous
+   reading and authenticated review writes separately before relying on the
+   public queue.
 
 ## Acceptance checks for implementation
 

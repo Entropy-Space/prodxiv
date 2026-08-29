@@ -65,7 +65,6 @@ pub struct AppState {
     trending_ingest_token: Option<Arc<str>>,
     trending_ingest_actor: Arc<str>,
     github_oidc: Option<Arc<dyn GitHubOidcAuthenticator>>,
-    public_drafts_enabled: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -95,7 +94,6 @@ impl AppState {
             trending_ingest_token: None,
             trending_ingest_actor: Arc::from("github_actions:daily_trending"),
             github_oidc: None,
-            public_drafts_enabled: false,
         }
     }
 
@@ -121,13 +119,6 @@ impl AppState {
         self.github_oidc = authenticator;
         self
     }
-
-    /// Explicit deployment opt-in; management draft endpoints stay authenticated.
-    #[must_use]
-    pub fn with_public_drafts(mut self, enabled: bool) -> Self {
-        self.public_drafts_enabled = enabled;
-        self
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,7 +133,6 @@ pub struct ApiConfig {
     pub trending_ingest_token: Option<String>,
     pub trending_ingest_actor: String,
     pub github_oidc: Option<GitHubOidcTrust>,
-    pub public_drafts_enabled: bool,
 }
 
 impl ApiConfig {
@@ -219,9 +209,6 @@ impl ApiConfig {
             trending_ingest_token,
             trending_ingest_actor,
             github_oidc,
-            public_drafts_enabled: public_read::public_drafts_enabled(
-                env::var("PRODXIV_PUBLIC_DRAFTS_ENABLED").ok().as_deref(),
-            ),
         })
     }
 }

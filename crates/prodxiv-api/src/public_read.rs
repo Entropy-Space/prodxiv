@@ -45,22 +45,6 @@ pub struct PaperRevisionListResponse {
     pub revisions: Vec<PublishedPaperSummary>,
 }
 
-pub(super) fn public_drafts_enabled(value: Option<&str>) -> bool {
-    value == Some("true")
-}
-
-fn require_public_drafts(state: &AppState) -> Result<(), ApiError> {
-    if state.public_drafts_enabled {
-        Ok(())
-    } else {
-        Err(ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "draft.public_reads_disabled",
-            "public draft reading is not enabled on this deployment",
-        ))
-    }
-}
-
 fn no_store(response: impl IntoResponse) -> Response {
     let mut response = response.into_response();
     response
@@ -79,8 +63,7 @@ fn no_store(response: impl IntoResponse) -> Response {
     responses(
         (status = 200, description = "Public current pending drafts, most recently edited first; never cache", body = PublicPaperDraftListResponse),
         (status = 400, description = "Pagination parameters are invalid", body = ErrorResponse),
-        (status = 500, description = "Reading failed", body = ErrorResponse),
-        (status = 503, description = "Public draft reads require deployment opt-in", body = ErrorResponse)
+        (status = 500, description = "Reading failed", body = ErrorResponse)
     )
 )]
 pub(super) async fn list_public_drafts(
@@ -94,7 +77,6 @@ async fn list_public_drafts_result(
     state: &AppState,
     query: Result<Query<PublicDraftsQuery>, QueryRejection>,
 ) -> Result<Json<PublicPaperDraftListResponse>, ApiError> {
-    require_public_drafts(state)?;
     let Query(query) = query.map_err(|_| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -133,8 +115,7 @@ async fn list_public_drafts_result(
     responses(
         (status = 200, description = "Current pending draft or its exact promoted publication identity; never cache", body = PublicPaperDraftResponse),
         (status = 404, description = "No public pending draft or publication mapping exists", body = ErrorResponse),
-        (status = 500, description = "Reading failed", body = ErrorResponse),
-        (status = 503, description = "Public draft reads require deployment opt-in", body = ErrorResponse)
+        (status = 500, description = "Reading failed", body = ErrorResponse)
     )
 )]
 pub(super) async fn get_public_draft(
@@ -148,7 +129,6 @@ async fn get_public_draft_result(
     state: &AppState,
     paper_uuid: &str,
 ) -> Result<Json<PublicPaperDraftResponse>, ApiError> {
-    require_public_drafts(state)?;
     let paper_uuid = canonical_draft_uuid(paper_uuid).map_err(|_| draft_not_found())?;
     let draft = state
         .store
@@ -279,22 +259,7 @@ fn decode_draft_cursor(value: &str) -> Result<PublicDraftCursor, ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{public_drafts_enabled, publication_filter};
-
-    #[test]
-    fn public_reads_are_opt_in_and_default_to_disabled() {
-        for value in [
-            None,
-            Some(""),
-            Some("false"),
-            Some("1"),
-            Some("TRUE"),
-            Some(" true "),
-        ] {
-            assert!(!public_drafts_enabled(value));
-        }
-        assert!(public_drafts_enabled(Some("true")));
-    }
+    use super::publication_filter;
 
     #[test]
     fn filters_have_bounded_literal_search_and_canonical_topics() {

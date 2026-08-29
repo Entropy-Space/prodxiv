@@ -138,14 +138,6 @@ impl FakeStore {
     }
 }
 
-fn public_app(store: Arc<FakeStore>) -> axum::Router {
-    router(
-        AppState::new(store, TOKEN, "api_test")
-            .with_bot_principal(Some(BOT_TOKEN.to_owned()), "paperbot:daily".to_owned())
-            .with_public_drafts(true),
-    )
-}
-
 async fn get(application: &axum::Router, path: &str) -> axum::response::Response {
     application
         .clone()
@@ -163,21 +155,26 @@ async fn create(store: &FakeStore, source: &str, key: &str) -> PaperDraft {
 }
 
 #[tokio::test]
-async fn public_drafts_require_explicit_opt_in_and_never_cache_errors() {
+async fn public_drafts_are_available_by_default_and_never_cache() {
     let store = Arc::new(FakeStore::default());
-    let draft = create(&store, "# Previously private content", "private-draft").await;
+    let draft = create(&store, "# Public working content", "public-draft").await;
     let application = app(store);
-    for path in [
-        "/v1/public/drafts".to_owned(),
-        format!("/v1/public/drafts/{}", draft.paper_uuid),
-    ] {
-        let response = get(&application, &path).await;
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
-        let body = json_body(response).await;
-        assert_eq!(body["error"]["code"], "draft.public_reads_disabled");
-        assert!(!body.to_string().contains("Previously private"));
-    }
+
+    let response = get(&application, "/v1/public/drafts").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let body = json_body(response).await;
+    assert_eq!(body["drafts"][0]["paper_uuid"], draft.paper_uuid);
+
+    let response = get(
+        &application,
+        &format!("/v1/public/drafts/{}", draft.paper_uuid),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let body = json_body(response).await;
+    assert_eq!(body["draft"]["source_markdown"], "# Public working content");
 }
 
 #[tokio::test]
@@ -197,7 +194,7 @@ async fn public_queue_contains_only_current_pending_safe_projections() {
         review.reviewed_by = Some("private-review-actor".to_owned());
         review.rejection_reason = Some("private-rejection-reason".to_owned());
     }
-    let application = public_app(store.clone());
+    let application = app(store.clone());
     let response = get(&application, "/v1/public/drafts").await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
@@ -248,8 +245,8 @@ async fn public_queue_contains_only_current_pending_safe_projections() {
         assert_eq!(json_body(response).await, missing);
     }
 
-    // Existing management reads and author actions remain authenticated even
-    // when an unrelated public reading surface is enabled.
+    // Existing management reads and author actions remain authenticated while
+    // the separate public reading surface stays anonymous.
     for path in [
         "/v1/drafts".to_owned(),
         format!("/v1/drafts/{}", valid.paper_uuid),
@@ -268,7 +265,7 @@ async fn public_pagination_is_stable_for_equal_timestamps_and_new_drafts() {
     let first = create(&store, "# First", "pagination-first").await;
     let second = create(&store, "# Second", "pagination-second").await;
     let third = create(&store, "# Third", "pagination-third").await;
-    let application = public_app(store.clone());
+    let application = app(store.clone());
     let page = json_body(get(&application, "/v1/public/drafts?limit=1").await).await;
     assert_eq!(page["drafts"][0]["paper_uuid"], third.paper_uuid);
     let cursor = page["next_cursor"].as_str().unwrap();
@@ -319,7 +316,7 @@ async fn public_read_follows_current_revision_and_keeps_history_private() {
         )
         .await
         .unwrap();
-    let application = public_app(store);
+    let application = app(store);
     let body = json_body(
         get(
             &application,
@@ -364,7 +361,7 @@ async fn promoted_uuid_resolves_to_exact_publication_without_management_fields()
         .await
         .unwrap()
         .unwrap();
-    let application = public_app(store);
+    let application = app(store);
     let response = get(
         &application,
         &format!("/v1/public/drafts/{}", draft.paper_uuid),
@@ -410,7 +407,7 @@ async fn archive_search_uses_latest_metadata_before_filtering_and_pagination() {
     // Both matches sit beyond 100 newer non-matching papers.
     papers.extend((4..108).map(|id| publication(id, 1, "Unrelated", "other_topic")));
     *store.publications.lock().unwrap() = papers;
-    let application = public_app(store);
+    let application = app(store);
     let page = json_body(
         get(
             &application,
@@ -467,7 +464,7 @@ async fn archive_search_uses_latest_metadata_before_filtering_and_pagination() {
 
 #[tokio::test]
 async fn rejects_invalid_archive_filters_and_missing_revision_lists() {
-    let application = public_app(Arc::new(FakeStore::default()));
+    let application = app(Arc::new(FakeStore::default()));
     for path in [
         format!("/v1/papers?q={}", "a".repeat(201)),
         "/v1/papers?q=bad%0Aquery".to_owned(),
@@ -497,7 +494,7 @@ async fn archive_preserves_and_filters_historically_accepted_topic_slugs() {
         "Historical topic spelling",
         "developer__tools",
     ));
-    let application = public_app(store);
+    let application = app(store);
     let response = get(&application, "/v1/papers?topic=developer__tools").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
@@ -519,6 +516,14 @@ fn openapi_keeps_management_authorized_and_public_projection_separate() {
             .get("security")
             .is_none()
     );
+    for path in ["/v1/public/drafts", "/v1/public/drafts/{paper_uuid}"] {
+        assert!(
+            document["paths"][path]["get"]["responses"]
+                .get("503")
+                .is_none(),
+            "graduated public read {path} must not expose a disabled response"
+        );
+    }
     let properties = &document["components"]["schemas"]["PublicPaperDraft"]["properties"];
     for private in [
         "review",

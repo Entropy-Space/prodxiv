@@ -1954,16 +1954,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "Public draft reads require deployment opt-in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         }
       }
@@ -2008,16 +1998,6 @@
           },
           "500": {
             "description": "Reading failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Public draft reads require deployment opt-in",
             "content": {
               "application/json": {
                 "schema": {
@@ -2968,7 +2948,7 @@
       },
       "PublicPaperDraft": {
         "type": "object",
-        "description": "Only the current pending revision is eligible for this public projection.\nThe Markdown itself is public draft content when deployment opts in; private\nreview actors, rejection reasons, history, and run artifacts are not included.",
+        "description": "Only the current pending revision is eligible for this public projection.\nThe Markdown itself is public draft content in this projection; private\nreview actors, rejection reasons, history, and run artifacts are not included.",
         "required": [
           "paper_uuid",
           "revision",

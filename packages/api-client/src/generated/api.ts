@@ -503,7 +503,7 @@ export interface components {
     PublicDraftReviewStatus: "pending_review";
     /**
      * @description Only the current pending revision is eligible for this public projection.
-     *     The Markdown itself is public draft content when deployment opts in; private
+     *     The Markdown itself is public draft content in this projection; private
      *     review actors, rejection reasons, history, and run artifacts are not included.
      */
     PublicPaperDraft: {
@@ -2082,15 +2082,6 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Public draft reads require deployment opt-in */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
     };
   };
   get_public_draft: {
@@ -2125,15 +2116,6 @@ export interface operations {
       };
       /** @description Reading failed */
       500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Public draft reads require deployment opt-in */
-      503: {
         headers: {
           [name: string]: unknown;
         };

@@ -81,7 +81,7 @@ describe("public draft index", () => {
     });
   });
 
-  test("distinguishes empty, disabled, invalid and failed lists", async () => {
+  test("distinguishes empty, invalid and failed lists", async () => {
     expect(
       await readPublicDraftIndex({
         api_url: "https://api.prodxiv.example",
@@ -91,25 +91,6 @@ describe("public draft index", () => {
     expect(await readPublicDraftIndex({})).toMatchObject({
       ok: false,
       status: 503,
-    });
-    expect(
-      await readPublicDraftIndex({
-        api_url: "https://api.prodxiv.example",
-        fetch: async () =>
-          Response.json(
-            {
-              error: {
-                code: "draft.public_reads_disabled",
-                message: "internal policy",
-              },
-            },
-            { status: 503 },
-          ),
-      }),
-    ).toEqual({
-      ok: false,
-      status: 503,
-      message: "Public draft reading has not been enabled for this archive.",
     });
     expect(
       await readPublicDraftIndex({
@@ -246,28 +227,6 @@ describe("public draft reader", () => {
           }),
       }),
     ).toMatchObject({ ok: false, error: { status: 502 } });
-  });
-
-  test("preserves a disabled reader as a 503, not a missing draft", async () => {
-    expect(
-      await readPublicDraft({
-        paper_uuid: draft.paper_uuid,
-        api_url: "https://api.prodxiv.example",
-        fetch: async () =>
-          Response.json(
-            {
-              error: {
-                code: "draft.public_reads_disabled",
-                message: "disabled",
-              },
-            },
-            { status: 503 },
-          ),
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { status: 503, title: "Public drafts unavailable" },
-    });
   });
 });
 

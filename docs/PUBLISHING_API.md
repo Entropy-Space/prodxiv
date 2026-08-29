@@ -37,12 +37,11 @@ JavaScript. Any non-empty Basic username is accepted in this MVP, so API audit
 events use `PRODXIV_PUBLISH_ACTOR` until real reviewer identity is introduced.
 
 The public `/drafts` reading pages use only `/v1/public/drafts` responses and
-never forward a publishing credential. Public draft reads are disabled unless
-the API has `PRODXIV_PUBLIC_DRAFTS_ENABLED=true`. This explicitly opts current
-pending draft source and metadata into public reading, including existing
-pending drafts. Review notes, non-pending draft content, retained draft history,
-audit records, and run archives remain private. See `docs/DRAFTS.md` for the
-read projection and rollout boundary.
+never forward a publishing credential. Current pending draft source and metadata
+are publicly readable through this restricted projection, including author-owned
+and bot-owned drafts. Review notes, non-pending draft content, retained draft
+history, audit records, and run archives remain private. See `docs/DRAFTS.md`
+for the read projection boundary.
 
 ## Local environment
 
@@ -287,10 +286,6 @@ Set:
   provider-neutral name `DIRECT_DATABASE_URL` is also accepted.
 - `PRODXIV_PUBLISH_TOKEN` to a secret with at least 32 characters.
 - `PRODXIV_PUBLISH_ACTOR` to the audit actor represented by that token.
-- `PRODXIV_PUBLIC_DRAFTS_ENABLED=true` only after confirming current pending
-  draft contents may be public. Omit it or use `false` to keep public draft reads
-  unavailable. This setting belongs on the API, not the website, and introduces
-  no new credential. Existing draft-management authorization is unchanged.
 - `PRODXIV_GITHUB_OIDC_REPOSITORY_ID` to `1313713424` on stable API
   deployments that accept the scheduled GitHub workflows. This enables OIDC.
 - `PRODXIV_GITHUB_OIDC_REPOSITORY` only when the trusted repository differs

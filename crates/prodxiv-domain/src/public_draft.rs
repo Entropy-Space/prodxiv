@@ -30,7 +30,7 @@ pub struct PublicPaperDraftSummary {
 }
 
 /// Only the current pending revision is eligible for this public projection.
-/// The Markdown itself is public draft content when deployment opts in; private
+/// The Markdown itself is public draft content in this projection; private
 /// review actors, rejection reasons, history, and run artifacts are not included.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -115,7 +115,7 @@ fn has_anonymous_links(metadata: &PaperMetadata) -> bool {
     };
     // This is a stricter *public draft projection* boundary, not a change to
     // historic publication validity. Embedded credentials must never become a
-    // reader's metadata link; the opt-in raw draft remains the original source.
+    // reader's metadata link; the raw draft remains the original source.
     [
         metadata.product_url.as_deref(),
         metadata.repository_url.as_deref(),

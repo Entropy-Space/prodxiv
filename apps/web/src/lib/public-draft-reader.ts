@@ -98,13 +98,6 @@ export async function readPublicDraft(
 
 function publicDraftError(error: unknown): PaperReaderError {
   if (error instanceof ProdxivApiError) {
-    if (error.code === "draft.public_reads_disabled") {
-      return {
-        status: 503,
-        title: "Public drafts unavailable",
-        message: "Public draft reading has not been enabled for this archive.",
-      };
-    }
     if (error.status === 404) {
       return {
         status: 404,

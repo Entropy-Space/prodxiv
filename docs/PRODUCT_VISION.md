@@ -169,10 +169,10 @@ products and pre-build concepts. Submissions should be open, subject to format
 validation and community moderation rather than mandatory editorial approval.
 
 Before publication, a paper has a UUID and a mutable draft with a bounded
-revision history. Draft management is authenticated. Deployments may explicitly
-enable public reading of current pending drafts through a separate read-only
-projection, while review details and retained snapshots remain private. Draft
-API behavior and retention are documented in `docs/DRAFTS.md`. The public short
+revision history. Draft management is authenticated. Current pending drafts are
+publicly readable through a separate read-only projection, while review details
+and retained snapshots remain private. Draft API behavior and retention are
+documented in `docs/DRAFTS.md`. The public short
 identifier is allocated only at publication; the UUID remains draft identity
 and internal provenance rather than becoming part of published paper URLs.
 

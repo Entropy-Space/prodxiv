@@ -517,7 +517,7 @@ research queue, not endorsements.
 The `Daily Paperbot Drafts` GitHub Actions workflow runs once per day and may
 also be dispatched manually. It selects the first three eligible repositories
 from that day's validated Trending research queue and runs them through the
-normal private auto-mode `agent batch` workflow. A repository is skipped when
+normal local auto-mode `agent batch` workflow. A repository is skipped when
 an existing published paper, pending draft, or approved draft names both that
 repository and the current Paperbot `tool_version`; a new Paperbot version
 makes it eligible again. Every successful project produces one terminal
@@ -527,9 +527,9 @@ question rather than fabricated evidence.
 The run has two ordered remote-write phases. First, it publishes drafts whose
 exact current revisions were approved by an author and atomically approves and
 publishes prior `pending_review` drafts that remain bot-owned. Then it submits
-every successfully generated paper as a private, bot-owned `pending_review`
-draft. Three remains the daily target, but one failed repository no longer
-blocks the other successful drafts from reaching the review queue. An
+every successfully generated paper as a publicly readable, bot-owned
+`pending_review` draft. Three remains the daily target, but one failed repository
+no longer blocks the other successful drafts from reaching the review queue. An
 incomplete generation or submission still makes the workflow fail after its
 reports and private artifacts have been preserved.
 The submission host revalidates every generated paper with the canonical

@@ -1,9 +1,9 @@
 # Draft papers
 
-Drafts are mutable working copies of unpublished papers. Management is private;
-deployments may explicitly enable public reading of current pending drafts.
-A draft is identified by a UUID from its first save. Publication identifiers such as
-`2608.000001` are allocated only when a paper is published.
+Drafts are mutable working copies of unpublished papers. Management is private,
+while the current pending revision is publicly readable through a restricted
+projection. A draft is identified by a UUID from its first save. Publication
+identifiers such as `2608.000001` are allocated only when a paper is published.
 
 Draft source may be incomplete Markdown, but it must be non-empty and at most
 2 MiB. Saving a draft does not imply that it passes the publication schema,
@@ -14,7 +14,8 @@ Each current draft has one review state:
 
 - `pending_review` is the default for a new draft or edited revision;
 - `approved` authorizes one exact revision for publication by a later run;
-- `rejected` keeps the revision private and may include a reason.
+- `rejected` removes the revision from the public pending queue and may include
+  a private reason.
 
 Review decisions are revision-bound. Uploading an edit creates the next draft
 revision and returns the draft to `pending_review`; it never changes an older
@@ -72,12 +73,11 @@ GET /v1/public/drafts
 GET /v1/public/drafts/{paper_uuid}
 ```
 
-Set `PRODXIV_PUBLIC_DRAFTS_ENABLED=true` on the **API project** to opt in. It is
-off by default; disabled reads return `503` with `draft.public_reads_disabled`.
-Before enabling it, check that every current pending draft's source and metadata
-may be public. Enabling this setting includes existing pending drafts, including
-author-owned drafts, and subsequent pending revisions. It does not automatically
-approve or publish anything and does not grant write access.
+Every current `pending_review` draft is publicly readable through these routes,
+including existing and future author-owned and bot-owned drafts. Saving a new
+draft or revision in this state makes its current source public. Public reading
+does not automatically approve or publish anything and does not grant write
+access.
 
 The collection returns current `pending_review` drafts ordered by most recently
 edited, with `limit` and a `next_cursor` for pagination. Public summaries contain

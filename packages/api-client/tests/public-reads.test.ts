@@ -392,20 +392,20 @@ describe("anonymous public reads", () => {
     }
   });
 
-  test("keeps disabled reads and ordinary API failures distinguishable", async () => {
+  test("preserves structured API failures", async () => {
     const client = new ProdxivApiClient({
       api_url: "https://api.prodxiv.example",
       fetch: async () =>
         Response.json(
           {
-            error: { code: "draft.public_reads_disabled", message: "disabled" },
+            error: { code: "storage.internal", message: "reading failed" },
           },
-          { status: 503 },
+          { status: 500 },
         ),
     });
     await expect(client.listPublicDrafts()).rejects.toMatchObject({
-      status: 503,
-      code: "draft.public_reads_disabled",
+      status: 500,
+      code: "storage.internal",
     });
   });
 
