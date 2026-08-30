@@ -72,7 +72,6 @@ describe("runAgentBatch", () => {
         feedback: "none",
         github_release_policy: "disabled",
         metadata: {
-          title: "first project research draft",
           product_name: "first project",
           authors: ["Batch Author"],
           status: "concept",
@@ -231,7 +230,6 @@ describe("runAgentBatch", () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[1]?.metadata).toEqual({
-      title: "missing metadata research draft",
       product_name: "missing metadata",
       repository_url: "https://github.com/example/missing-metadata",
     });

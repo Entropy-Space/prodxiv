@@ -9,6 +9,7 @@ import type {
   EvidenceKind,
   EvidenceResponse,
 } from "./types.ts";
+import { generatedTitleDiagnostic } from "./title.ts";
 
 const EVIDENCE_KINDS = new Set<EvidenceKind>([
   "repository",
@@ -23,6 +24,13 @@ const MAX_UNKNOWN_ITEMS = 24;
 const MAX_QUESTIONS_PER_ROUND = 5;
 const MAX_RESPONSE_TEXT_CHARACTERS = 2_000;
 const MAX_DRAFT_CHARACTERS = 256 * 1024;
+
+export interface GeneratedTitleDraftResponse extends DraftResponse {
+  title: string;
+}
+
+export type GeneratedTitleAuthoringResponse =
+  AskQuestionsResponse | GeneratedTitleDraftResponse;
 
 export function parseEvidenceResponse(value: string): EvidenceResponse {
   const object = parseJsonObject(value, "evidence");
@@ -85,6 +93,42 @@ export function parseDraftResponse(value: string): DraftResponse {
     invalidResponse("authoring response must submit a draft in this phase");
   }
   return response;
+}
+
+export function parseGeneratedTitleDraftResponse(
+  value: string,
+  productName: string,
+): GeneratedTitleDraftResponse {
+  const object = parseJsonObject(value, "authoring");
+  if (requiredString(object.action, "authoring.action") !== "submit_draft") {
+    invalidResponse("authoring response must submit a draft in this phase");
+  }
+  return parseGeneratedTitleDraftObject(object, productName);
+}
+
+export function parseGeneratedTitleAuthoringResponse(
+  value: string,
+  productName: string,
+): GeneratedTitleAuthoringResponse {
+  const object = parseJsonObject(value, "authoring");
+  const action = requiredString(object.action, "authoring.action");
+  if (action === "ask_questions") {
+    return parseAskQuestionsResponse(object);
+  }
+  if (action === "submit_draft") {
+    return parseGeneratedTitleDraftObject(object, productName);
+  }
+  invalidResponse(`authoring.action is not recognized: ${action}`);
+}
+
+function parseGeneratedTitleDraftObject(
+  object: Record<string, unknown>,
+  productName: string,
+): GeneratedTitleDraftResponse {
+  const title = generatedTitle(object.title, productName);
+  const draftObject = { ...object };
+  delete draftObject.title;
+  return { ...parseDraftObject(draftObject), title };
 }
 
 export function validateEvidenceCandidateSourceIds(
@@ -245,6 +289,15 @@ function parseDraftObject(object: Record<string, unknown>): DraftResponse {
       MAX_RESPONSE_TEXT_CHARACTERS,
     ),
   };
+}
+
+function generatedTitle(value: unknown, productName: string): string {
+  const title = requiredString(value, "authoring.title");
+  const diagnostic = generatedTitleDiagnostic(title, productName);
+  if (diagnostic !== undefined) {
+    invalidResponse(`authoring.title ${diagnostic}`);
+  }
+  return title;
 }
 
 function parseDraftAssumptions(value: unknown): DraftAssumption[] {

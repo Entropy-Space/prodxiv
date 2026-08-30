@@ -243,8 +243,15 @@ and an unattended auto mode:
   repository's software license. Interactive papers remain ordinary private
   drafts and use the less restrictive `draft` validation profile.
 
-The run record stores `mode` and the selected `feedback` value; auto uses
-`feedback: none`.
+The run record stores `mode`, the selected `feedback` value, and whether its
+title is `provided` or `generated`; auto uses `feedback: none`.
+When `--title` is omitted, the first authoring turn proposes a concise title
+from validated evidence in `Product: specific thesis` form. Paperbot validates
+the title's structure and records the current title in `run.json` and the paper
+front matter. Self-review and author-answer turns must return an updated title
+with each revised generated draft, so it stays aligned with the paper's thesis.
+An explicit `--title`, or a project-level batch `title`, remains an exact
+host-controlled override.
 Runs created before these fields existed are interpreted as interactive async
 runs and remain safely resumable. `agent run` defaults to interactive async;
 `agent batch` defaults to auto and accepts `--mode interactive` when a queued
@@ -592,7 +599,7 @@ with one anonymous canonical GitHub repository per project:
     },
     {
       "repository_url": "https://github.com/huggingface/speech-to-speech",
-      "title": "Speech-to-Speech research draft",
+      "title": "Speech-to-Speech: Real-Time Voice Interaction Across Modalities",
       "product_name": "Speech-to-Speech"
     }
   ]
@@ -611,8 +618,11 @@ bun run paperbot agent batch ./projects.json \
   --concurrency 2
 ```
 
-Project-level `authors` and `status` override optional command defaults. When
-they are absent, each project uses its GitHub owner and, when available, a
+Project-level `title`, `authors`, and `status` override optional command
+defaults. Without `title`, Paperbot authors a thesis title from
+validated evidence and keeps it aligned through later authoring turns. When
+author and status overrides are absent, each project uses its GitHub owner and,
+when available, a
 release snapshot. `github_release_policy` defaults to `best_effort`: bounded
 release metadata is captured concurrently, but an oversized, unavailable, or
 invalid release response is skipped without discarding the pinned repository

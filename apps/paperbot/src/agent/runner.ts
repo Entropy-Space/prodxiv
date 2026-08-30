@@ -40,6 +40,7 @@ import {
   assessDraft,
   draftFromPaper,
   emptyDraftResponse,
+  titleFromPaper,
   type DraftAssessment,
 } from "./paper.ts";
 import { PiAuthoringRuntime } from "./pi.ts";
@@ -63,10 +64,13 @@ import {
   parseAuthoringResponse,
   parseDraftResponse,
   parseEvidenceResponse,
+  parseGeneratedTitleAuthoringResponse,
+  parseGeneratedTitleDraftResponse,
   validateAuthoringEvidenceIds,
   validateConflictSourceIds,
   validateEvidenceCandidateSourceIds,
 } from "./responses.ts";
+import { generatedTitleDiagnostic } from "./title.ts";
 import {
   appendRolloutEvent,
   modelTurnCompletedEvent,
@@ -120,6 +124,7 @@ import type {
   AgentRunMode,
   AgentSessionRole,
   AgentSource,
+  AgentTitleMode,
   AskQuestionsResponse,
   AuthoringResponse,
   AuthoringRuntime,
@@ -214,6 +219,7 @@ export async function runAgent(
     );
   }
   const requestedMetadata = normalizeAgentRequestMetadata(options.metadata);
+  const generateTitle = requestedMetadata.title === undefined;
   const externalSources = normalizeExternalSources(
     options.external_sources ?? [],
   );
@@ -226,7 +232,13 @@ export async function runAgent(
   const runId = (dependencies.run_id ?? (() => crypto.randomUUID()))();
   const startedAt = now(dependencies).toISOString();
   let record = createRunRecord(
-    { ...options, mode, feedback, metadata: requestedMetadata },
+    {
+      ...options,
+      mode,
+      feedback,
+      title_mode: generateTitle ? "generated" : "provided",
+      metadata: requestedMetadata,
+    },
     model,
     externalSources,
     startedAt,
@@ -276,7 +288,10 @@ export async function runAgent(
       );
     }
     const metadata = completeAgentMetadata(
-      requestedMetadata,
+      {
+        ...requestedMetadata,
+        title: requestedMetadata.title ?? requestedMetadata.product_name,
+      },
       source,
       model,
       now(dependencies).toISOString(),
@@ -340,17 +355,21 @@ export async function runAgent(
         external_sources: externalSources,
         evidence,
         analysis,
+        title_mode: record.input.title_mode,
       }),
       runPath,
       record,
       dependencies,
-      parseDraftResponse,
+      draftResponseParser(metadata, record.input.title_mode),
       {
         operation: "initial_draft",
         prompt_summary: `Write an initial paper from ${evidence.length} validated evidence items; record unsupported intent as assumptions`,
         summarize_response: summarizeAuthoringResponse,
       },
     );
+    record.input.metadata = metadata;
+    record.updated_at = now(dependencies).toISOString();
+    await persistRunRecord(runPath, record);
     const initialResolution = await resolveDraftResponse({
       initial_response: initialDraft,
       allow_questions: false,
@@ -383,11 +402,12 @@ export async function runAgent(
         draft: initialResolution.draft,
         remaining_question_rounds: remainingQuestionRounds(record),
         mode,
+        title_mode: record.input.title_mode,
       }),
       runPath,
       record,
       dependencies,
-      parseAuthoringResponse,
+      authoringResponseParser(metadata, record.input.title_mode),
       {
         operation: "draft_review",
         prompt_summary:
@@ -440,9 +460,7 @@ export async function runAgent(
         dependencies,
         collect_author_answers: options.collect_author_answers!,
       });
-      if (
-        !sameDraftResponse(initialResolution.draft, synchronousResolution.draft)
-      ) {
+      if (initialResolution.paper !== synchronousResolution.paper) {
         await checkpointDraft(
           runPath,
           record,
@@ -465,7 +483,7 @@ export async function runAgent(
       );
     }
 
-    if (!sameDraftResponse(initialResolution.draft, reviewResolution.draft)) {
+    if (initialResolution.paper !== reviewResolution.paper) {
       await checkpointDraft(runPath, record, reviewResolution, dependencies);
     }
     await finalizePaper(runPath, record, reviewResolution, dependencies);
@@ -576,6 +594,21 @@ export async function resumeAgent(
   const currentPaper = await readCurrentDraft(runPath, record);
   const storedDraft = await readCurrentDraftResponse(runPath, record);
   const currentDraft = draftFromPaper(currentPaper, evidence, storedDraft);
+  if (record.input.title_mode === "generated") {
+    const currentTitle = titleFromPaper(currentPaper);
+    const titleDiagnostic = generatedTitleDiagnostic(
+      currentTitle,
+      metadata.product_name,
+    );
+    if (titleDiagnostic !== undefined) {
+      throw new PaperbotError(
+        `edited generated title ${titleDiagnostic}`,
+        ExitCode.validation,
+      );
+    }
+    metadata.title = currentTitle;
+    record.input.metadata = metadata;
+  }
   record.state = "authoring";
   record.updated_at = now(dependencies).toISOString();
   delete record.error;
@@ -629,11 +662,12 @@ export async function resumeAgent(
         questions: pendingQuestions,
         answers,
         remaining_question_rounds: remainingQuestionRounds(record),
+        title_mode: record.input.title_mode,
       }),
       runPath,
       record,
       dependencies,
-      parseAuthoringResponse,
+      authoringResponseParser(metadata, record.input.title_mode),
       {
         operation: "revise_from_answers",
         prompt_summary: `Revise the draft using ${pendingQuestions.length} answered author questions while preserving supported content`,
@@ -755,11 +789,12 @@ async function completeSynchronousInterview(input: {
         questions: pendingQuestions,
         answers,
         remaining_question_rounds: remainingQuestionRounds(input.record),
+        title_mode: input.record.input.title_mode,
       }),
       input.run_path,
       input.record,
       input.dependencies,
-      parseAuthoringResponse,
+      authoringResponseParser(input.metadata, input.record.input.title_mode),
       {
         operation: "revise_from_answers",
         prompt_summary: `Revise the draft using ${pendingQuestions.length} answered author questions while preserving supported content`,
@@ -1020,11 +1055,19 @@ async function resolveDraftResponse(input: {
           remaining_question_rounds: input.allow_questions
             ? remainingQuestionRounds(input.record)
             : 0,
+          ...(input.record.input.title_mode === "generated"
+            ? { generated_title: input.metadata.title }
+            : {}),
         }),
         input.run_path,
         input.record,
         input.dependencies,
-        input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
+        input.allow_questions
+          ? authoringResponseParser(
+              input.metadata,
+              input.record.input.title_mode,
+            )
+          : draftResponseParser(input.metadata, input.record.input.title_mode),
         {
           operation: "draft_correction",
           prompt_summary:
@@ -1070,11 +1113,14 @@ async function resolveDraftResponse(input: {
             "A full draft is required now; no author-question round is available in this phase.",
           ],
           remaining_question_rounds: 0,
+          ...(input.record.input.title_mode === "generated"
+            ? { generated_title: input.metadata.title }
+            : {}),
         }),
         input.run_path,
         input.record,
         input.dependencies,
-        parseDraftResponse,
+        draftResponseParser(input.metadata, input.record.input.title_mode),
         {
           operation: "draft_correction",
           prompt_summary:
@@ -1130,11 +1176,16 @@ async function resolveDraftResponse(input: {
         remaining_question_rounds: input.allow_questions
           ? remainingQuestionRounds(input.record)
           : 0,
+        ...(input.record.input.title_mode === "generated"
+          ? { generated_title: input.metadata.title }
+          : {}),
       }),
       input.run_path,
       input.record,
       input.dependencies,
-      input.allow_questions ? parseAuthoringResponse : parseDraftResponse,
+      input.allow_questions
+        ? authoringResponseParser(input.metadata, input.record.input.title_mode)
+        : draftResponseParser(input.metadata, input.record.input.title_mode),
       {
         operation: "draft_correction",
         prompt_summary: `Correct ${assessment.diagnostics.length} deterministic validation issues while preserving supported content`,
@@ -1720,25 +1771,43 @@ function remainingQuestionRounds(record: AgentRunRecord): number {
   return MAX_AUTHOR_QUESTION_ROUNDS - record.workflow.question_rounds;
 }
 
-function sameDraftResponse(left: DraftResponse, right: DraftResponse): boolean {
-  return (
-    left.summary === right.summary &&
-    left.markdown === right.markdown &&
-    arraysEqual(left.topics, right.topics) &&
-    arraysEqual(left.evidence_ids, right.evidence_ids) &&
-    JSON.stringify(left.assumptions) === JSON.stringify(right.assumptions) &&
-    arraysEqual(left.unresolved_questions, right.unresolved_questions)
-  );
+function draftResponseParser(
+  metadata: AgentPaperMetadata,
+  titleMode: AgentTitleMode,
+): (value: string) => DraftResponse {
+  if (titleMode === "provided") {
+    return parseDraftResponse;
+  }
+  return (value) => {
+    const response = parseGeneratedTitleDraftResponse(
+      value,
+      metadata.product_name,
+    );
+    metadata.title = response.title;
+    const { title: _title, ...draft } = response;
+    return draft;
+  };
 }
 
-function arraysEqual(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
+function authoringResponseParser(
+  metadata: AgentPaperMetadata,
+  titleMode: AgentTitleMode,
+): (value: string) => AuthoringResponse {
+  if (titleMode === "provided") {
+    return parseAuthoringResponse;
+  }
+  return (value) => {
+    const response = parseGeneratedTitleAuthoringResponse(
+      value,
+      metadata.product_name,
+    );
+    if (response.action === "ask_questions") {
+      return response;
+    }
+    metadata.title = response.title;
+    const { title: _title, ...draft } = response;
+    return draft;
+  };
 }
 
 function runResult(

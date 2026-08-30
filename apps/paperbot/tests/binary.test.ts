@@ -47,7 +47,7 @@ test("compiled Paperbot preserves its unified CLI from a clean directory", async
     cleanPath,
     environment,
   );
-  expect(version).toEqual({ exit_code: 0, stdout: "0.0.1\n", stderr: "" });
+  expect(version).toEqual({ exit_code: 0, stdout: "0.0.2\n", stderr: "" });
 
   const skills = await runProcess(
     [binaryPath, "skills", "paper", "references", "--format", "json"],

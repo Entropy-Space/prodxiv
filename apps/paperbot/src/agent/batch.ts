@@ -566,8 +566,8 @@ function projectMetadata(
     project.product_name ??
     productNameFromRepository(project.repository.repository);
   return normalizeAgentRequestMetadata({
-    title: project.title ?? `${productName} research draft`,
     product_name: productName,
+    ...(project.title === undefined ? {} : { title: project.title }),
     ...(authors === undefined ? {} : { authors }),
     ...(status === undefined ? {} : { status }),
     ...(project.product_url === undefined

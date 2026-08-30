@@ -187,6 +187,21 @@ export function draftFromPaper(
   };
 }
 
+export function titleFromPaper(paper: string): string {
+  const frontMatterEnd = paper.indexOf("\n---\n");
+  if (!paper.startsWith("---\n") || frontMatterEnd === -1) {
+    throw new PaperbotError("agent draft is missing front matter", ExitCode.io);
+  }
+  const title = readJsonFrontMatterString(
+    paper.slice(4, frontMatterEnd),
+    "title",
+  );
+  if (title === undefined) {
+    throw new PaperbotError("agent draft is missing its title", ExitCode.io);
+  }
+  return title;
+}
+
 function assumptionDiagnostics(
   draft: DraftResponse,
   allowedEvidenceIds: ReadonlySet<string>,
