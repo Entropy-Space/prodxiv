@@ -98,8 +98,8 @@ writes the structured assumptions to `assumptions.json`, records their digest
 in `events.jsonl`, and ends at `needs_author_review` with exactly one terminal
 `*_final.zip`. Batch reports use schema version 2 and record their requested
 mode. The status still means a human must review the paper before any
-submission. The mode and feedback transport (`none` for auto) are recorded in
-`run.json`.
+submission. The mode, feedback transport (`none` for auto), and provided or
+generated title mode are recorded in `run.json`.
 
 The workflow creates one isolated
 Pi evidence session that selects host-numbered source lines and writes neutral
@@ -124,6 +124,11 @@ are retained as Pi-native JSONL under the private run directory; `run.json`
 records their relative paths, IDs, and SHA-256 digests.
 An unchanged self-review approves the existing draft checkpoint without
 creating a duplicate immutable revision.
+If the caller omits `--title`, the first authoring turn creates a concise
+`Product: specific thesis` title from validated evidence. Paperbot validates
+its structure, and later self-review or author-answer turns revise it together
+with the generated draft. Explicit CLI and batch-manifest titles remain exact
+host-controlled overrides.
 
 `run.json` records a UUID generation ID plus the exact Paperbot version, Git
 revision and dirty-source digest, build ID, Bun version, lockfile digest, and

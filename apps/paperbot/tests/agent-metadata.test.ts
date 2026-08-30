@@ -156,15 +156,15 @@ describe("completeAgentMetadata", () => {
 function producer(): AgentProducerProvenance {
   return {
     name: "paperbot",
-    version: "0.0.1",
+    version: "0.0.2",
     git_revision: "a".repeat(40),
     git_dirty: false,
     source_state_sha256: "b".repeat(64),
     build_id: "c".repeat(64),
     bun_version: Bun.version,
     dependency_lock_sha256: "d".repeat(64),
-    run_schema_version: "5",
-    prompt_set_version: "3",
+    run_schema_version: "6",
+    prompt_set_version: "4",
     prompt_set_sha256: "e".repeat(64),
   };
 }

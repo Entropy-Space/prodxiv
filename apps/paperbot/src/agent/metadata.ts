@@ -13,7 +13,7 @@ import type {
 export const AUTO_PAPER_LICENSE = "CC BY 4.0";
 
 export function completeAgentMetadata(
-  requested: AgentPaperRequestMetadata,
+  requested: AgentPaperRequestMetadata & { title: string },
   source: AgentSource,
   model: string,
   timestamp: string,

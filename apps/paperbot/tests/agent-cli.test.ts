@@ -135,7 +135,7 @@ test("parses explicit author and status overrides", () => {
       "--status=public_beta",
       "--allow-remote-model",
       "--title",
-      "OpenWork research draft",
+      "OpenWork: A Local-First Workspace for AI-Assisted Projects",
       "--product-name",
       "OpenWork",
       "--product-url=https://openwork.example",
@@ -159,7 +159,7 @@ test("parses explicit author and status overrides", () => {
     mode: "interactive",
     feedback: "async",
     metadata: {
-      title: "OpenWork research draft",
+      title: "OpenWork: A Local-First Workspace for AI-Assisted Projects",
       product_name: "OpenWork",
       authors: ["Ada Lovelace", "Lin Example"],
       status: "public_beta",
@@ -190,7 +190,6 @@ test("accepts an agent run with inferred GitHub metadata", () => {
   ).toEqual(
     expect.objectContaining({
       metadata: {
-        title: "product research draft",
         product_name: "product",
       },
       mode: "interactive",
@@ -289,7 +288,7 @@ test("rejects unsupported mode and feedback combinations", () => {
   ).toThrow("agent run --feedback is only valid with --mode interactive");
 });
 
-test("uses a repository identifier only as an explicit draft default", () => {
+test("uses a repository identifier only as the default product name", () => {
   expect(
     parseArguments([
       "agent",
@@ -306,7 +305,6 @@ test("uses a repository identifier only as an explicit draft default", () => {
   ).toEqual(
     expect.objectContaining({
       metadata: {
-        title: "Handy research draft",
         product_name: "Handy",
         authors: ["Research Team"],
         status: "concept",
@@ -528,7 +526,6 @@ test("writes only the agent result to stdout in JSON mode", async () => {
       run_agent: async (input) => {
         receivedRepository = input.repository;
         expect(input.metadata).toEqual({
-          title: "openwork research draft",
           product_name: "openwork",
           authors: ["Research Team"],
           status: "concept",

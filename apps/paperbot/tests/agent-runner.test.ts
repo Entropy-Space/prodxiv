@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 
 import { PaperbotError } from "@prodxiv/paperbot-core";
 import type { AgentProgressEvent } from "../src/agent/progress.ts";
+import { readRunRecord } from "../src/agent/run-store.ts";
 import { resumeAgent, runAgent } from "../src/agent/runner.ts";
 import { readSourceArtifact } from "../src/agent/source.ts";
 import type {
@@ -180,6 +181,9 @@ describe("runAgent", () => {
     ]);
     expect(paper).toContain("Private research draft");
     expect(draft).toContain("Private research draft");
+    expect(paper).toContain(
+      'title: "Fixture Product: Repeatable Inputs for Repository Analysis"',
+    );
     expect(paper).not.toMatch(/^# Benchmarks$/m);
     expect(JSON.parse(evidenceText.trim())).toMatchObject({
       evidence_id: "evidence:001",
@@ -190,9 +194,15 @@ describe("runAgent", () => {
       excerpt_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(JSON.parse(runText)).toMatchObject({
-      schema_version: "5",
+      schema_version: "6",
       run_id: RUN_ID,
       state: "needs_author_review",
+      input: {
+        title_mode: "provided",
+        metadata: {
+          title: "Fixture Product: Repeatable Inputs for Repository Analysis",
+        },
+      },
       sessions: {
         evidence: {
           session_id: "fake-evidence",
@@ -216,7 +226,7 @@ describe("runAgent", () => {
       },
     });
     expect(questions).toContain("author review is still required");
-    expect(paper).toContain('tool_version: "0.0.1"');
+    expect(paper).toContain('tool_version: "0.0.2"');
     expect(paper).toContain(`generation_id: "${RUN_ID}"`);
     const parsedRun = JSON.parse(runText) as {
       checkpoint: unknown;
@@ -315,6 +325,84 @@ describe("runAgent", () => {
     await expect(
       readFile(join(outputPath, "review.json"), "utf8"),
     ).rejects.toThrow();
+  });
+
+  test("keeps a generated thesis title aligned through self-review", async () => {
+    const outputPath = join(workspacePath, "generated-title-run");
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        generatedDraftResponse({ title: "fixture-product research draft" }),
+        generatedDraftResponse(),
+        generatedDraftResponse({
+          title: "Fixture Product: Auditable Inputs for Repository Analysis",
+        }),
+      ],
+    });
+    const { title: _title, ...requestedMetadata } = metadata();
+    requestedMetadata.product_name = "fixture-product";
+
+    await runAgent(
+      {
+        ...runOptions(outputPath),
+        metadata: requestedMetadata,
+      },
+      { create_runtime: () => runtime },
+    );
+
+    expect(runtime.prompts[1]?.prompt).toContain(
+      'the form "fixture-product: <specific thesis>"',
+    );
+    expect(runtime.prompts[2]?.prompt).toContain(
+      "must begin with fixture-product",
+    );
+    expect(runtime.prompts[3]?.prompt).toContain(
+      '"title": "Fixture Product: Repeatable Inputs for Repository Analysis"',
+    );
+    const [paper, run] = await Promise.all([
+      readFile(join(outputPath, "paper.md"), "utf8"),
+      readFile(join(outputPath, "run.json"), "utf8"),
+    ]);
+    expect(paper).toContain(
+      'title: "Fixture Product: Auditable Inputs for Repository Analysis"',
+    );
+    expect(JSON.parse(run)).toMatchObject({
+      input: {
+        title_mode: "generated",
+        metadata: {
+          title: "Fixture Product: Auditable Inputs for Repository Analysis",
+        },
+      },
+      workflow: { draft_revision: 2 },
+    });
+  });
+
+  test("keeps an explicit host title immutable", async () => {
+    const outputPath = join(workspacePath, "explicit-title-run");
+    const runtime = new FakeRuntime({
+      evidence: [evidenceResponse()],
+      author: [
+        generatedDraftResponse({
+          title: "Fixture Product: A Model-Selected Override",
+        }),
+        draftResponse(),
+        draftResponse(),
+      ],
+    });
+
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () => runtime,
+    });
+
+    expect(runtime.prompts[1]?.prompt).toContain(
+      'The host controls the title "Fixture Product: Repeatable Inputs for Repository Analysis"',
+    );
+    expect(runtime.prompts[2]?.prompt).toContain(
+      "authoring contains an unknown field: title",
+    );
+    expect(await readFile(join(outputPath, "paper.md"), "utf8")).toContain(
+      'title: "Fixture Product: Repeatable Inputs for Repository Analysis"',
+    );
   });
 
   test("checkpoints a second draft only when self-review changes it", async () => {
@@ -430,6 +518,72 @@ describe("runAgent", () => {
     expect(checkpointFiles[1]).toContain("needs_author_review.zip");
   });
 
+  test("revises a generated title after asynchronous author answers", async () => {
+    const outputPath = join(workspacePath, "generated-title-resume");
+    const { title: _title, ...requestedMetadata } = metadata();
+    await runAgent(
+      {
+        ...runOptions(outputPath),
+        metadata: requestedMetadata,
+      },
+      {
+        create_runtime: () =>
+          new FakeRuntime({
+            evidence: [evidenceResponse()],
+            author: [generatedDraftResponse(), askQuestionsResponse()],
+          }),
+      },
+    );
+    const draftPath = join(outputPath, "draft.md");
+    const currentDraft = await readFile(draftPath, "utf8");
+    await writeFile(
+      draftPath,
+      currentDraft.replace(
+        'title: "Fixture Product: Repeatable Inputs for Repository Analysis"',
+        'title: "Fixture Product: Author-Edited Repository Analysis"',
+      ),
+    );
+    const answersPath = join(workspacePath, "generated-title-answers.md");
+    await writeFile(
+      answersPath,
+      "The fixture exists to make repository-analysis tests repeatable.\n",
+    );
+    const runtime = new FakeRuntime({
+      author: [
+        generatedDraftResponse({
+          title: "Fixture Product: Repeatable Repository Analysis Tests",
+          evidence_ids: ["evidence:001", "evidence:002"],
+        }),
+      ],
+    });
+
+    await resumeAgent(
+      {
+        run_path: outputPath,
+        answers_path: answersPath,
+        allow_remote_model: true,
+      },
+      { create_runtime: () => runtime },
+    );
+
+    expect(runtime.prompts[0]?.prompt).toContain(
+      '"title": "Fixture Product: Author-Edited Repository Analysis"',
+    );
+    expect(await readFile(join(outputPath, "paper.md"), "utf8")).toContain(
+      'title: "Fixture Product: Repeatable Repository Analysis Tests"',
+    );
+    expect(
+      JSON.parse(await readFile(join(outputPath, "run.json"), "utf8")),
+    ).toMatchObject({
+      input: {
+        title_mode: "generated",
+        metadata: {
+          title: "Fixture Product: Repeatable Repository Analysis Tests",
+        },
+      },
+    });
+  });
+
   test("preserves structured assumptions across an async author resume", async () => {
     const outputPath = join(workspacePath, "run");
     const assumption = {
@@ -495,6 +649,7 @@ describe("runAgent", () => {
     record.producer.run_schema_version = "4";
     delete record.input.mode;
     delete record.input.feedback;
+    delete record.input.title_mode;
     await writeFile(runPath, `${JSON.stringify(record, null, 2)}\n`);
     const answersPath = join(workspacePath, "legacy-answers.md");
     await writeFile(answersPath, "Legacy author context.\n");
@@ -522,6 +677,33 @@ describe("runAgent", () => {
       },
     ).toMatchObject({
       input: { mode: "interactive", feedback: "async" },
+    });
+  });
+
+  test("migrates schema-v5 titles as provided host metadata", async () => {
+    const outputPath = join(workspacePath, "schema-v5-run");
+    await runAgent(runOptions(outputPath), {
+      create_runtime: () => completeRuntime(),
+    });
+    const runPath = join(outputPath, "run.json");
+    const record = JSON.parse(await readFile(runPath, "utf8")) as {
+      input: Record<string, unknown>;
+      schema_version: string;
+      producer: { run_schema_version: string };
+    };
+    delete record.input.title_mode;
+    await writeFile(runPath, `${JSON.stringify(record, null, 2)}\n`);
+    await expect(readRunRecord(outputPath)).rejects.toThrow(
+      "agent run record is invalid",
+    );
+
+    record.schema_version = "5";
+    record.producer.run_schema_version = "5";
+    await writeFile(runPath, `${JSON.stringify(record, null, 2)}\n`);
+
+    expect(await readRunRecord(outputPath)).toMatchObject({
+      schema_version: "6",
+      input: { title_mode: "provided" },
     });
   });
 
@@ -1167,7 +1349,7 @@ describe("runAgent", () => {
         output_path: outputPath,
         allow_remote_model: true,
         metadata: {
-          title: "Acquired Product research draft",
+          title: "Acquired Product: Repository Evidence with Release Context",
           product_name: "Acquired Product",
         },
         model: "deepseek-v4-flash",
@@ -1203,6 +1385,7 @@ describe("runAgent", () => {
     expect(JSON.parse(run)).toMatchObject({
       input: {
         metadata: {
+          title: "Acquired Product: Repository Evidence with Release Context",
           authors: [
             {
               id: "github:example",
@@ -1708,7 +1891,7 @@ function remoteRunOptions(outputPath: string) {
     output_path: outputPath,
     allow_remote_model: true,
     metadata: {
-      title: "Acquired Product research draft",
+      title: "Acquired Product: Bounded Repository Analysis",
       product_name: "Acquired Product",
       authors: ["Example Team"],
       status: "launched" as const,
@@ -1759,15 +1942,15 @@ const RUN_ID = "00000000-0000-4000-8000-000000000001";
 function testProducer(): AgentProducerProvenance {
   return {
     name: "paperbot",
-    version: "0.0.1",
+    version: "0.0.2",
     git_revision: "a".repeat(40),
     git_dirty: false,
     source_state_sha256: "b".repeat(64),
     build_id: "c".repeat(64),
     bun_version: Bun.version,
     dependency_lock_sha256: "d".repeat(64),
-    run_schema_version: "5",
-    prompt_set_version: "3",
+    run_schema_version: "6",
+    prompt_set_version: "4",
     prompt_set_sha256: "e".repeat(64),
   };
 }
@@ -1797,7 +1980,7 @@ function readStoredZip(bytes: Uint8Array): Map<string, Buffer> {
 
 function metadata() {
   return {
-    title: "Fixture Product: Private Research Draft",
+    title: "Fixture Product: Repeatable Inputs for Repository Analysis",
     product_name: "Fixture Product",
     authors: ["Research team"],
     status: "launched" as const,
@@ -1839,6 +2022,17 @@ function draftResponse(
     evidence_ids: ["evidence:001"],
     assumptions: [],
     unresolved_questions: [],
+    ...overrides,
+  });
+}
+
+function generatedDraftResponse(
+  overrides: Partial<Record<string, unknown>> = {},
+): string {
+  const draft = JSON.parse(draftResponse()) as Record<string, unknown>;
+  return JSON.stringify({
+    ...draft,
+    title: "Fixture Product: Repeatable Inputs for Repository Analysis",
     ...overrides,
   });
 }

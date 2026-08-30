@@ -95,7 +95,7 @@ export interface AgentRunArguments {
   mode: AgentRunMode;
   feedback: AgentFeedbackMode;
   metadata: {
-    title: string;
+    title?: string;
     product_name: string;
     authors?: string[];
     status?: AgentPaperStatus;
@@ -378,8 +378,8 @@ function parseAgentRunArguments(
     mode,
     feedback: mode === "auto" ? "none" : (feedback ?? "async"),
     metadata: {
-      title: title ?? `${defaultProductName} research draft`,
       product_name: product_name ?? defaultProductName,
+      ...(title === undefined ? {} : { title }),
       ...(authors.length === 0 ? {} : { authors }),
       ...(status === undefined ? {} : { status }),
       ...(product_url === undefined ? {} : { product_url }),

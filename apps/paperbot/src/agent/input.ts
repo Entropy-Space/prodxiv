@@ -91,11 +91,14 @@ export function normalizeAgentRequestMetadata(
   if (!isRecord(value)) {
     throw usageError("agent metadata must be an object");
   }
-  const title = normalizeText(
-    value.title,
-    "agent metadata title",
-    MAX_AGENT_TEXT_LENGTH,
-  );
+  const title =
+    value.title === undefined
+      ? undefined
+      : normalizeText(
+          value.title,
+          "agent metadata title",
+          MAX_AGENT_TEXT_LENGTH,
+        );
   const productName = normalizeText(
     value.product_name,
     "agent metadata product_name",
@@ -121,7 +124,7 @@ export function normalizeAgentRequestMetadata(
           "agent metadata repository_url",
         );
   return {
-    title,
+    ...(title === undefined ? {} : { title }),
     product_name: productName,
     ...(authors === undefined ? {} : { authors }),
     ...(value.status === undefined ? {} : { status: value.status }),
@@ -139,6 +142,9 @@ export function normalizeAgentMetadata(value: unknown): AgentPaperMetadata {
     authors: undefined,
     status: undefined,
   });
+  if (request.title === undefined) {
+    throw usageError("completed agent metadata requires a title");
+  }
   if (!Array.isArray(value.authors) || value.authors.length === 0) {
     throw usageError("completed agent metadata requires at least one author");
   }

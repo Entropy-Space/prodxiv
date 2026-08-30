@@ -26,6 +26,7 @@ import {
   type AgentSessionRecord,
   type AgentSessionRole,
   type AgentSource,
+  type AgentTitleMode,
   type AuthorQuestion,
   type DraftResponse,
   type EvidenceItem,
@@ -55,6 +56,7 @@ export function createRunRecord(
     metadata: AgentPaperRequestMetadata;
     mode?: AgentRunMode;
     feedback?: AgentFeedbackMode;
+    title_mode: AgentTitleMode;
   },
   model: string,
   externalSources: string[],
@@ -76,6 +78,7 @@ export function createRunRecord(
       allow_remote_model: true,
       mode: options.mode ?? "interactive",
       feedback: options.feedback ?? "async",
+      title_mode: options.title_mode,
       external_sources: externalSources,
       metadata: options.metadata,
     },
@@ -154,13 +157,15 @@ export async function readRunRecord(runPath: string): Promise<AgentRunRecord> {
     throw invalidRunRecord(runPath);
   }
   if (isRecord(value) && isRecord(value.input)) {
-    if (
+    const migratesSchemaFour =
       value.schema_version === "4" &&
       (value.input.mode === undefined || value.input.mode === "interactive") &&
       (value.input.feedback === undefined ||
         value.input.feedback === "sync" ||
-        value.input.feedback === "async")
-    ) {
+        value.input.feedback === "async");
+    const migratesSchemaFive = value.schema_version === "5";
+    const migratesLegacySchema = migratesSchemaFour || migratesSchemaFive;
+    if (migratesLegacySchema) {
       value.schema_version = AGENT_RUN_SCHEMA_VERSION;
     }
     if (value.input.mode === undefined) {
@@ -168,6 +173,9 @@ export async function readRunRecord(runPath: string): Promise<AgentRunRecord> {
     }
     if (value.input.feedback === undefined) {
       value.input.feedback = "async";
+    }
+    if (migratesLegacySchema && value.input.title_mode === undefined) {
+      value.input.title_mode = "provided";
     }
   }
   if (!isRunRecord(value)) {
@@ -590,6 +598,8 @@ function isRunRecord(value: unknown): value is AgentRunRecord {
     (value.input.feedback === "sync" ||
       value.input.feedback === "async" ||
       value.input.feedback === "none") &&
+    (value.input.title_mode === "provided" ||
+      value.input.title_mode === "generated") &&
     ((value.input.mode === "auto" && value.input.feedback === "none") ||
       (value.input.mode === "interactive" &&
         (value.input.feedback === "sync" ||
@@ -639,6 +649,7 @@ function isProducerProvenance(value: unknown): boolean {
     typeof value.dependency_lock_sha256 === "string" &&
     SHA256_PATTERN.test(value.dependency_lock_sha256) &&
     (value.run_schema_version === "4" ||
+      value.run_schema_version === "5" ||
       value.run_schema_version === AGENT_RUN_SCHEMA_VERSION) &&
     typeof value.prompt_set_version === "string" &&
     value.prompt_set_version.length > 0 &&

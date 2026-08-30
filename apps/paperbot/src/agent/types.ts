@@ -1,7 +1,7 @@
 import type { ScanFileType, ScanManifest } from "@prodxiv/paperbot-core";
 import type { GitHubSourceSelection } from "@prodxiv/paperbot-source";
 
-export const AGENT_RUN_SCHEMA_VERSION = "5";
+export const AGENT_RUN_SCHEMA_VERSION = "6";
 
 export type EvidenceKind = "repository" | "external" | "author" | "inference";
 export type EvidenceStatus =
@@ -21,6 +21,7 @@ export type PiSessionRole = AgentSessionRole | "trend_selection";
 export type AgentRunMode = "interactive" | "auto";
 export type AgentFeedbackMode = "sync" | "async" | "none";
 export type AgentGitHubReleasePolicy = "best_effort" | "disabled";
+export type AgentTitleMode = "provided" | "generated";
 
 export interface AgentModelConfig {
   provider: "pi";
@@ -36,7 +37,7 @@ export interface AgentProducerProvenance {
   build_id: string;
   bun_version: string;
   dependency_lock_sha256: string;
-  run_schema_version: "4" | typeof AGENT_RUN_SCHEMA_VERSION;
+  run_schema_version: "4" | "5" | typeof AGENT_RUN_SCHEMA_VERSION;
   prompt_set_version: string;
   prompt_set_sha256: string;
   built_at?: string;
@@ -51,7 +52,7 @@ export type AgentPaperStatusValue =
   | "discontinued";
 
 export interface AgentPaperRequestMetadata {
-  title: string;
+  title?: string;
   product_name: string;
   authors?: string[];
   status?: AgentPaperStatusValue;
@@ -319,6 +320,7 @@ export interface AgentRunRecord {
     allow_remote_model: true;
     mode: AgentRunMode;
     feedback: AgentFeedbackMode;
+    title_mode: AgentTitleMode;
     external_sources: string[];
     metadata: AgentPaperRequestMetadata | AgentPaperMetadata;
   };
