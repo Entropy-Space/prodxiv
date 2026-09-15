@@ -1,6 +1,7 @@
 //! PostgreSQL persistence for prodxiv drafts, publications, and observations.
 
 mod public_read;
+mod translations;
 
 pub use public_read::{PublicDraftCursor, PublicDraftPage, PublicationFilter};
 
@@ -2585,6 +2586,8 @@ fn trending_request_sha256(snapshot: &NewGitHubTrendingSnapshot) -> Result<Strin
 
 #[derive(Debug, Error)]
 pub enum StorageError {
+    #[error("translation is invalid: {0}")]
+    InvalidTranslation(&'static str),
     #[error("database operation failed: {0}")]
     Database(#[from] sqlx::Error),
     #[error("database migration failed: {0}")]

@@ -190,3 +190,41 @@ describe("readPublishedPaper", () => {
     expect(result).toMatchObject({ ok: false, error: { status: 502 } });
   });
 });
+
+test("renders Japanese with no English variant and refuses missing languages", async () => {
+  const translations = [
+    {
+      language: "ja",
+      title: "概要",
+      summary: "説明",
+      markdown: "# 概要\n\n日本語。",
+      source_sha256: "a".repeat(64),
+      model: "test",
+    },
+  ];
+  const fetch = async (input: RequestInfo | URL) => {
+    const url = String(input);
+    return Response.json(
+      url.endsWith("/translations")
+        ? translations
+        : url.endsWith("/revisions")
+          ? { revisions: [] }
+          : publishedPaper,
+    );
+  };
+  const options = {
+    paper_id: publishedPaper.paper_id,
+    revision: "1",
+    api_url: "https://api.example",
+    fetch,
+  };
+  const japanese = await readPublishedPaper({ ...options, language: "ja" });
+  expect(japanese.ok).toBe(true);
+  if (japanese.ok) {
+    expect(japanese.paper.metadata.title).toBe("概要");
+    expect(japanese.rendered.html).toContain("日本語。");
+    expect(japanese.translations.map((item) => item.language)).toEqual(["ja"]);
+  }
+  const english = await readPublishedPaper({ ...options, language: "en" });
+  expect(english).toMatchObject({ ok: false, error: { status: 404 } });
+});

@@ -16,6 +16,7 @@ const result = await readPublishedPaper({
   paper_id: paperId ?? "",
   revision: revision?.toString() ?? "",
   api_url: import.meta.env.PRODXIV_API_URL,
+  language: Astro.url.searchParams.get("lang") ?? undefined,
 });
 
 if (!result.ok) {
@@ -38,10 +39,12 @@ if (!result.ok) {
       published_at={result.paper.published_at}
       section_headings={result.rendered.section_headings}
       source_markdown={result.paper.source_markdown}
-      source_href={`${publicPaperPath(result.paper.paper_id, result.paper.version)}/source.md`}
+      source_href={`${publicPaperPath(result.paper.paper_id, result.paper.version)}/source.md${result.language === undefined ? "" : `?lang=${result.language}`}`}
       canonical_url={new URL(publicPaperPath(result.paper.paper_id, result.paper.version), Astro.site ?? Astro.url.origin).href}
       revisions={result.revisions}
       history_available={result.history_available}
+      translations={result.translations}
+      language={result.language}
     >
       <Fragment set:html={result.rendered.html} />
     </PaperView>

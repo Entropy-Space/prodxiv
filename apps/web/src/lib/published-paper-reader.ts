@@ -4,6 +4,9 @@ import {
   type ApiFetch,
   type PublishedPaper,
   type PublishedPaperSummary,
+  type PaperTranslation,
+  type PaperLanguage,
+  isPaperLanguage,
 } from "@prodxiv/api-client";
 import { paperSlugFromCanonicalId } from "@prodxiv/api-client/public-paper-url";
 
@@ -27,6 +30,8 @@ export type PaperReaderResult =
       rendered: RenderedPaperMarkdown;
       revisions: PublishedPaperSummary[];
       history_available: boolean;
+      translations: PaperTranslation[];
+      language?: PaperLanguage;
       history_message?: string;
     }
   | {
@@ -35,6 +40,7 @@ export type PaperReaderResult =
     };
 
 export interface PaperReaderOptions {
+  language?: string;
   paper_id: string;
   revision: string;
   api_url?: string;
@@ -44,6 +50,16 @@ export interface PaperReaderOptions {
 export async function readPublishedPaper(
   options: PaperReaderOptions,
 ): Promise<PaperReaderResult> {
+  if (options.language !== undefined && !isPaperLanguage(options.language)) {
+    return {
+      ok: false,
+      error: {
+        status: 400,
+        title: "Invalid language",
+        message: "The requested paper language is not supported.",
+      },
+    };
+  }
   if (paperSlugFromCanonicalId(options.paper_id) === undefined) {
     return invalidPaperIdentifier();
   }
@@ -71,12 +87,35 @@ export async function readPublishedPaper(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const [paper, history] = await Promise.all([
+    const [original, history, translations] = await Promise.all([
       client.getPaperRevision(options.paper_id, revision),
       client.listPaperRevisions(options.paper_id).catch(() => undefined),
+      client
+        .listPaperTranslations(options.paper_id, revision)
+        .catch((error: unknown) => {
+          if (options.language !== undefined) throw error;
+          return [] as PaperTranslation[];
+        }),
     ]);
     // Rendering the immutable source does not depend on the separate history
     // endpoint. A rolling API upgrade or history failure must not hide it.
+    const selected =
+      options.language === undefined
+        ? undefined
+        : translations.find((item) => item.language === options.language);
+    if (options.language !== undefined && selected === undefined) {
+      return {
+        ok: false,
+        error: {
+          status: 404,
+          title: "Language unavailable",
+          message:
+            "This paper revision is not available in the requested language.",
+        },
+      };
+    }
+    const paper =
+      selected === undefined ? original : translatedPaper(original, selected);
     const rendered = renderPaperMarkdown(paper.source_markdown);
     const historyAvailable =
       history?.revisions.some((entry) => entry.version === paper.version) ===
@@ -87,6 +126,8 @@ export async function readPublishedPaper(
       rendered,
       revisions: historyAvailable ? (history?.revisions ?? []) : [],
       history_available: historyAvailable,
+      translations,
+      ...(selected === undefined ? {} : { language: selected.language }),
       ...(historyAvailable
         ? {}
         : { history_message: "Revision history is temporarily unavailable." }),
@@ -155,4 +196,18 @@ function publicError(error: unknown): PaperReaderError {
     title: "Paper unavailable",
     message: "An unexpected error prevented this paper from being displayed.",
   };
+}
+
+export function translatedPaper(
+  paper: PublishedPaper,
+  translation: PaperTranslation,
+): PublishedPaper {
+  const metadata = {
+    ...paper.metadata,
+    title: translation.title,
+    summary: translation.summary,
+  };
+  // JSON is valid YAML; host-owned metadata is retained without model rewriting.
+  const source_markdown = `---\n${JSON.stringify(metadata, null, 2)}\n---\n${translation.markdown}`;
+  return { ...paper, metadata, source_markdown };
 }

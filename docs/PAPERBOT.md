@@ -582,6 +582,37 @@ would override the repository value. Configure the daily workflow's
 daily workflow requests its API identity through GitHub OIDC and has no
 long-lived API secret. Neither workflow needs a database credential.
 
+### Translations of new publications
+
+New revisions published after the translation migration enqueue independent
+`en`, `zh-CN` (Simplified Chinese), `ja`, `de`, and `fr` jobs in PostgreSQL.
+There is no backfill query or startup scan of historical papers. A new revision
+of an existing paper is eligible; its older revisions remain untouched.
+
+The daily host runs `scripts/paperbot-evaluation/translate-papers.ts` after
+promotion. It reads at most 20 queued jobs, copies the current English source
+for `en`, and uses separate tool-less Pi sessions for the other languages.
+No publication credentials enter model context. Title, summary, prose, and
+headings are translated; URLs, inline and fenced code, and embedded HTML/SVG
+remain exact. The API verifies the immutable source hash, field bounds,
+heading levels/order, and protected assets. These checks do not establish
+semantic translation accuracy; the reader identifies machine translations.
+
+Each language succeeds or fails independently. No language version is
+required, including `en`; the collection may be empty. An explicit unavailable
+language returns 404 rather than substituting English. The original archived
+source remains readable through the existing URL, and available versions are
+selected with `?lang=ja` (or another supported language). Downloads use the same
+selector. Language selection translates paper content, not the website UI.
+
+Failures are audited and retried on later daily runs, with three recorded
+attempts per language before automatic retry stops. A failed language does not
+block other languages or paper publication. Only the bot principal can read
+jobs or save results, and it can write only enrolled jobs. Successful content
+is immutable and completion is idempotent: concurrent results cannot overwrite
+an accepted version. Corrections require a new paper revision. Private model
+sessions and a per-language completion/failure report join the daily artifacts.
+
 ### Batch public repositories
 
 To prepare several independent research drafts, create a private JSON manifest

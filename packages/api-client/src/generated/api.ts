@@ -244,6 +244,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/papers/{paper_id}/revisions/{revision}/translations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/public/drafts": {
     parameters: {
       query?: never;
@@ -270,6 +286,38 @@ export interface paths {
     get: operations["get_public_draft"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/translation-jobs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["jobs"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/translation-jobs/{paper_id}/{revision}/{language}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["finish"];
     delete?: never;
     options?: never;
     head?: never;
@@ -422,6 +470,8 @@ export interface components {
       revision: number;
       updated_at: string;
     };
+    /** @enum {string} */
+    PaperLanguage: "en" | "zh-CN" | "ja" | "de" | "fr";
     PaperListResponse: {
       next_cursor?: string | null;
       papers: components["schemas"]["PublishedPaperSummary"][];
@@ -462,6 +512,15 @@ export interface components {
       | components["schemas"]["ProductStatusObservation"];
     PaperTopicsResponse: {
       topics: string[];
+    };
+    /** @description Language versions are sparse: no particular language is required. */
+    PaperTranslation: {
+      language: components["schemas"]["PaperLanguage"];
+      markdown: string;
+      model: string;
+      source_sha256: string;
+      summary: string;
+      title: string;
     };
     PaperWriter: {
       generation_id?: string | null;
@@ -583,6 +642,24 @@ export interface components {
     StatusConfidence: "high" | "medium" | "low";
     /** @enum {string} */
     StatusDetermination: "declared" | "inferred" | "unverified";
+    TranslationJob: {
+      /** Format: int32 */
+      attempts: number;
+      language: components["schemas"]["PaperLanguage"];
+      paper: components["schemas"]["PublishedPaper"];
+      source_sha256: string;
+    };
+    TranslationResult:
+      | {
+          /** @enum {string} */
+          status: "completed";
+          translation: components["schemas"]["PaperTranslation"];
+        }
+      | {
+          source_sha256: string;
+          /** @enum {string} */
+          status: "failed";
+        };
     WriteDraftRequest: {
       source_markdown: string;
     };
@@ -2041,6 +2118,36 @@ export interface operations {
       };
     };
   };
+  list: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        paper_id: string;
+        revision: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaperTranslation"][];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   list_public_drafts: {
     parameters: {
       query?: {
@@ -2116,6 +2223,83 @@ export interface operations {
       };
       /** @description Reading failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  jobs: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranslationJob"][];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  finish: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        paper_id: string;
+        revision: number;
+        language: components["schemas"]["PaperLanguage"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranslationResult"];
+      };
+    };
+    responses: {
+      /** @description Job result saved or already complete */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      422: {
         headers: {
           [name: string]: unknown;
         };

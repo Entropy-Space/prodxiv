@@ -976,3 +976,121 @@ async fn imports_and_reads_an_immutable_trending_snapshot(pool: PgPool) {
         "Trending observations must remain immutable"
     );
 }
+
+#[sqlx::test]
+async fn translation_queue_is_sparse_immutable_and_digest_bound(pool: PgPool) {
+    use prodxiv_domain::{PaperLanguage, PaperTranslation, TranslationResult};
+    let storage = PostgresStorage::new(pool.clone());
+    storage.migrate().await.unwrap();
+    assert!(storage.translation_jobs().await.unwrap().is_empty());
+    let (source, paper) = submission();
+    let published = storage
+        .publish_new(paper, &source, "test", "translation-fixture", None)
+        .await
+        .unwrap()
+        .paper;
+    let jobs = storage.translation_jobs().await.unwrap();
+    assert_eq!(jobs.len(), 5);
+    let job = jobs
+        .iter()
+        .find(|job| job.language == PaperLanguage::Ja)
+        .unwrap();
+    let content = PaperTranslation {
+        language: PaperLanguage::Ja,
+        source_sha256: job.source_sha256.clone(),
+        title: "日本語".into(),
+        summary: "説明".into(),
+        markdown: PaperDocument::from_markdown(&published.source_markdown)
+            .unwrap()
+            .markdown,
+        model: "fixture".into(),
+    };
+    let mut wrong = content.clone();
+    wrong.source_sha256 = "0".repeat(64);
+    assert!(
+        storage
+            .finish_translation(
+                &published.paper_id,
+                1,
+                PaperLanguage::Ja,
+                &TranslationResult::Completed { translation: wrong },
+                "bot"
+            )
+            .await
+            .is_err()
+    );
+    let result = TranslationResult::Completed {
+        translation: content.clone(),
+    };
+    storage
+        .finish_translation(&published.paper_id, 1, PaperLanguage::Ja, &result, "bot")
+        .await
+        .unwrap();
+    storage
+        .finish_translation(&published.paper_id, 1, PaperLanguage::Ja, &result, "bot")
+        .await
+        .unwrap();
+    let available = storage
+        .paper_translations(&published.paper_id, 1)
+        .await
+        .unwrap();
+    assert_eq!(available, vec![content]);
+    assert_eq!(storage.translation_jobs().await.unwrap().len(), 4);
+    assert!(
+        sqlx::query("UPDATE paper_translations SET content = '{}'::jsonb")
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    let failed = TranslationResult::Failed {
+        source_sha256: job.source_sha256.clone(),
+    };
+    for _ in 0..3 {
+        storage
+            .finish_translation(&published.paper_id, 1, PaperLanguage::Fr, &failed, "bot")
+            .await
+            .unwrap();
+    }
+    assert_eq!(storage.translation_jobs().await.unwrap().len(), 3);
+    let audit_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'translation.completed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit_count, 1);
+}
+
+#[sqlx::test]
+async fn translation_migration_does_not_backfill_existing_papers(pool: PgPool) {
+    for migration in prodxiv_storage::MIGRATOR
+        .iter()
+        .filter(|m| m.version < 20260915090000)
+    {
+        // Migration SQL is compiled from checked-in files, never user input.
+        sqlx::raw_sql(sqlx::AssertSqlSafe(migration.sql.as_ref()))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let storage = PostgresStorage::new(pool.clone());
+    let (source, paper) = submission();
+    let old = storage
+        .publish_new(paper, &source, "test", "old-translation-fixture", None)
+        .await
+        .unwrap()
+        .paper;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20260915090000_paper_translations.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(storage.translation_jobs().await.unwrap().is_empty());
+    assert!(
+        storage
+            .paper_translations(&old.paper_id, 1)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

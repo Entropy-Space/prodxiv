@@ -1,5 +1,5 @@
 ---
-import type { PublishedPaper, PublishedPaperSummary } from "@prodxiv/api-client";
+import type { PaperLanguage, PaperTranslation, PublishedPaper, PublishedPaperSummary } from "@prodxiv/api-client";
 import { publicPaperPath } from "@prodxiv/api-client/public-paper-url";
 import SiteLayout from "../layouts/SiteLayout.astro";
 import PaperActions from "./PaperActions.astro";
@@ -29,6 +29,8 @@ type Props = CommonProps & (
     source_href: string;
     revisions: PublishedPaperSummary[];
     history_available: boolean;
+    translations?: PaperTranslation[];
+    language?: PaperLanguage;
   }
   | {
     kind: "draft";
@@ -50,6 +52,7 @@ type Props = CommonProps & (
   }
 );
 
+const languageLabels: Record<PaperLanguage, string> = { en: "English", "zh-CN": "简体中文", ja: "日本語", de: "Deutsch", fr: "Français" };
 const props = Astro.props;
 const metadata = props.metadata ?? undefined;
 const title = metadata?.title.trim() || "Untitled draft";
@@ -84,7 +87,7 @@ const productUrl = publicResourceUrl(metadata?.product_url);
 ---
 
 <SiteLayout title={`${title} — prodxiv`} description={description} noindex={props.kind === "reference"}>
-  <article class="paper shell">
+  <article class="paper shell" lang={props.kind === "published" ? props.language : undefined}>
     <a class="paper-back" href={props.kind === "draft" ? "/drafts" : "/"}>
       ← {props.kind === "draft" ? "Pending drafts" : "Published papers"}
     </a>
@@ -154,6 +157,17 @@ const productUrl = publicResourceUrl(metadata?.product_url);
       )
     }
 
+    {props.kind === "published" && (props.translations?.length ?? 0) > 0 && (
+      <nav class="paper-languages" aria-label="Paper language">
+        <a href={publicPaperPath(props.paper_id, props.revision)} aria-current={props.language === undefined ? "page" : undefined}>Original</a>
+        {props.translations?.map(translation => (
+          <a href={`${publicPaperPath(props.paper_id, props.revision)}?lang=${translation.language}`} lang={translation.language} aria-current={translation.language === props.language ? "page" : undefined}>{languageLabels[translation.language]}</a>
+        ))}
+      </nav>
+    )}
+    {props.kind === "published" && props.language !== undefined && props.language !== "en" && (
+      <aside class="notice" lang="en">Machine translation of this exact revision. Translation may contain errors; it does not imply author review.</aside>
+    )}
     <div class="paper-tools">
       {
         props.kind === "published" && (
@@ -288,6 +302,8 @@ const productUrl = publicResourceUrl(metadata?.product_url);
 </script>
 
 <style>
+  .paper-languages { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1.5rem; }
+  .paper-languages [aria-current="page"] { font-weight: bold; }
   .paper {
     padding-top: 1.1rem;
   }

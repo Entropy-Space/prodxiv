@@ -2300,3 +2300,22 @@ async fn rejects_an_idempotency_key_reused_for_different_content() {
         "publication.idempotency_conflict"
     );
 }
+
+#[tokio::test]
+async fn translation_jobs_require_bot_authority() {
+    for (token, expected) in [
+        (None, StatusCode::UNAUTHORIZED),
+        (Some(TOKEN), StatusCode::FORBIDDEN),
+        (Some(INGEST_TOKEN), StatusCode::UNAUTHORIZED),
+    ] {
+        let mut request = Request::builder().uri("/v1/translation-jobs");
+        if let Some(token) = token {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let response = app(Arc::new(FakeStore::default()))
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+}
