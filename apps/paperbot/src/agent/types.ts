@@ -17,7 +17,8 @@ export type AgentRunState =
   | "failed";
 export type AuthorPhase = "drafting" | "reviewing";
 export type AgentSessionRole = "evidence" | "author";
-export type PiSessionRole = AgentSessionRole | "trend_selection";
+export type PiSessionRole =
+  AgentSessionRole | "trend_selection" | "translation";
 export type AgentRunMode = "interactive" | "auto";
 export type AgentFeedbackMode = "sync" | "async" | "none";
 export type AgentGitHubReleasePolicy = "best_effort" | "disabled";

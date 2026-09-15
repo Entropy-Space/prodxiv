@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf};
 
-use prodxiv_domain::{PaperDocument, ValidationReport, validation_policy};
+use prodxiv_domain::{PaperDocument, PaperTranslation, ValidationReport, validation_policy};
 use schemars::schema_for;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,6 +9,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_or_else(|| PathBuf::from("schemas"), PathBuf::from);
     fs::create_dir_all(&output_directory)?;
 
+    write_schema(
+        output_directory.join("translation.schema.json"),
+        &schema_for!(PaperTranslation),
+    )?;
     write_schema(
         output_directory.join("paper.schema.json"),
         &schema_for!(PaperDocument),

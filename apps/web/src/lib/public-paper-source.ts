@@ -2,6 +2,7 @@ import {
   ProdxivApiClient,
   ProdxivApiError,
   type ApiFetch,
+  isPaperLanguage,
 } from "@prodxiv/api-client";
 import {
   canonicalPaperIdFromSlug,
@@ -10,7 +11,10 @@ import {
 } from "@prodxiv/api-client/public-paper-url";
 import { configuredApiUrl } from "./api-url.ts";
 
+import { translatedPaper } from "./published-paper-reader.ts";
+
 export interface PublishedSourceOptions {
+  language?: string;
   paper_slug: string;
   version_slug: string;
   api_url?: string;
@@ -20,6 +24,8 @@ export interface PublishedSourceOptions {
 export async function publishedSourceResponse(
   options: PublishedSourceOptions,
 ): Promise<Response> {
+  if (options.language !== undefined && !isPaperLanguage(options.language))
+    return sourceError(400, "Invalid language.");
   const paperId = canonicalPaperIdFromSlug(options.paper_slug);
   const revision = paperVersionFromSlug(options.version_slug);
   if (paperId === undefined || revision === undefined) {
@@ -35,12 +41,24 @@ export async function publishedSourceResponse(
       api_url: apiUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    const paper = await client.getPaperRevision(paperId, revision);
+    let paper = await client.getPaperRevision(paperId, revision);
+    if (options.language !== undefined) {
+      const translations = await client.listPaperTranslations(
+        paperId,
+        revision,
+      );
+      const selected = translations.find(
+        (item) => item.language === options.language,
+      );
+      if (selected === undefined)
+        return sourceError(404, "Language unavailable.");
+      paper = translatedPaper(paper, selected);
+    }
     const slug = paperSlugFromCanonicalId(paperId);
     return new Response(paper.source_markdown, {
       headers: {
         "content-type": "text/markdown; charset=utf-8",
-        "content-disposition": `attachment; filename="${slug}-v${revision}.md"`,
+        "content-disposition": `attachment; filename="${slug}-v${revision}${options.language === undefined ? "" : `-${options.language}`}.md"`,
         "cache-control": "public, max-age=31536000, immutable",
         "x-content-type-options": "nosniff",
       },

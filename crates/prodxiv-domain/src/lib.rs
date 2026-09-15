@@ -5,7 +5,11 @@ mod paper;
 mod policy;
 mod public_draft;
 mod publication;
+mod translation;
 mod validation;
+pub use translation::{
+    PaperLanguage, PaperTranslation, TranslationJob, TranslationResult, validate_translation,
+};
 
 pub use draft::{
     DRAFT_REVISION_RETENTION, DraftOwnerKind, DraftReviewStatus, MAX_DRAFT_REJECTION_REASON_BYTES,

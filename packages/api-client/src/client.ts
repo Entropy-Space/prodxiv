@@ -1,6 +1,11 @@
 import type { components } from "./generated/api.ts";
 import { paperSlugFromCanonicalId } from "./public-paper-url.ts";
 
+export type PaperLanguage = components["schemas"]["PaperLanguage"];
+export type PaperTranslation = components["schemas"]["PaperTranslation"];
+export type TranslationJob = components["schemas"]["TranslationJob"];
+export type TranslationResult = components["schemas"]["TranslationResult"];
+
 export type PaperMetadata = components["schemas"]["PaperMetadata"];
 export type PublishedPaper = components["schemas"]["PublishedPaper"];
 export type PublishedPaperSummary =
@@ -423,6 +428,75 @@ export class ProdxivApiClient {
     });
 
     return publishPaperResult(response, body);
+  }
+
+  async listPaperTranslations(
+    paperId: string,
+    revision: number,
+  ): Promise<PaperTranslation[]> {
+    const path = translationPath(paperId, revision);
+    const { response, body } = await this.#publicRequest(path);
+    assertSuccessfulResponse(response, body);
+    if (
+      !Array.isArray(body) ||
+      !body.every(isPaperTranslation) ||
+      new Set(body.map((item) => item.language)).size !== body.length
+    ) {
+      throw invalidResponse(response, "invalid paper translations");
+    }
+    return body;
+  }
+
+  async listTranslationJobs(): Promise<TranslationJob[]> {
+    const { response, body } = await this.#request("/v1/translation-jobs", {
+      headers: { Authorization: this.#draftAuthorization() },
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    assertSuccessfulResponse(response, body);
+    if (!Array.isArray(body) || body.length > 20)
+      throw invalidResponse(response, "invalid translation queue");
+    return body.map((item: unknown) => {
+      if (
+        !isRecord(item) ||
+        !isPaperLanguage(item.language) ||
+        !isDigest(item.source_sha256) ||
+        !Number.isInteger(item.attempts) ||
+        Number(item.attempts) < 0 ||
+        Number(item.attempts) >= 3
+      ) {
+        throw invalidResponse(response, "invalid translation job");
+      }
+      return {
+        paper: publishedPaper(response, item.paper),
+        language: item.language,
+        source_sha256: item.source_sha256,
+        attempts: Number(item.attempts),
+      };
+    });
+  }
+
+  async finishTranslation(
+    job: TranslationJob,
+    result: TranslationResult,
+  ): Promise<void> {
+    translationPath(job.paper.paper_id, job.paper.version);
+    if (!isPaperLanguage(job.language))
+      throw new Error("invalid translation language");
+    const { response, body } = await this.#request(
+      `/v1/translation-jobs/${encodeURIComponent(job.paper.paper_id)}/${job.paper.version}/${job.language}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: this.#draftAuthorization(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(result),
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    assertSuccessfulResponse(response, body);
   }
 
   async getPaperRevision(
@@ -1571,4 +1645,41 @@ function isOptionalNonNegativeInteger(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isPaperLanguage(value: unknown): value is PaperLanguage {
+  return (
+    value === "en" ||
+    value === "zh-CN" ||
+    value === "ja" ||
+    value === "de" ||
+    value === "fr"
+  );
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isPaperTranslation(value: unknown): value is PaperTranslation {
+  return (
+    isRecord(value) &&
+    isPaperLanguage(value.language) &&
+    isDigest(value.source_sha256) &&
+    isNonEmptyString(value.title) &&
+    isNonEmptyString(value.summary) &&
+    isNonEmptyString(value.markdown) &&
+    isNonEmptyString(value.model)
+  );
+}
+
+function translationPath(paperId: string, revision: number): string {
+  validatePaperId(paperId);
+  if (!isPaperRevision(revision))
+    throw new ProdxivApiError(
+      0,
+      "request.invalid_revision",
+      "invalid paper revision",
+    );
+  return `/v1/papers/${encodeURIComponent(paperId)}/revisions/${revision}/translations`;
 }

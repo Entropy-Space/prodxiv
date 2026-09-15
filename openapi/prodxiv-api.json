@@ -1895,6 +1895,59 @@
         }
       }
     },
+    "/v1/papers/{paper_id}/revisions/{revision}/translations": {
+      "get": {
+        "tags": [
+          "translations"
+        ],
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PaperTranslation"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/public/drafts": {
       "get": {
         "tags": [
@@ -2007,6 +2060,130 @@
             }
           }
         }
+      }
+    },
+    "/v1/translation-jobs": {
+      "get": {
+        "tags": [
+          "translations"
+        ],
+        "operationId": "jobs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TranslationJob"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/v1/translation-jobs/{paper_id}/{revision}/{language}": {
+      "post": {
+        "tags": [
+          "translations"
+        ],
+        "operationId": "finish",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "language",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaperLanguage"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslationResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Job result saved or already complete"
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
       }
     }
   },
@@ -2610,6 +2787,16 @@
         },
         "additionalProperties": false
       },
+      "PaperLanguage": {
+        "type": "string",
+        "enum": [
+          "en",
+          "zh-CN",
+          "ja",
+          "de",
+          "fr"
+        ]
+      },
       "PaperListResponse": {
         "type": "object",
         "required": [
@@ -2816,6 +3003,39 @@
             }
           }
         }
+      },
+      "PaperTranslation": {
+        "type": "object",
+        "description": "Language versions are sparse: no particular language is required.",
+        "required": [
+          "language",
+          "source_sha256",
+          "title",
+          "summary",
+          "markdown",
+          "model"
+        ],
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/PaperLanguage"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "source_sha256": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "PaperWriter": {
         "type": "object",
@@ -3237,6 +3457,71 @@
           "declared",
           "inferred",
           "unverified"
+        ]
+      },
+      "TranslationJob": {
+        "type": "object",
+        "required": [
+          "paper",
+          "language",
+          "source_sha256",
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "language": {
+            "$ref": "#/components/schemas/PaperLanguage"
+          },
+          "paper": {
+            "$ref": "#/components/schemas/PublishedPaper"
+          },
+          "source_sha256": {
+            "type": "string"
+          }
+        }
+      },
+      "TranslationResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "translation",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              },
+              "translation": {
+                "$ref": "#/components/schemas/PaperTranslation"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "source_sha256",
+              "status"
+            ],
+            "properties": {
+              "source_sha256": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            }
+          }
         ]
       },
       "WriteDraftRequest": {

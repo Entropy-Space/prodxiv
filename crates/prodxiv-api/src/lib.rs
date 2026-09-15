@@ -2,6 +2,7 @@
 
 mod github_oidc;
 mod public_read;
+mod translations;
 
 pub use public_read::{
     PaperRevisionListResponse, PaperTopicsResponse, PublicPaperDraftListResponse,
@@ -30,9 +31,10 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodxiv_domain::{
     DRAFT_REVISION_RETENTION, Diagnostic, DraftOwnerKind, DraftReviewStatus,
     MAX_DRAFT_REJECTION_REASON_BYTES, PaperDocument, PaperDraft, PaperDraftRevision,
-    PaperDraftRevisionSummary, PaperDraftSummary, PublicPaperDraft, PublicPaperDraftResponse,
-    PublicPaperDraftSummary, PublishedPaper, PublishedPaperSummary, ValidationProfile,
-    ValidationReport, canonicalize_paper_id, validate_paper,
+    PaperDraftRevisionSummary, PaperDraftSummary, PaperLanguage, PaperTranslation,
+    PublicPaperDraft, PublicPaperDraftResponse, PublicPaperDraftSummary, PublishedPaper,
+    PublishedPaperSummary, TranslationJob, TranslationResult, ValidationProfile, ValidationReport,
+    canonicalize_paper_id, validate_paper,
 };
 use prodxiv_storage::{
     DraftCreateOutcome, DraftUpdateOutcome, GITHUB_TRENDING_ANY_LANGUAGE, GitHubTrendingEntry,
@@ -315,6 +317,27 @@ fn resolve_migration_database_url(
 
 #[async_trait]
 pub trait PublicationStore: Send + Sync {
+    async fn translation_jobs(&self) -> Result<Vec<TranslationJob>, StoreError> {
+        Err(StoreError::Internal)
+    }
+    async fn paper_translations(
+        &self,
+        _paper_id: &str,
+        _revision: u32,
+    ) -> Result<Vec<PaperTranslation>, StoreError> {
+        Err(StoreError::Internal)
+    }
+    async fn finish_translation(
+        &self,
+        _paper_id: &str,
+        _revision: u32,
+        _language: PaperLanguage,
+        _result: &TranslationResult,
+        _actor: &str,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Internal)
+    }
+
     async fn create_draft(
         &self,
         source_markdown: &str,
@@ -460,6 +483,33 @@ pub trait PublicationStore: Send + Sync {
 
 #[async_trait]
 impl PublicationStore for PostgresStorage {
+    async fn translation_jobs(&self) -> Result<Vec<TranslationJob>, StoreError> {
+        PostgresStorage::translation_jobs(self)
+            .await
+            .map_err(StoreError::from)
+    }
+    async fn paper_translations(
+        &self,
+        paper_id: &str,
+        revision: u32,
+    ) -> Result<Vec<PaperTranslation>, StoreError> {
+        PostgresStorage::paper_translations(self, paper_id, revision)
+            .await
+            .map_err(StoreError::from)
+    }
+    async fn finish_translation(
+        &self,
+        paper_id: &str,
+        revision: u32,
+        language: PaperLanguage,
+        result: &TranslationResult,
+        actor: &str,
+    ) -> Result<(), StoreError> {
+        PostgresStorage::finish_translation(self, paper_id, revision, language, result, actor)
+            .await
+            .map_err(StoreError::from)
+    }
+
     async fn create_draft(
         &self,
         source_markdown: &str,
@@ -737,6 +787,8 @@ impl PublicationStore for PostgresStorage {
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("translation is invalid: {0}")]
+    InvalidTranslation(&'static str),
     #[error("finalized publication is invalid")]
     InvalidPublication(ValidationReport),
     #[error("paper identifier space for the current month is exhausted")]
@@ -768,6 +820,7 @@ pub enum StoreError {
 impl From<StorageError> for StoreError {
     fn from(error: StorageError) -> Self {
         match error {
+            StorageError::InvalidTranslation(message) => Self::InvalidTranslation(message),
             StorageError::Publication(prodxiv_domain::PublicationPreparationError::Invalid(
                 report,
             )) => Self::InvalidPublication(report),
@@ -1095,6 +1148,16 @@ impl From<GitHubTrendingEntry> for GitHubTrendingEntryResponse {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/translation-jobs", get(translations::jobs))
+        .route(
+            "/v1/translation-jobs/{paper_id}/{revision}/{language}",
+            post(translations::finish)
+                .layer(DefaultBodyLimit::max(MAX_DRAFT_WRITE_BODY_BYTES + 128_000)),
+        )
+        .route(
+            "/v1/papers/{paper_id}/revisions/{revision}/translations",
+            get(translations::list),
+        )
         .route("/v1/papers", get(list_papers).post(publish_paper))
         .route("/v1/papers/topics", get(public_read::list_paper_topics))
         .route(
@@ -2312,6 +2375,11 @@ fn constant_time_token_eq(provided: &str, expected: &str) -> bool {
 
 fn store_error(error: StoreError) -> ApiError {
     match error {
+        StoreError::InvalidTranslation(message) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "translation.invalid",
+            message,
+        ),
         StoreError::InvalidPublication(report) => ApiError::validation(report),
         StoreError::IdentifierSpaceExhausted => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2501,6 +2569,7 @@ fn trending_store_error(error: StoreError) -> ApiError {
         description = "Authoritative private drafting, immutable publication, and retrieval API."
     ),
     paths(
+        translations::jobs, translations::finish, translations::list,
         health,
         create_draft,
         list_drafts,

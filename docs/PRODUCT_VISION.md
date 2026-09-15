@@ -176,6 +176,13 @@ documented in `docs/DRAFTS.md`. The public short
 identifier is allocated only at publication; the UUID remains draft identity
 and internal provenance rather than becoming part of published paper URLs.
 
+Language versions belong to the same paper revision and are independently
+available. The initial targets are English, Simplified Chinese, Japanese,
+German, and French. No particular language is mandatory. New publications
+receive asynchronous machine translations; historical papers are not backfilled.
+Translations preserve source-revision provenance and become immutable when
+accepted, with machine translation visibly disclosed to readers.
+
 Published revisions are immutable. Authors update a paper by publishing a new
 revision instead of silently changing its historical record.
 
