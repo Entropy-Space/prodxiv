@@ -594,7 +594,11 @@ promotion. It reads at most 20 queued jobs, copies the current English source
 for `en`, and uses separate tool-less Pi sessions for the other languages.
 No publication credentials enter model context. Title, summary, prose, and
 headings are translated; URLs, inline and fenced code, and embedded HTML/SVG
-remain exact. The API verifies the immutable source hash, field bounds,
+remain exact. Inline code may change order within the same paragraph, heading,
+list item, or table cell to follow translated grammar, while preserving each
+snippet's text and occurrence count. Code in link labels and image alt text
+stays associated with its original link or image, and reordering cannot cross
+raw HTML boundaries. The API verifies the immutable source hash, field bounds,
 heading levels/order, and protected assets. These checks do not establish
 semantic translation accuracy; the reader identifies machine translations.
 
