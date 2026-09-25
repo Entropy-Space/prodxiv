@@ -603,10 +603,9 @@ function configuredApiUrl(value: string | undefined): string {
 }
 
 async function main(): Promise<void> {
-  const token = await resolveApiBearerToken("PRODXIV_BOT_TOKEN");
   const client = new ProdxivApiClient({
     api_url: configuredApiUrl(process.env.PRODXIV_API_URL),
-    token,
+    token_provider: () => resolveApiBearerToken("PRODXIV_BOT_TOKEN"),
   });
   const [command, inputPath, expectedCountValue] = process.argv.slice(2);
   let report: PromotionReport | SubmissionReport;

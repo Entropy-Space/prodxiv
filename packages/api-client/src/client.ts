@@ -133,6 +133,8 @@ export type ApiFetch = (
 export interface ProdxivApiClientOptions {
   api_url: string;
   token?: string;
+  /** Resolved immediately before each authenticated request. */
+  token_provider?: () => Promise<string>;
   fetch?: ApiFetch;
 }
 
@@ -158,11 +160,20 @@ export class ProdxivApiError extends Error {
 export class ProdxivApiClient {
   readonly #apiUrl: string;
   readonly #token: string | undefined;
+  readonly #tokenProvider: (() => Promise<string>) | undefined;
   readonly #fetch: ApiFetch;
 
   constructor(options: ProdxivApiClientOptions) {
+    if (options.token !== undefined && options.token_provider !== undefined) {
+      throw new ProdxivApiError(
+        0,
+        "auth.token_conflict",
+        "configure either a bearer token or a token provider, not both",
+      );
+    }
     this.#apiUrl = options.api_url.replace(/\/+$/, "");
     this.#token = options.token;
+    this.#tokenProvider = options.token_provider;
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
@@ -186,10 +197,9 @@ export class ProdxivApiClient {
 
   async createDraft(input: CreateDraftInput): Promise<PaperDraft> {
     validateDraftSource(input.source_markdown);
-    const { response, body } = await this.#request("/v1/drafts", {
+    const { response, body } = await this.#authenticatedRequest("/v1/drafts", {
       method: "POST",
       headers: {
-        authorization: this.#draftAuthorization(),
         "content-type": "application/json",
         "idempotency-key": input.idempotency_key,
       },
@@ -237,17 +247,15 @@ export class ProdxivApiClient {
       query.set("owner_kind", input.owner_kind);
     }
     const suffix = query.size === 0 ? "" : `?${query.toString()}`;
-    const { response, body } = await this.#request(`/v1/drafts${suffix}`, {
-      headers: { authorization: this.#draftAuthorization() },
-    });
+    const { response, body } = await this.#authenticatedRequest(
+      `/v1/drafts${suffix}`,
+    );
     return paperDraftList(response, body);
   }
 
   async getDraft(paperUuid: string): Promise<PaperDraft> {
     const path = draftPath(paperUuid);
-    const { response, body } = await this.#request(path, {
-      headers: { authorization: this.#draftAuthorization() },
-    });
+    const { response, body } = await this.#authenticatedRequest(path);
     return paperDraft(response, body);
   }
 
@@ -257,15 +265,17 @@ export class ProdxivApiClient {
   ): Promise<PaperDraft> {
     validateDraftSource(input.source_markdown);
     validateDraftRevision(input.expected_revision);
-    const { response, body } = await this.#request(draftPath(paperUuid), {
-      method: "PUT",
-      headers: {
-        authorization: this.#draftAuthorization(),
-        "content-type": "application/json",
-        "if-match": `"${input.expected_revision}"`,
+    const { response, body } = await this.#authenticatedRequest(
+      draftPath(paperUuid),
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "if-match": `"${input.expected_revision}"`,
+        },
+        body: JSON.stringify({ source_markdown: input.source_markdown }),
       },
-      body: JSON.stringify({ source_markdown: input.source_markdown }),
-    });
+    );
     return paperDraft(response, body);
   }
 
@@ -274,12 +284,11 @@ export class ProdxivApiClient {
     input: ReviewDraftInput,
   ): Promise<PaperDraft> {
     validateDraftRevision(input.expected_revision);
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/approve`,
       {
         method: "POST",
         headers: {
-          authorization: this.#draftAuthorization(),
           "if-match": `"${input.expected_revision}"`,
         },
       },
@@ -302,12 +311,11 @@ export class ProdxivApiClient {
         "draft rejection reason must not exceed 2000 bytes",
       );
     }
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/reject`,
       {
         method: "POST",
         headers: {
-          authorization: this.#draftAuthorization(),
           "content-type": "application/json",
           "if-match": `"${input.expected_revision}"`,
         },
@@ -324,20 +332,21 @@ export class ProdxivApiClient {
     expectedRevision: number,
   ): Promise<void> {
     validateDraftRevision(expectedRevision);
-    const { response, body } = await this.#request(draftPath(paperUuid), {
-      method: "DELETE",
-      headers: {
-        authorization: this.#draftAuthorization(),
-        "if-match": `"${expectedRevision}"`,
+    const { response, body } = await this.#authenticatedRequest(
+      draftPath(paperUuid),
+      {
+        method: "DELETE",
+        headers: {
+          "if-match": `"${expectedRevision}"`,
+        },
       },
-    });
+    );
     assertSuccessfulResponse(response, body);
   }
 
   async listDraftRevisions(paperUuid: string): Promise<PaperDraftRevisionList> {
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/revisions`,
-      { headers: { authorization: this.#draftAuthorization() } },
     );
     return paperDraftRevisionList(response, body);
   }
@@ -347,9 +356,8 @@ export class ProdxivApiClient {
     revision: number,
   ): Promise<PaperDraftRevision> {
     validateDraftRevision(revision);
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/revisions/${revision}`,
-      { headers: { authorization: this.#draftAuthorization() } },
     );
     return paperDraftRevision(response, body);
   }
@@ -359,12 +367,11 @@ export class ProdxivApiClient {
     input: PublishDraftInput,
   ): Promise<PublishPaperResult> {
     validateDraftRevision(input.expected_revision);
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/publish`,
       {
         method: "POST",
         headers: {
-          authorization: this.#draftAuthorization(),
           "content-type": "application/json",
           "idempotency-key": input.idempotency_key,
           "if-match": `"${input.expected_revision}"`,
@@ -384,12 +391,11 @@ export class ProdxivApiClient {
     input: PublishDraftInput,
   ): Promise<PublishPaperResult> {
     validateDraftRevision(input.expected_revision);
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `${draftPath(paperUuid)}/approve-and-publish`,
       {
         method: "POST",
         headers: {
-          authorization: this.#draftAuthorization(),
           "content-type": "application/json",
           "idempotency-key": input.idempotency_key,
           "if-match": `"${input.expected_revision}"`,
@@ -405,17 +411,9 @@ export class ProdxivApiClient {
   }
 
   async publishPaper(input: PublishPaperInput): Promise<PublishPaperResult> {
-    if (this.#token === undefined || this.#token.length === 0) {
-      throw new ProdxivApiError(
-        0,
-        "auth.token_missing",
-        "publishing requires a bearer token",
-      );
-    }
-    const { response, body } = await this.#request("/v1/papers", {
+    const { response, body } = await this.#authenticatedRequest("/v1/papers", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${this.#token}`,
         "content-type": "application/json",
         "idempotency-key": input.idempotency_key,
       },
@@ -448,11 +446,13 @@ export class ProdxivApiClient {
   }
 
   async listTranslationJobs(): Promise<TranslationJob[]> {
-    const { response, body } = await this.#request("/v1/translation-jobs", {
-      headers: { Authorization: this.#draftAuthorization() },
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
+    const { response, body } = await this.#authenticatedRequest(
+      "/v1/translation-jobs",
+      {
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
     assertSuccessfulResponse(response, body);
     if (!Array.isArray(body) || body.length > 20)
       throw invalidResponse(response, "invalid translation queue");
@@ -483,12 +483,11 @@ export class ProdxivApiClient {
     translationPath(job.paper.paper_id, job.paper.version);
     if (!isPaperLanguage(job.language))
       throw new Error("invalid translation language");
-    const { response, body } = await this.#request(
+    const { response, body } = await this.#authenticatedRequest(
       `/v1/translation-jobs/${encodeURIComponent(job.paper.paper_id)}/${job.paper.version}/${job.language}`,
       {
         method: "POST",
         headers: {
-          Authorization: this.#draftAuthorization(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(result),
@@ -679,12 +678,46 @@ export class ProdxivApiClient {
     return { response, body };
   }
 
-  #draftAuthorization(): string {
+  async #authenticatedRequest(
+    path: string,
+    init: Omit<RequestInit, "headers"> & {
+      headers?: Record<string, string>;
+    } = {},
+  ): Promise<{ response: Response; body: unknown }> {
+    const authorization = await this.#authorization();
+    return this.#request(path, {
+      ...init,
+      headers: { ...init.headers, authorization },
+    });
+  }
+
+  async #authorization(): Promise<string> {
+    if (this.#tokenProvider !== undefined) {
+      let token: unknown;
+      try {
+        token = await this.#tokenProvider();
+      } catch {
+        // Providers may include credentials in their thrown error or cause.
+        throw new ProdxivApiError(
+          0,
+          "auth.token_refresh_failed",
+          "could not obtain a bearer token from the token provider",
+        );
+      }
+      if (typeof token !== "string" || token.length === 0 || /\s/.test(token)) {
+        throw new ProdxivApiError(
+          0,
+          "auth.token_refresh_failed",
+          "token provider returned an invalid bearer token",
+        );
+      }
+      return `Bearer ${token}`;
+    }
     if (this.#token === undefined || this.#token.length === 0) {
       throw new ProdxivApiError(
         0,
         "auth.token_missing",
-        "draft access requires a bearer token",
+        "authenticated API access requires a bearer token",
       );
     }
     return `Bearer ${this.#token}`;

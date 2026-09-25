@@ -170,9 +170,8 @@ function usage(): string {
 if (import.meta.main) {
   try {
     await runCollector(parseArguments(Bun.argv.slice(2)), async () =>
-      readIngestionConfig(
-        process.env,
-        await resolveApiBearerToken("PRODXIV_TRENDING_INGEST_TOKEN"),
+      readIngestionConfig(process.env, () =>
+        resolveApiBearerToken("PRODXIV_TRENDING_INGEST_TOKEN"),
       ),
     );
   } catch (error) {

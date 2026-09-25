@@ -92,6 +92,93 @@ describe("GitHub Trending publisher", () => {
     expect(await request?.json()).toEqual(snapshot);
   });
 
+  test("loads authentication lazily and refreshes it for each snapshot and retry", async () => {
+    const tokens = ["a".repeat(32), "b".repeat(32), "c".repeat(32)];
+    let providerCalls = 0;
+    const config = readIngestionConfig(
+      { PRODXIV_API_URL: "https://api.prodxiv.com" },
+      async () => tokens[providerCalls++]!,
+    );
+    expect(providerCalls).toBe(0);
+    const authorization: Array<string | null> = [];
+    const fetcher = mockFetch(async (input, init) => {
+      authorization.push(new Request(input, init).headers.get("authorization"));
+      if (authorization.length === 1) {
+        return Response.json({}, { status: 503 });
+      }
+      return Response.json(
+        { snapshot_id: authorization.length, entry_count: 1, inserted: true },
+        { status: 201 },
+      );
+    });
+
+    const result = await publishTrendingSnapshots(
+      [snapshot, { ...snapshot, language: "rust" }],
+      config,
+      fetcher,
+    );
+
+    expect(result).toEqual({ published_count: 2, failures: [] });
+    expect(providerCalls).toBe(3);
+    expect(authorization).toEqual(tokens.map((token) => `Bearer ${token}`));
+  });
+
+  test("sanitizes credential provider failures and continues with later snapshots", async () => {
+    let providerCalls = 0;
+    let requestCalls = 0;
+    const result = await publishTrendingSnapshots(
+      [snapshot, { ...snapshot, language: "rust" }],
+      {
+        api_url: "https://api.prodxiv.com",
+        ingest_actor: "github_actions:daily_trending",
+        token_provider: async () => {
+          providerCalls += 1;
+          if (providerCalls === 1) {
+            throw new Error("request failed with Bearer secret-token");
+          }
+          return "x".repeat(32);
+        },
+      },
+      mockFetch(async () => {
+        requestCalls += 1;
+        return Response.json(
+          { snapshot_id: 42, entry_count: 1, inserted: true },
+          { status: 201 },
+        );
+      }),
+    );
+
+    expect(providerCalls).toBe(2);
+    expect(requestCalls).toBe(1);
+    expect(result).toEqual({
+      published_count: 1,
+      failures: [
+        { language: "c#", message: "ingestion API authentication failed" },
+      ],
+    });
+  });
+
+  test("rejects invalid dynamic credentials before sending a request", async () => {
+    let calls = 0;
+    const result = await publishTrendingSnapshots(
+      [snapshot],
+      {
+        api_url: "https://api.prodxiv.com",
+        ingest_actor: "github_actions:daily_trending",
+        token_provider: async () => `secret\n${"x".repeat(32)}`,
+      },
+      mockFetch(async () => {
+        calls += 1;
+        return Response.json({});
+      }),
+    );
+
+    expect(calls).toBe(0);
+    expect(result.failures).toEqual([
+      { language: "c#", message: "ingestion API bearer token is invalid" },
+    ]);
+  });
+
   test("does not retry a rejected snapshot", async () => {
     let calls = 0;
     const fetcher = mockFetch(async () => {
