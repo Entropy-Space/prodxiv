@@ -62,7 +62,6 @@ async function main(): Promise<void> {
   }
   const excludedRepositories = await currentPaperbotRepositories(
     process.env.PRODXIV_API_URL,
-    await resolveApiBearerToken("PRODXIV_BOT_TOKEN"),
   );
   const manifest = await prepareEvaluationManifest(
     resolve(selectionPath),
@@ -78,16 +77,15 @@ async function main(): Promise<void> {
 
 async function currentPaperbotRepositories(
   apiUrlValue: string | undefined,
-  token: string | undefined,
 ): Promise<Set<string>> {
-  if (apiUrlValue === undefined || token === undefined) {
+  if (apiUrlValue === undefined) {
     throw new Error(
-      "PRODXIV_API_URL and an API bearer token are required to exclude existing Paperbot papers",
+      "PRODXIV_API_URL is required to exclude existing Paperbot papers",
     );
   }
   const client = new ProdxivApiClient({
     api_url: configuredApiUrl(apiUrlValue),
-    token,
+    token_provider: () => resolveApiBearerToken("PRODXIV_BOT_TOKEN"),
   });
   const repositories = new Set<string>();
   let cursor: string | undefined;

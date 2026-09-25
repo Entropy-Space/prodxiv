@@ -5,6 +5,7 @@ import {
   ProdxivApiError,
   type PaperDraft,
   type PublishedPaper,
+  type TranslationJob,
 } from "../src/client.ts";
 
 const draft = {
@@ -589,5 +590,286 @@ describe("ProdxivApiClient", () => {
         code: "network.invalid_response",
       } satisfies Partial<ProdxivApiError>),
     );
+  });
+});
+
+describe("API client authentication", () => {
+  const job = {
+    paper: publishedPaper,
+    language: "ja",
+    source_sha256: "a".repeat(64),
+    attempts: 0,
+  } satisfies TranslationJob;
+  const publish_input = {
+    expected_revision: 1,
+    idempotency_key: "auth-refresh-publication",
+  };
+
+  test("resolves fresh credentials for every authenticated method", async () => {
+    const { updated_at: _, ...revision } = draft;
+    const { source_markdown: __, ...revision_summary } = revision;
+    const { source_markdown: ___, ...draft_summary } = draft;
+    const cases: Array<{
+      run: (client: ProdxivApiClient) => Promise<unknown>;
+      body?: unknown;
+      status?: number;
+    }> = [
+      {
+        run: (client) =>
+          client.createDraft({
+            source_markdown: draft.source_markdown,
+            idempotency_key: "auth-refresh-draft",
+          }),
+        body: draft,
+      },
+      {
+        run: (client) => client.listDrafts(),
+        body: { drafts: [draft_summary] },
+      },
+      { run: (client) => client.getDraft(draft.paper_uuid), body: draft },
+      {
+        run: (client) =>
+          client.updateDraft(draft.paper_uuid, {
+            source_markdown: draft.source_markdown,
+            expected_revision: 1,
+          }),
+        body: draft,
+      },
+      {
+        run: (client) =>
+          client.approveDraft(draft.paper_uuid, { expected_revision: 1 }),
+        body: draft,
+      },
+      {
+        run: (client) =>
+          client.rejectDraft(draft.paper_uuid, { expected_revision: 1 }),
+        body: draft,
+      },
+      { run: (client) => client.deleteDraft(draft.paper_uuid, 1), status: 204 },
+      {
+        run: (client) => client.listDraftRevisions(draft.paper_uuid),
+        body: { revisions: [revision_summary], retained_revision_limit: 5 },
+      },
+      {
+        run: (client) => client.getDraftRevision(draft.paper_uuid, 1),
+        body: revision,
+      },
+      {
+        run: (client) => client.publishDraft(draft.paper_uuid, publish_input),
+        body: publishedPaper,
+      },
+      {
+        run: (client) =>
+          client.approveAndPublishDraft(draft.paper_uuid, publish_input),
+        body: publishedPaper,
+      },
+      {
+        run: (client) =>
+          client.publishPaper({
+            source_markdown: publishedPaper.source_markdown,
+            idempotency_key: "auth-refresh-paper",
+          }),
+        body: publishedPaper,
+      },
+      { run: (client) => client.listTranslationJobs(), body: [job] },
+      {
+        run: (client) =>
+          client.finishTranslation(job, {
+            status: "failed",
+            source_sha256: job.source_sha256,
+          }),
+        status: 204,
+      },
+    ];
+    let provider_calls = 0;
+    let request_count = 0;
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token_provider: async () => `token-${++provider_calls}`,
+      fetch: async (_, init) => {
+        const current = cases[request_count++];
+        expect(current).toBeDefined();
+        expect(provider_calls).toBe(request_count);
+        expect(new Headers(init?.headers).get("authorization")).toBe(
+          `Bearer token-${request_count}`,
+        );
+        return current?.status === 204
+          ? new Response(null, { status: 204 })
+          : Response.json(current?.body);
+      },
+    });
+    expect(provider_calls).toBe(0);
+    for (const item of cases) await item.run(client);
+    expect(provider_calls).toBe(cases.length);
+    expect(request_count).toBe(cases.length);
+  });
+
+  test("refreshes after model work outlives the queue-read credential", async () => {
+    let now = 0;
+    const expires_at = new Map<string, number>();
+    const authorizations: string[] = [];
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token_provider: async () => {
+        const token = `token-${now}`;
+        expires_at.set(`Bearer ${token}`, now + 10 * 60_000);
+        return token;
+      },
+      fetch: async (_, init) => {
+        const authorization =
+          new Headers(init?.headers).get("authorization") ?? "";
+        expect(expires_at.get(authorization)).toBeGreaterThan(now);
+        authorizations.push(authorization);
+        return init?.method === "POST"
+          ? new Response(null, { status: 204 })
+          : Response.json([job]);
+      },
+    });
+    await client.listTranslationJobs();
+    now += 11 * 60_000;
+    await client.finishTranslation(job, {
+      status: "failed",
+      source_sha256: job.source_sha256,
+    });
+    expect(authorizations).toEqual(["Bearer token-0", "Bearer token-660000"]);
+  });
+
+  test("keeps static credentials compatible with publication and job reads", async () => {
+    const authorizations: Array<string | null> = [];
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token: "static-token",
+      fetch: async (_, init) => {
+        authorizations.push(new Headers(init?.headers).get("authorization"));
+        return Response.json(init?.method === "POST" ? publishedPaper : [job]);
+      },
+    });
+    await client.listTranslationJobs();
+    await client.publishPaper({
+      source_markdown: publishedPaper.source_markdown,
+      idempotency_key: "static-token-publication",
+    });
+    expect(authorizations).toEqual([
+      "Bearer static-token",
+      "Bearer static-token",
+    ]);
+  });
+
+  test("rejects ambiguous token configuration without invoking either dependency", () => {
+    let provider_calls = 0;
+    let request_count = 0;
+    for (const token of ["static-token", ""]) {
+      expect(
+        () =>
+          new ProdxivApiClient({
+            api_url: "https://api.prodxiv.example",
+            token,
+            token_provider: async () => {
+              provider_calls += 1;
+              return "dynamic-token";
+            },
+            fetch: async () => {
+              request_count += 1;
+              return Response.json([]);
+            },
+          }),
+      ).toThrow(expect.objectContaining({ code: "auth.token_conflict" }));
+    }
+    expect(provider_calls).toBe(0);
+    expect(request_count).toBe(0);
+  });
+
+  test("rejects invalid provider tokens without sending a request", async () => {
+    let request_count = 0;
+    for (const token of [
+      undefined,
+      null,
+      42,
+      "",
+      " ",
+      "\t\n",
+      " token",
+      "token value",
+    ]) {
+      const client = new ProdxivApiClient({
+        api_url: "https://api.prodxiv.example",
+        token_provider: async () => token as string,
+        fetch: async () => {
+          request_count += 1;
+          return Response.json([]);
+        },
+      });
+      await expect(client.listTranslationJobs()).rejects.toMatchObject({
+        status: 0,
+        code: "auth.token_refresh_failed",
+      });
+    }
+    expect(request_count).toBe(0);
+  });
+
+  test("normalizes provider failures without retaining secret messages or causes", async () => {
+    let request_count = 0;
+    for (const failure of [
+      new Error("Bearer private-token", { cause: new Error("private-cause") }),
+      "private-token",
+      { message: "private-token" },
+    ]) {
+      const client = new ProdxivApiClient({
+        api_url: "https://api.prodxiv.example",
+        token_provider: async () => {
+          throw failure;
+        },
+        fetch: async () => {
+          request_count += 1;
+          return Response.json([]);
+        },
+      });
+      let actual: unknown;
+      try {
+        await client.publishPaper({
+          source_markdown: publishedPaper.source_markdown,
+          idempotency_key: "failed-refresh-publication",
+        });
+      } catch (error) {
+        actual = error;
+      }
+      expect(actual).toBeInstanceOf(ProdxivApiError);
+      expect(actual).toMatchObject({
+        status: 0,
+        code: "auth.token_refresh_failed",
+        message: "could not obtain a bearer token from the token provider",
+        diagnostics: [],
+      });
+      expect((actual as Error).cause).toBeUndefined();
+      expect(String(actual)).not.toContain("private-token");
+      expect(JSON.stringify(actual)).not.toContain("private-token");
+    }
+    expect(request_count).toBe(0);
+  });
+
+  test("does not retry a rejected write after resolving credentials", async () => {
+    let provider_calls = 0;
+    let request_count = 0;
+    const client = new ProdxivApiClient({
+      api_url: "https://api.prodxiv.example",
+      token_provider: async () => `token-${++provider_calls}`,
+      fetch: async () => {
+        request_count += 1;
+        return Response.json(
+          {
+            error: { code: "auth.unauthorized", message: "token rejected" },
+          },
+          { status: 401 },
+        );
+      },
+    });
+    await expect(
+      client.publishPaper({
+        source_markdown: publishedPaper.source_markdown,
+        idempotency_key: "rejected-publication",
+      }),
+    ).rejects.toMatchObject({ status: 401, code: "auth.unauthorized" });
+    expect(provider_calls).toBe(1);
+    expect(request_count).toBe(1);
   });
 });

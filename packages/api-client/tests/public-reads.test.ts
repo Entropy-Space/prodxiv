@@ -60,63 +60,87 @@ function clientFor(body: unknown): ProdxivApiClient {
 }
 
 describe("anonymous public reads", () => {
-  test("never forwards a configured bearer token or ambient cookies", async () => {
-    const requests: Array<{ url: string; init?: RequestInit }> = [];
-    const client = new ProdxivApiClient({
-      api_url: "https://api.prodxiv.example",
-      token: "private-review-token",
-      fetch: async (input, init) => {
-        const url = input.toString();
-        requests.push({ url, init });
-        if (url.includes("/public/drafts?")) {
-          return Response.json({
-            drafts: [draftSummary],
-            next_cursor: "next/page",
-          });
-        }
-        if (url.endsWith("/public/drafts/" + draft.paper_uuid)) {
-          return Response.json({ kind: "draft", draft });
-        }
-        if (url.endsWith("/topics"))
-          return Response.json({ topics: ["developer_tools"] });
-        if (url.endsWith("/revisions"))
-          return Response.json({ revisions: [paperSummary] });
-        if (url.includes("/revisions/")) return Response.json(paper);
-        return Response.json({ papers: [paperSummary] });
-      },
-    });
+  test.each(["static token", "token provider"])(
+    "never uses a configured %s or ambient cookies for public reads",
+    async (source) => {
+      const requests: Array<{ url: string; init?: RequestInit }> = [];
+      let provider_calls = 0;
+      const client = new ProdxivApiClient({
+        api_url: "https://api.prodxiv.example",
+        ...(source === "static token"
+          ? { token: "private-review-token" }
+          : {
+              token_provider: async () => {
+                provider_calls += 1;
+                throw new Error("public reads must not resolve credentials");
+              },
+            }),
+        fetch: async (input, init) => {
+          const url = input.toString();
+          requests.push({ url, init });
+          if (url.includes("/public/drafts?")) {
+            return Response.json({
+              drafts: [draftSummary],
+              next_cursor: "next/page",
+            });
+          }
+          if (url.endsWith("/public/drafts/" + draft.paper_uuid)) {
+            return Response.json({ kind: "draft", draft });
+          }
+          if (url.endsWith("/topics"))
+            return Response.json({ topics: ["developer_tools"] });
+          if (url.endsWith("/revisions"))
+            return Response.json({ revisions: [paperSummary] });
+          if (url.endsWith("/translations")) return Response.json([]);
+          if (url.includes("/revisions/")) return Response.json(paper);
+          if (url.endsWith("/github/trending")) {
+            return Response.json({
+              requested_language: "any",
+              snapshots: [],
+              available_languages: [],
+            });
+          }
+          return Response.json({ papers: [paperSummary] });
+        },
+      });
 
-    expect(
-      await client.listPublicDrafts({ limit: 5, cursor: "current/page" }),
-    ).toEqual({
-      drafts: [draftSummary],
-      next_cursor: "next/page",
-    });
-    expect(await client.getPublicDraft(draft.paper_uuid)).toEqual({
-      kind: "draft",
-      draft,
-    });
-    await client.listPapers({
-      q: "source & evidence",
-      topic: "developer_tools",
-    });
-    await client.listPaperTopics();
-    await client.listPaperRevisions(paper.paper_id);
-    await client.getPaperRevision(paper.paper_id, paper.version);
-    expect(requests[0]?.url).toBe(
-      "https://api.prodxiv.example/v1/public/drafts?limit=5&cursor=current%2Fpage",
-    );
-    expect(requests[2]?.url).toContain(
-      "q=source+%26+evidence&topic=developer_tools",
-    );
-    for (const request of requests) {
-      expect(request.init?.credentials).toBe("omit");
-      expect(request.init?.redirect).toBe("error");
-      expect(new Headers(request.init?.headers).has("authorization")).toBe(
-        false,
+      expect(
+        await client.listPublicDrafts({ limit: 5, cursor: "current/page" }),
+      ).toEqual({
+        drafts: [draftSummary],
+        next_cursor: "next/page",
+      });
+      expect(await client.getPublicDraft(draft.paper_uuid)).toEqual({
+        kind: "draft",
+        draft,
+      });
+      await client.listPapers({
+        q: "source & evidence",
+        topic: "developer_tools",
+      });
+      await client.listPaperTopics();
+      await client.listPaperRevisions(paper.paper_id);
+      await client.getPaperRevision(paper.paper_id, paper.version);
+      await client.getPaperVersion(paper.paper_id, paper.version);
+      await client.listPaperTranslations(paper.paper_id, paper.version);
+      await client.getGitHubTrending();
+      expect(provider_calls).toBe(0);
+      expect(requests.length).toBe(9);
+      expect(requests[0]?.url).toBe(
+        "https://api.prodxiv.example/v1/public/drafts?limit=5&cursor=current%2Fpage",
       );
-    }
-  });
+      expect(requests[2]?.url).toContain(
+        "q=source+%26+evidence&topic=developer_tools",
+      );
+      for (const request of requests) {
+        expect(request.init?.credentials).toBe("omit");
+        expect(request.init?.redirect).toBe("error");
+        expect(new Headers(request.init?.headers).has("authorization")).toBe(
+          false,
+        );
+      }
+    },
+  );
 
   test("rejects API URLs containing credentials without fetching", async () => {
     let fetched = false;

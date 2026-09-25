@@ -581,6 +581,11 @@ would override the repository value. Configure the daily workflow's
 `production` GitHub Environment with only the `PRODXIV_API_URL` variable. The
 daily workflow requests its API identity through GitHub OIDC and has no
 long-lived API secret. Neither workflow needs a database credential.
+Scheduled API clients resolve authentication immediately before each protected
+request, including result and failure writes after a long model session. They
+request a fresh GitHub Actions OIDC token for each request; a configured static
+token remains supported for local or self-hosted runs. Trending ingestion also
+refreshes authentication before each retry.
 
 ### Translations of new publications
 
@@ -592,6 +597,10 @@ of an existing paper is eligible; its older revisions remain untouched.
 The daily host runs `scripts/paperbot-evaluation/translate-papers.ts` after
 promotion. It reads at most 20 queued jobs, copies the current English source
 for `en`, and uses separate tool-less Pi sessions for the other languages.
+If a model response is malformed JSON or has invalid fields, the host allows
+one format-correction turn in that same private session. A second invalid
+response fails the language; model transport and API errors are not sent back
+to the model or retried as formatting errors.
 No publication credentials enter model context. Title, summary, prose, and
 headings are translated; URLs, inline and fenced code, and embedded HTML/SVG
 remain exact. Inline code may change order within the same paragraph, heading,
@@ -616,6 +625,11 @@ jobs or save results, and it can write only enrolled jobs. Successful content
 is immutable and completion is idempotent: concurrent results cannot overwrite
 an accepted version. Corrections require a new paper revision. Private model
 sessions and a per-language completion/failure report join the daily artifacts.
+The version-2 translation report records the failing stage, a safe error code,
+HTTP status when available, and any separate error recording the failure.
+Queue-loading failures also produce a report and fail the workflow. Arbitrary
+server/model error text, credentials, and model output are excluded from these
+diagnostics; private model-session artifacts remain available for investigation.
 
 ### Batch public repositories
 

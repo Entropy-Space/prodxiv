@@ -2,7 +2,8 @@ import type { TrendingSnapshot } from "./collector.ts";
 
 export interface IngestionConfig {
   api_url: string;
-  ingest_token: string;
+  ingest_token?: string;
+  token_provider?: () => Promise<string>;
   ingest_actor: string;
 }
 
@@ -33,7 +34,7 @@ class IngestionRequestError extends Error {
 
 export function readIngestionConfig(
   environment: Record<string, string | undefined> = process.env,
-  resolvedToken?: string,
+  credential?: string | (() => Promise<string>),
 ): IngestionConfig {
   const api_url = environment.PRODXIV_API_URL?.replace(/\/+$/, "");
   if (api_url === undefined || api_url.length === 0) {
@@ -46,9 +47,13 @@ export function readIngestionConfig(
     throw new Error("PRODXIV_API_URL must use HTTPS except on localhost");
   }
 
+  const token_provider =
+    typeof credential === "function" ? credential : undefined;
   const ingest_token =
-    resolvedToken ?? environment.PRODXIV_TRENDING_INGEST_TOKEN;
-  if (ingest_token === undefined || ingest_token.length < 32) {
+    typeof credential === "string"
+      ? credential
+      : environment.PRODXIV_TRENDING_INGEST_TOKEN;
+  if (token_provider === undefined && !isValidIngestToken(ingest_token)) {
     throw new Error(
       "PRODXIV_TRENDING_INGEST_TOKEN must contain at least 32 characters",
     );
@@ -66,7 +71,11 @@ export function readIngestionConfig(
       "PRODXIV_TRENDING_INGEST_ACTOR must contain 1 to 128 safe identifier characters",
     );
   }
-  return { api_url, ingest_token, ingest_actor };
+  return {
+    api_url,
+    ...(token_provider === undefined ? { ingest_token } : { token_provider }),
+    ingest_actor,
+  };
 }
 
 export async function publishTrendingSnapshots(
@@ -116,10 +125,11 @@ async function publishSnapshot(
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
+      const token = await ingestionToken(config);
       const response = await fetcher(endpoint, {
         method: "POST",
         headers: {
-          authorization: `Bearer ${config.ingest_token}`,
+          authorization: `Bearer ${token}`,
           "content-type": "application/json",
           "idempotency-key": snapshotIdempotencyKey(snapshot),
           "user-agent": "prodxiv-trending-collector/0.1 (+https://prodxiv.com)",
@@ -147,6 +157,34 @@ async function publishSnapshot(
   }
 
   throw last_error;
+}
+
+async function ingestionToken(config: IngestionConfig): Promise<string> {
+  let token: string | undefined;
+  try {
+    token =
+      config.token_provider === undefined
+        ? config.ingest_token
+        : await config.token_provider();
+  } catch {
+    // Provider errors can include credentials or request details. Keep the
+    // report safe while allowing later snapshots to request a fresh token.
+    throw new IngestionRequestError(
+      "ingestion API authentication failed",
+      false,
+    );
+  }
+  if (!isValidIngestToken(token)) {
+    throw new IngestionRequestError(
+      "ingestion API bearer token is invalid",
+      false,
+    );
+  }
+  return token;
+}
+
+function isValidIngestToken(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 32 && !/\s/.test(value);
 }
 
 function parseIngestionResponse(value: unknown): IngestionResponse {
